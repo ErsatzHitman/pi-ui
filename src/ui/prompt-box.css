@@ -10,7 +10,6 @@
 		inset-inline: 1rem;
 		bottom: 0.5rem;
 		z-index: 10;
-		container: prompt / inline-size;
 		max-width: var(--prompt-max-width);
 		margin-inline: auto;
 		font-size: var(--text-sm);
@@ -112,6 +111,7 @@
 		position: relative;
 		z-index: 40;
 		display: flex;
+		container: prompt / inline-size;
 		width: calc(100% - 4rem);
 		align-items: center;
 		gap: 0.5rem;
@@ -380,7 +380,7 @@
 		}
 	}
 
-	/* Viewport-specific touch spacing; control density follows the prompt width. */
+	/* Viewport-specific touch spacing; control density follows the footer width. */
 	@media (width <= 639px) {
 		.prompt-box {
 			inset-inline: 0.5rem;

@@ -55,7 +55,7 @@
 		line-height: 1.125rem;
 	}
 
-	@container prompt (width < 40rem) {
+	@container prompt (width < 30rem) {
 		.btn:is(.workspace-picker, .thinking-picker-button, .update-badge) {
 			width: var(--button-size);
 			padding: 0;
