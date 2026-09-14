@@ -126,6 +126,16 @@ export const sessionRoutes = {
 			);
 		},
 	},
+	[endpoints.sessionsPrevious]: {
+		POST: async (_request, context) => {
+			const path = context.store.previousSessionPath;
+			// The shortcut is a no-op until a persisted session has been switched away from.
+			if (!path) return datastarResponse();
+			return sessionTransitionResponse(
+				await requireHost(context).resumeSession(path),
+			);
+		},
+	},
 	[endpoints.sessionsForkToWorkspace]: {
 		POST: async (request, context) => {
 			const requestedPath = requiredString(

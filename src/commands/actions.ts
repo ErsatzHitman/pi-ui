@@ -1,4 +1,5 @@
 import { endpoints } from "../server/routes/endpoints.ts";
+import { previousSessionAction } from "../ui/session-transition.tsx";
 import type { AppCommandId } from "./catalog.ts";
 
 export function newSessionAction(temporary = false): string {
@@ -67,6 +68,7 @@ export const commandActions = {
 	"new-chat": newSessionAction(),
 	"new-temporary-chat": newSessionAction(true),
 	"resume-session": "document.getElementById('session-dialog').showModal()",
+	"previous-session": previousSessionAction(),
 	"session-tree": openTreeAction(),
 	"command-palette": "document.getElementById('command-input')?.focus()",
 	"change-code-theme":

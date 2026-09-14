@@ -842,6 +842,33 @@ test("RuntimeController reuses streaming runtimes across repeated background act
 	assertEquals(b.disposeCount, 1);
 });
 
+test("RuntimeController tracks the previous session for alternate jumps", async () => {
+	const state = new AppStore();
+	const a = fakeRuntime("/sessions/a.jsonl");
+	const b = fakeRuntime("/sessions/b.jsonl");
+	a.setStreaming(true);
+	b.setStreaming(true);
+	const controller = await RuntimeController.prepare(state, "/workspace", {
+		dependencies: dependencies([a, b]),
+	});
+	controller.activate();
+	assertEquals(state.currentSessionPath, "/sessions/a.jsonl");
+	assertEquals(state.previousSessionPath, undefined);
+
+	assertEquals(await controller.resumeSession("/sessions/b.jsonl"), {
+		status: "success",
+	});
+	assertEquals(state.currentSessionPath, "/sessions/b.jsonl");
+	assertEquals(state.previousSessionPath, "/sessions/a.jsonl");
+
+	assertEquals(await controller.resumeSession("/sessions/a.jsonl"), {
+		status: "success",
+	});
+	assertEquals(state.currentSessionPath, "/sessions/a.jsonl");
+	assertEquals(state.previousSessionPath, "/sessions/b.jsonl");
+	await controller.dispose();
+});
+
 test("RuntimeController forks the current session to another workspace", async () => {
 	const state = new AppStore();
 	const source = fakeRuntime("/sessions/source.jsonl", true, "/work/source");

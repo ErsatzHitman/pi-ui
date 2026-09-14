@@ -587,6 +587,9 @@ export class RuntimeController {
 				if (replacement.status !== "success") return false;
 			}
 			await this.dependencies.moveToTrash(targetSessionFile);
+			if (this.state.previousSessionPath === targetSessionFile) {
+				this.state.setPreviousSessionPath(undefined);
+			}
 			const backgroundSession = this.backgroundSessions.get(targetSessionFile);
 			if (backgroundSession) {
 				this.unsubscribeBackgroundSession(backgroundSession);
@@ -1124,9 +1127,16 @@ export class RuntimeController {
 		});
 	}
 
+	/** Keeps the outgoing persisted session reachable for the alternate-session jump. */
+	private rememberCurrentSession(): void {
+		const path = this.runtime.session.sessionManager.getSessionFile();
+		if (path) this.state.setPreviousSessionPath(path);
+	}
+
 	private async leaveCurrentRuntimeForReplacement(
 		action = this.currentRuntimeLeaveAction(),
 	): Promise<void> {
+		this.rememberCurrentSession();
 		if (action === "background") {
 			this.backgroundCurrentRuntime();
 		} else if (action === "discard") {

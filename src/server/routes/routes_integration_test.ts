@@ -138,6 +138,32 @@ test("session favicons use workspace assets and fall back to a folder", async ()
 	}
 });
 
+test("previous session shortcut resumes the backend-tracked session", async () => {
+	const resumed: string[] = [];
+	const context = fakeContext({
+		host: fakeHost({
+			resumeSession: async (path) => {
+				resumed.push(path);
+				return { status: "success" };
+			},
+		}),
+	});
+	const router = createRouter(context);
+
+	const empty = await router.fetch(
+		new Request("http://localhost/sessions/previous", { method: "POST" }),
+	);
+	assertEquals(empty.status, 204);
+	assertEquals(resumed, []);
+
+	context.store.setPreviousSessionPath("/sessions/previous.jsonl");
+	const response = await router.fetch(
+		new Request("http://localhost/sessions/previous", { method: "POST" }),
+	);
+	assertEquals(response.status, 204);
+	assertEquals(resumed, ["/sessions/previous.jsonl"]);
+});
+
 test("older messages use a targeted persistent-stream patch", async () => {
 	let revealedCount = 0;
 	const context = fakeContext({

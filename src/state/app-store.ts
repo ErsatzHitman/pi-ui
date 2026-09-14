@@ -193,6 +193,7 @@ export type AppStateSnapshot = Readonly<{
 	llamaDialog: AppLlamaDialog | undefined;
 	currentModel: string | undefined;
 	currentSessionPath: string | undefined;
+	previousSessionPath: string | undefined;
 	isTemporarySession: boolean;
 	thinkingLevel: AppThinkingLevel;
 	thinkingLevels: readonly AppThinkingLevel[];
@@ -274,6 +275,7 @@ export class AppStore {
 	llamaDialog: AppLlamaDialog | undefined;
 	currentModel: string | undefined;
 	currentSessionPath: string | undefined;
+	previousSessionPath: string | undefined;
 	isTemporarySession = false;
 	thinkingLevel: AppThinkingLevel = "off";
 	thinkingLevels: AppThinkingLevel[] = ["off"];
@@ -370,6 +372,7 @@ export class AppStore {
 			llamaDialog: this.llamaDialog ? structuredClone(this.llamaDialog) : undefined,
 			currentModel: this.currentModel,
 			currentSessionPath: this.currentSessionPath,
+			previousSessionPath: this.previousSessionPath,
 			isTemporarySession: this.isTemporarySession,
 			thinkingLevel: this.thinkingLevel,
 			thinkingLevels: [...this.thinkingLevels],
@@ -710,8 +713,17 @@ export class AppStore {
 		this.commit();
 	}
 	setCurrentSessionPath(value: string | undefined): void {
+		// Switching between persisted sessions keeps the outgoing one reachable.
+		if (value && value !== this.currentSessionPath && this.currentSessionPath) {
+			this.previousSessionPath = this.currentSessionPath;
+		}
 		this.currentSessionPath = value;
 		this.presentation?.sessionsChanged();
+		this.commit();
+	}
+	setPreviousSessionPath(value: string | undefined): void {
+		if (this.previousSessionPath === value) return;
+		this.previousSessionPath = value;
 		this.commit();
 	}
 	setTemporarySession(value: boolean): void {

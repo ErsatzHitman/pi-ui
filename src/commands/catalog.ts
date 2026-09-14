@@ -2,6 +2,7 @@ export type AppCommandId =
 	| "new-chat"
 	| "new-temporary-chat"
 	| "resume-session"
+	| "previous-session"
 	| "session-tree"
 	| "command-palette"
 	| "change-code-theme"
@@ -46,6 +47,12 @@ export const appCommandCatalog: AppCommandMetadata[] = [
 		title: "Resume session",
 		description: "Browse recent pi sessions for this project.",
 		shortcut: "ctrl R",
+	},
+	{
+		id: "previous-session",
+		title: "Previous session",
+		description: "Jump back and forth between the last two sessions.",
+		shortcut: "ctrl ^",
 	},
 	{
 		id: "session-tree",

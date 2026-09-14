@@ -24,7 +24,10 @@ import { renderSessionPicker, renderWorkspaceDialogMenu } from "./pickers.tsx";
 import { renderPromptBox } from "./prompt-box.tsx";
 import type { AppRenderSnapshot } from "./render-state.ts";
 import { renderSessionSidebar } from "./session-sidebar.tsx";
-import { renderSessionTransition } from "./session-transition.tsx";
+import {
+	previousSessionShortcutAction,
+	renderSessionTransition,
+} from "./session-transition.tsx";
 import { syncHtml } from "./sync-html.ts";
 import { renderThemeLab } from "./theme-lab.tsx";
 import { renderToolbar } from "./toolbar.tsx";
@@ -139,7 +142,7 @@ export function renderPage(
 					data-on:keydown__window={`${altShortcutAction(
 						"KeyM",
 						toggleMinimalModeAction(),
-					)} ${altShortcutAction("KeyO", toggleToolOutputAction())}`}
+					)} ${altShortcutAction("KeyO", toggleToolOutputAction())} ${previousSessionShortcutAction()}`}
 					data-on:pi-ui-display-refresh={`@post('${endpoints.displayRefresh}', {
 						payload: { clientId: '${displayClientId}', hz: evt.detail.hz },
 					})`}
