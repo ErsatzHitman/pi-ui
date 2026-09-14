@@ -5,7 +5,6 @@ const state = {
 	middleScrolling: false,
 	pinnedToBottom: true,
 	pointerScrolling: false,
-	rearmOnBottom: false,
 	scrollTop: 0,
 };
 const bottomScrollTimers = new Set();
@@ -22,8 +21,8 @@ export function bindMessageScroll() {
 		(event) => {
 			const messages = document.getElementById("messages");
 			// Ignore captured scroll events from nested tool and code outputs. Layout
-			// changes alone never re-arm following; reaching the end during an active
-			// downward wheel or scrollbar gesture does.
+			// changes alone never re-arm following; any downward scroll that reaches
+			// the live edge does, whatever gesture produced it.
 			if (!(messages instanceof HTMLElement) || event.target !== messages) return;
 			if (
 				(state.middleScrolling || state.pointerScrolling) &&
@@ -38,18 +37,16 @@ export function bindMessageScroll() {
 					state.scrollTop,
 					messages.scrollTop,
 					distance,
-					state.middleScrolling ||
-						state.rearmOnBottom ||
-						state.pointerScrolling,
 				)
-			)
+			) {
 				state.pinnedToBottom = true;
+				messages.scrollTop = messages.scrollHeight;
+			}
 			if (historyLoading && anchor) {
 				anchor.userScrollDelta += messages.scrollTop - anchor.lastScrollTop;
 				anchor.lastScrollTop = messages.scrollTop;
 			}
 			state.scrollTop = messages.scrollTop;
-			state.rearmOnBottom = false;
 			updateScrollControl();
 		},
 		true,
@@ -105,28 +102,27 @@ export function bindMessageScroll() {
 			{ capture: true, passive: true },
 		);
 	}
-	for (const type of ["mousedown", "auxclick"]) {
-		document.addEventListener(
-			type,
-			(event) => {
-				if (event.button === 1) {
-					state.middleScrolling = true;
-					markUnpinned();
-				}
-			},
-			{
-				capture: true,
-				passive: true,
-			},
-		);
-	}
+	// Press only. `auxclick` fires on middle-button release and would undo the
+	// re-arm that happened while the drag reached the live edge.
+	document.addEventListener(
+		"mousedown",
+		(event) => {
+			if (event.button === 1) {
+				state.middleScrolling = true;
+				markUnpinned();
+			}
+		},
+		{
+			capture: true,
+			passive: true,
+		},
+	);
 	document.addEventListener(
 		"wheel",
 		(event) => {
 			if (!isMessageInteraction(event.target)) return;
 			state.middleScrolling = false;
 			if (event.deltaY < 0) markUnpinned();
-			else if (event.deltaY > 0) state.rearmOnBottom = true;
 		},
 		{ capture: true, passive: true },
 	);
@@ -274,19 +270,8 @@ export function hasPointerDragIntent(startX, startY, currentX, currentY) {
 	return Math.hypot(currentX - startX, currentY - startY) >= 8;
 }
 
-export function shouldRearmAfterScroll(
-	wasPinned,
-	previousTop,
-	scrollTop,
-	distance,
-	hasDownwardIntent,
-) {
-	return (
-		!wasPinned &&
-		hasDownwardIntent &&
-		scrollTop > previousTop &&
-		distance <= liveEdgeThresholdPx
-	);
+export function shouldRearmAfterScroll(wasPinned, previousTop, scrollTop, distance) {
+	return !wasPinned && scrollTop > previousTop && distance <= liveEdgeThresholdPx;
 }
 
 export function scrollBottom(behavior = "auto") {
@@ -296,7 +281,6 @@ export function scrollBottom(behavior = "auto") {
 	state.middleScrolling = false;
 	state.pinnedToBottom = true;
 	state.pointerScrolling = false;
-	state.rearmOnBottom = false;
 	const scroll = () => {
 		const messages = document.getElementById("messages");
 		if (!(messages instanceof HTMLElement) || !state.pinnedToBottom) return;
@@ -319,7 +303,6 @@ export function scrollBottom(behavior = "auto") {
 export function markUnpinned() {
 	clearBottomScrollTimers();
 	state.pinnedToBottom = false;
-	state.rearmOnBottom = false;
 	const messages = document.getElementById("messages");
 	if (messages instanceof HTMLElement) state.scrollTop = messages.scrollTop;
 	updateScrollControl();

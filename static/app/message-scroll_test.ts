@@ -28,9 +28,9 @@ test("old messages trim only when every candidate is above the viewport", () => 
 	assertEquals(shouldTrimOldMessages(true, 0, 99, 100), false);
 });
 
-test("downward user scrolling to the end re-arms following", () => {
-	assertEquals(shouldRearmAfterScroll(false, 400, 420, 8, true), true);
-	assertEquals(shouldRearmAfterScroll(false, 400, 420, 8.1, true), false);
-	assertEquals(shouldRearmAfterScroll(false, 420, 400, 0, true), false);
-	assertEquals(shouldRearmAfterScroll(false, 400, 420, 0, false), false);
+test("downward scrolling that reaches the live edge re-arms following", () => {
+	assertEquals(shouldRearmAfterScroll(false, 400, 420, 8), true);
+	assertEquals(shouldRearmAfterScroll(false, 400, 420, 8.1), false);
+	assertEquals(shouldRearmAfterScroll(false, 420, 400, 0), false);
+	assertEquals(shouldRearmAfterScroll(true, 400, 420, 0), false);
 });
