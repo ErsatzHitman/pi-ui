@@ -153,7 +153,30 @@ all options with their defaults:
 		"wrap": true
 	},
 	"keybindHints": true,
-	"keybinds": {},
+	"keybinds": {
+		"new-chat": "ctrl o",
+		"new-temporary-chat": "ctrl alt o",
+		"resume-session": "ctrl r",
+		"previous-session": "ctrl ^",
+		"command-palette": "ctrl k",
+		"toggle-minimal-mode": "alt m",
+		"toggle-tool-output": "alt o",
+		"switch-model": "ctrl l",
+		"cycle-model": "ctrl p",
+		"cycle-thinking": "alt t",
+		"cycle-thinking-backward": "alt shift t",
+		"toggle-thinking": "ctrl alt t",
+		"toggle-review": "ctrl g",
+		"change-workspace": "ctrl /",
+		"cycle-model-backward": "ctrl shift p",
+		"toggle-sessions": "ctrl b",
+		"focus-prompt": "alt p",
+		"focus-conversation": "alt c",
+		"focus-sessions": "alt s",
+		"focus-workspace-files": "alt f",
+		"focus-workspace-changes": "alt g",
+		"focus-workspace-editor": "alt e"
+	},
 	"minimalMode": false,
 	"sessionSidebar": {
 		"open": true,
@@ -198,22 +221,6 @@ all options with their defaults:
 | <kbd>@</kbd>                                               | file picker                 |
 | <kbd>alt</kbd> <kbd>enter</kbd>                            | queue follow-up             |
 | <kbd>alt</kbd> <kbd>↑</kbd>                                | restore queued text         |
-
-### custom keybinds
-
-override any shortcut in `keybinds`, keyed by action id and written as modifiers followed by one key. `ctrl` is the primary modifier (`⌘` on macOS).
-
-```json
-{
-	"keybinds": {
-		"new-chat": "ctrl n",
-		"previous-session": "ctrl alt p",
-		"focus-prompt": "alt q"
-	}
-}
-```
-
-modifiers are `ctrl` (or `control`), `alt`, and `shift`; keys are a letter, a digit, `/`, or `^`. overrides apply at startup, ignore unknown ids or malformed chords (keeping the default), and never bind a chord without `ctrl` or `alt` so typing is unaffected. contextual keys (`/`, `@`, <kbd>alt</kbd> <kbd>enter</kbd>, <kbd>alt</kbd> <kbd>↑</kbd>, and list navigation) are not configurable.
 
 ## license
 
