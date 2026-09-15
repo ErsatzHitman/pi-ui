@@ -1,3 +1,4 @@
+import { activeKeybind, keybindActions, keybindAria } from "../keybinds.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import {
 	sessionSidebarWidthDefault,
@@ -10,10 +11,9 @@ import {
 	type AppStateSnapshot,
 } from "../state/app-store.ts";
 import { calendarDayDifference, formatCalendarDay } from "../utils/date-time-format.ts";
-import { primaryModifierExpression } from "../utils/keyboard.ts";
 import { systemTimeLocale } from "../utils/locale.ts";
 import { DateTime } from "./date-time.tsx";
-import { altShortcutAction, ShortcutKbd } from "./keyboard.tsx";
+import { ShortcutKbd } from "./keyboard.tsx";
 import { loaderIcon } from "./prompt-status.tsx";
 import { SessionRenameTitle } from "./session-rename.tsx";
 import { SessionRowAction } from "./session-row-action.tsx";
@@ -43,14 +43,11 @@ function restoreSessionSidebar(desktopOpen: boolean): string {
 	el.querySelector('.session-sidebar-scroller').scrollLeft = 0;
 `;
 }
-const focusSessionSidebarShortcut = altShortcutAction(
-	"KeyS",
-	`el.dispatchEvent(new CommandEvent('command', { command: '--show' }));
+const focusSessionSidebarShortcut = `el.dispatchEvent(new CommandEvent('command', { command: '--show' }));
 	const target = el.querySelector(
 		'li > button[aria-current="true"], li > button[data-active="true"], li > button',
 	) ?? el.querySelector('nav');
-	target?.focus({ preventScroll: true });`,
-);
+	target?.focus({ preventScroll: true });`;
 
 type SessionSidebarState = Pick<
 	AppStateSnapshot,
@@ -74,7 +71,7 @@ export function renderSessionSidebar(
 				class="session-sidebar"
 				aria-label="Sessions"
 				closedby="any"
-				aria-keyshortcuts="Control+B Meta+B"
+				aria-keyshortcuts={keybindAria("toggle-sessions")}
 				data-signals:_session-sidebar-open__ifmissing="el.open"
 				data-on:toggle={`$_sessionSidebarOpen = el.open`}
 				data-on:command={`
@@ -102,11 +99,13 @@ export function renderSessionSidebar(
 				)`}
 				data-signals:_session-sidebar-pointer-x__ifmissing="0"
 				data-signals:session-delete-hover__ifmissing="''"
-				data-on:keydown__window={`if (evt.code === 'KeyB' && !evt.altKey && !evt.shiftKey && ${primaryModifierExpression()}) {
-				evt.preventDefault();
-				el.dispatchEvent(new CommandEvent('command', { command: '--toggle' }));
-				}
-				${focusSessionSidebarShortcut}`}
+				data-on:keydown__window={keybindActions(
+					[
+						"toggle-sessions",
+						"el.dispatchEvent(new CommandEvent('command', { command: '--toggle' }));",
+					],
+					["focus-sessions", focusSessionSidebarShortcut],
+				)}
 			>
 				<div
 					id="session-sidebar-separator"
@@ -140,7 +139,7 @@ export function renderSessionSidebar(
 					<nav
 						class="raised-surface session-sidebar-nav"
 						aria-label="Sessions"
-						aria-keyshortcuts="Alt+S"
+						aria-keyshortcuts={keybindAria("focus-sessions")}
 						tabindex="-1"
 						autofocus
 						data-on:keydown={`if (
@@ -164,7 +163,7 @@ export function renderSessionSidebar(
 						<header class="session-sidebar-header">
 							<div class="session-sidebar-heading">
 								<span>Sessions</span>
-								<ShortcutKbd shortcut="alt S" />
+								<ShortcutKbd shortcut={activeKeybind("focus-sessions")} />
 							</div>
 						</header>
 						<section>

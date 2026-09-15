@@ -7,17 +7,17 @@ import {
 } from "../../static/app/attachment-file.js";
 import { providerErrorPresentation } from "../agent/provider-error-message.ts";
 import { authDialogAction } from "../commands/actions.ts";
+import { keybindActions, keybindAria } from "../keybinds.ts";
 import { getActiveCodeThemeId } from "../pierre-theme.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppKeybindHint, AppSessionSummary } from "../state/app-store.ts";
 import type { TranscriptMessageTitlePart } from "../state/transcript-state.ts";
 import { escapeHtml } from "../utils/html.ts";
-import { primaryModifierExpression } from "../utils/keyboard.ts";
 import { highlightBash } from "./bash-highlight.ts";
 import { DateTime } from "./date-time.tsx";
 import { Icon } from "./icon.tsx";
 import { ChevronRight, Loader } from "./icons.ts";
-import { altShortcutAction, ShortcutKbd } from "./keyboard.tsx";
+import { ShortcutKbd } from "./keyboard.tsx";
 import { renderMarkdownStreaming } from "./markdown.tsx";
 import { BoundedCache } from "./render-cache.ts";
 import type { AppMessage } from "./render-state.ts";
@@ -59,19 +59,16 @@ export function renderMessages(
 				$_sessionTransitionLoading ? 'true' : 'false'
 			"
 			aria-live="polite"
-			aria-keyshortcuts="Alt+C"
+			aria-keyshortcuts={keybindAria("focus-conversation")}
 			tabindex="-1"
 			data-init="window.piUi.messageScroll.bindResize()"
-			data-on:keydown__window={`if (
-			${primaryModifierExpression()} &&
-			evt.altKey &&
-			!evt.shiftKey &&
-			evt.code === 'KeyT'
-			) {
-			evt.preventDefault();
-			@post('${endpoints.thinkingVisibilityToggle}', { payload: {} });
-			}
-			${altShortcutAction("KeyC", "el.focus({ preventScroll: true });")}`}
+			data-on:keydown__window={keybindActions(
+				[
+					"toggle-thinking",
+					`@post('${endpoints.thinkingVisibilityToggle}', { payload: {} });`,
+				],
+				["focus-conversation", "el.focus({ preventScroll: true });"],
+			)}
 		>
 			<div class="messages-stack">
 				<div id="message-list">

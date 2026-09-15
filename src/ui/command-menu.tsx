@@ -1,5 +1,6 @@
 import { commandActions } from "../commands/actions.ts";
 import { appCommandCatalog, type AppCommandMetadata } from "../commands/catalog.ts";
+import { activeKeybind } from "../keybinds.ts";
 import { ShortcutKbd } from "./keyboard.tsx";
 import { syncHtml } from "./sync-html.ts";
 
@@ -62,6 +63,7 @@ export function renderCommandMenu(): string {
 
 function renderCommandRow(item: AppCommandMetadata): string {
 	const searchText = `${item.title} ${item.description} ${item.id}`.toLowerCase();
+	const shortcut = activeKeybind(item.id);
 	return syncHtml(
 		<div
 			role="menuitem"
@@ -73,9 +75,9 @@ function renderCommandRow(item: AppCommandMetadata): string {
 				<span class="command-item-title">{item.title}</span>
 				<span class="command-item-description">{item.description}</span>
 			</span>
-			{item.shortcut && (
+			{shortcut && (
 				<span class="command-item-shortcut">
-					<ShortcutKbd shortcut={item.shortcut} />
+					<ShortcutKbd shortcut={shortcut} />
 				</span>
 			)}
 		</div>,

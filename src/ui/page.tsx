@@ -1,5 +1,6 @@
 import { toggleMinimalModeAction, toggleToolOutputAction } from "../commands/actions.ts";
 import { activeFontStacks } from "../fonts.ts";
+import { activeKeybind, keybindActions } from "../keybinds.ts";
 import { getPierreThemes } from "../pierre-theme.ts";
 import {
 	endpoints,
@@ -17,17 +18,14 @@ import { renderExtensionDialog } from "./extension-dialog.tsx";
 import { renderFontDialog } from "./font-dialog.tsx";
 import { Icon } from "./icon.tsx";
 import { FileUp, FolderOpen, PanelRight, Search } from "./icons.ts";
-import { altShortcutAction, ShortcutTooltip } from "./keyboard.tsx";
+import { ShortcutTooltip } from "./keyboard.tsx";
 import { renderLlamaDialog } from "./llama-dialog.tsx";
 import { renderMessages } from "./messages.tsx";
 import { renderSessionPicker, renderWorkspaceDialogMenu } from "./pickers.tsx";
 import { renderPromptBox } from "./prompt-box.tsx";
 import type { AppRenderSnapshot } from "./render-state.ts";
 import { renderSessionSidebar } from "./session-sidebar.tsx";
-import {
-	previousSessionShortcutAction,
-	renderSessionTransition,
-} from "./session-transition.tsx";
+import { previousSessionAction, renderSessionTransition } from "./session-transition.tsx";
 import { syncHtml } from "./sync-html.ts";
 import { renderThemeLab } from "./theme-lab.tsx";
 import { renderToolbar } from "./toolbar.tsx";
@@ -139,10 +137,11 @@ export function renderPage(
 							}),
 						);
 					`}
-					data-on:keydown__window={`${altShortcutAction(
-						"KeyM",
-						toggleMinimalModeAction(),
-					)} ${altShortcutAction("KeyO", toggleToolOutputAction())} ${previousSessionShortcutAction()}`}
+					data-on:keydown__window={keybindActions(
+						["toggle-minimal-mode", toggleMinimalModeAction()],
+						["toggle-tool-output", toggleToolOutputAction()],
+						["previous-session", previousSessionAction()],
+					)}
 					data-on:pi-ui-display-refresh={`@post('${endpoints.displayRefresh}', {
 						payload: { clientId: '${displayClientId}', hz: evt.detail.hz },
 					})`}
@@ -277,7 +276,7 @@ export function renderPage(
 									<Icon icon={PanelRight} />
 									<ShortcutTooltip
 										label="Toggle sessions"
-										shortcut="ctrl B"
+										shortcut={activeKeybind("toggle-sessions")}
 									/>
 								</button>
 							</div>

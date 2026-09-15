@@ -1,9 +1,10 @@
+import { activeKeybind, keybindAction, keybindAria } from "../keybinds.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
 import { renderExtensionWidgets } from "./extension-widgets.tsx";
 import { Icon } from "./icon.tsx";
 import { ArrowDown, Paperclip, X } from "./icons.ts";
-import { altShortcutAction, ShortcutKbd, ShortcutTooltip } from "./keyboard.tsx";
+import { ShortcutKbd, ShortcutTooltip } from "./keyboard.tsx";
 import { renderSlashPicker, slashPickerOpenExpression } from "./pickers.tsx";
 import { renderPromptAction } from "./prompt-action.tsx";
 import { renderModelPicker, renderThinkingPicker } from "./prompt-pickers.tsx";
@@ -84,13 +85,13 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 						aria-autocomplete="list"
 						aria-haspopup="listbox"
 						data-preserve-attr="aria-controls aria-activedescendant"
-						aria-keyshortcuts="Alt+P"
+						aria-keyshortcuts={keybindAria("focus-prompt")}
 						rows="1"
 						data-bind:prompt
 						attrs={{
 							"data-on:input__debounce.150ms": `@post('${endpoints.extensionUiEditor}', { payload: { prompt: $prompt } })`,
-							"data-on:keydown__window": altShortcutAction(
-								"KeyP",
+							"data-on:keydown__window": keybindAction(
+								"focus-prompt",
 								`el.focus({ preventScroll: true });
 							el.selectionStart = el.value.length;
 							el.selectionEnd = el.value.length;`,
@@ -172,7 +173,7 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 					></textarea>
 					<div class="prompt-editor-actions">
 						<div class="prompt-shortcut-hint">
-							<ShortcutKbd shortcut="alt P" />
+							<ShortcutKbd shortcut={activeKeybind("focus-prompt")} />
 						</div>
 						<button
 							type="button"

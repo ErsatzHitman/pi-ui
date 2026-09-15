@@ -4,6 +4,7 @@ import { defaultAutoTitleConfig } from "../src/agent/auto-title.ts";
 import { codeThemesFor, defaultCodeThemes } from "../src/code-themes.ts";
 import { appConfigSchemaUrl } from "../src/config-schema.ts";
 import { defaultFonts, FONT_OPTIONS } from "../src/fonts.ts";
+import { keybindIds } from "../src/keybinds.ts";
 import {
 	sessionSidebarWidthDefault,
 	sessionSidebarWidthMax,
@@ -149,6 +150,21 @@ const schema = Type.Object(
 				default: true,
 				description: "Show keyboard shortcut hints in the interface.",
 			}),
+		),
+		keybinds: Type.Optional(
+			Type.Partial(
+				Type.Record(
+					Type.Union(keybindIds().map((id) => Type.Literal(id))),
+					Type.String({
+						pattern: "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$",
+					}),
+				),
+				{
+					description:
+						"Keyboard shortcut overrides by action id, for example ctrl O, ctrl alt O, or alt shift T.",
+					additionalProperties: false,
+				},
+			),
 		),
 		minimalMode: Type.Optional(
 			Type.Boolean({

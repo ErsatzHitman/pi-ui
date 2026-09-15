@@ -1,5 +1,6 @@
 import type { SessionTransitionState } from "../agent/session-transition-controller.ts";
 import { appCommandCatalog } from "../commands/catalog.ts";
+import { activeKeybind } from "../keybinds.ts";
 import { sessionPerformance } from "../perf/session-performance.ts";
 import type { AvailableUpdate } from "../update-check.ts";
 import { formatMessageCount } from "../utils/format.ts";
@@ -223,20 +224,27 @@ type AppStoreUpdateOptions = { flush?: boolean; commit?: boolean };
 
 const sessionSidebarPageSize = 30;
 
-const emptyChatHints: AppKeybindHint[] = [
-	...appCommandCatalog
-		.filter((command) => command.shortcut)
-		.map((command) => ({
-			keys: formatShortcut(command.shortcut),
-			description: command.description,
-		})),
-	{ keys: "alt T", description: "Cycle thinking level." },
-	{ keys: "@", description: "Attach a file path." },
-	{ keys: "/", description: "Open slash commands and skills." },
-];
+function emptyChatHints(): AppKeybindHint[] {
+	const commandHints = appCommandCatalog.flatMap((command) => {
+		const shortcut = activeKeybind(command.id);
+		return shortcut
+			? [{ keys: formatShortcut(shortcut), description: command.description }]
+			: [];
+	});
+	return [
+		...commandHints,
+		{
+			keys: formatShortcut(activeKeybind("cycle-thinking")),
+			description: "Cycle thinking level.",
+		},
+		{ keys: "@", description: "Attach a file path." },
+		{ keys: "/", description: "Open slash commands and skills." },
+	];
+}
 
 function randomEmptyChatHint(): AppKeybindHint {
-	return emptyChatHints[Math.floor(Math.random() * emptyChatHints.length)];
+	const hints = emptyChatHints();
+	return hints[Math.floor(Math.random() * hints.length)];
 }
 function debugUiEnabled(): boolean {
 	return process.env.PI_UI_DEBUG === "1";

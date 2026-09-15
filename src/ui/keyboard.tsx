@@ -1,20 +1,6 @@
 import { formatShortcut, shortcutParts } from "../utils/keyboard.ts";
 import { operatingSystem } from "../utils/platform.ts";
 
-export function altShortcutAction(code: string, action: string): string {
-	return `if (
-		evt.code === '${code}' &&
-		evt.altKey &&
-		!evt.shiftKey &&
-		!evt.ctrlKey &&
-		!evt.metaKey &&
-		!document.querySelector(':modal')
-	) {
-		evt.preventDefault();
-		${action}
-	}`;
-}
-
 function shortcutGlyph(part: string): string {
 	const key = part.toLowerCase();
 	if (key === "alt") return "⌥";

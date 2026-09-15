@@ -153,6 +153,7 @@ all options with their defaults:
 		"wrap": true
 	},
 	"keybindHints": true,
+	"keybinds": {},
 	"minimalMode": false,
 	"sessionSidebar": {
 		"open": true,
@@ -197,6 +198,22 @@ all options with their defaults:
 | <kbd>@</kbd>                                               | file picker                 |
 | <kbd>alt</kbd> <kbd>enter</kbd>                            | queue follow-up             |
 | <kbd>alt</kbd> <kbd>↑</kbd>                                | restore queued text         |
+
+### custom keybinds
+
+override any shortcut in `keybinds`, keyed by action id and written as modifiers followed by one key. `ctrl` is the primary modifier (`⌘` on macOS).
+
+```json
+{
+	"keybinds": {
+		"new-chat": "ctrl n",
+		"previous-session": "ctrl alt p",
+		"focus-prompt": "alt q"
+	}
+}
+```
+
+modifiers are `ctrl` (or `control`), `alt`, and `shift`; keys are a letter, a digit, `/`, or `^`. overrides apply at startup, ignore unknown ids or malformed chords (keeping the default), and never bind a chord without `ctrl` or `alt` so typing is unaffected. contextual keys (`/`, `@`, <kbd>alt</kbd> <kbd>enter</kbd>, <kbd>alt</kbd> <kbd>↑</kbd>, and list navigation) are not configurable.
 
 ## license
 

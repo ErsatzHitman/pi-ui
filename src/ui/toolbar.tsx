@@ -3,8 +3,13 @@ import {
 	toggleDialogAction,
 	toggleWorkspaceReviewAction,
 } from "../commands/actions.ts";
+import {
+	activeKeybind,
+	keybindAction,
+	keybindAria,
+	type KeybindId,
+} from "../keybinds.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
-import { primaryModifierExpression } from "../utils/keyboard.ts";
 import { Icon } from "./icon.tsx";
 import {
 	Command,
@@ -33,7 +38,7 @@ type ToolbarItem = {
 	action: ToolbarAction;
 	icon: IconData;
 	label: string;
-	shortcut?: string;
+	keybind: KeybindId;
 	tooltipAlign?: "start" | "center" | "end";
 };
 
@@ -41,7 +46,7 @@ const reviewToolbarItem: ToolbarItem = {
 	action: "review",
 	icon: FileDiff,
 	label: "Review workspace",
-	shortcut: "ctrl G",
+	keybind: "toggle-review",
 	tooltipAlign: "start",
 };
 
@@ -50,26 +55,26 @@ const toolbarItems: readonly ToolbarItem[] = [
 		action: "commands",
 		icon: Command,
 		label: "Commands",
-		shortcut: "ctrl K",
+		keybind: "command-palette",
 		tooltipAlign: "start",
 	},
 	{
 		action: "sessions",
 		icon: RotateCcw,
 		label: "Resume session",
-		shortcut: "ctrl R",
+		keybind: "resume-session",
 	},
 	{
 		action: "new-chat",
 		icon: MessageCirclePlus,
 		label: "New chat",
-		shortcut: "ctrl O",
+		keybind: "new-chat",
 	},
 	{
 		action: "new-temporary-chat",
 		icon: MessageCircleDashed,
 		label: "New temporary chat",
-		shortcut: "ctrl alt O",
+		keybind: "new-temporary-chat",
 	},
 ];
 
@@ -102,7 +107,7 @@ function ToolbarItemButton(props: {
 		<ToolbarButton
 			label={props.item.label}
 			action={props.item.action}
-			shortcut={props.item.shortcut}
+			keybind={props.item.keybind}
 			tooltipAlign={props.item.tooltipAlign}
 			variant={temporary && props.state.isTemporarySession ? "secondary" : "ghost"}
 			pressed={temporary && props.state.isTemporarySession}
@@ -116,7 +121,7 @@ function ToolbarItemButton(props: {
 function ToolbarButton(props: {
 	label: string;
 	action: ToolbarAction;
-	shortcut?: string;
+	keybind: KeybindId;
 	variant?: "primary" | "secondary" | "ghost";
 	unavailable?: boolean;
 	pressed?: boolean;
@@ -157,16 +162,21 @@ function ToolbarButton(props: {
 					: undefined
 			}
 			data-on:click={toolbarClickAction(props.action)}
-			data-on:keydown__window={toolbarKeydownAction(props.action)}
+			data-on:keydown__window={keybindAction(
+				props.keybind,
+				toolbarClickAction(props.action) ?? toggleDialogAction(),
+			)}
 			data-tooltip={props.label}
 			data-tooltip-delay
 			data-align={props.tooltipAlign}
 			aria-label={props.label}
+			aria-keyshortcuts={keybindAria(props.keybind)}
 		>
 			{props.children}
-			{props.shortcut && (
-				<ShortcutTooltip label={props.label} shortcut={props.shortcut} />
-			)}
+			<ShortcutTooltip
+				label={props.label}
+				shortcut={activeKeybind(props.keybind)}
+			/>
 		</button>
 	);
 }
@@ -179,40 +189,5 @@ function toolbarClickAction(action: ToolbarAction): string | undefined {
 	if (action === "review") return toggleWorkspaceReviewAction();
 	if (action === "new-chat") return newSessionAction();
 	if (action === "new-temporary-chat") return newSessionAction(true);
-	return undefined;
-}
-
-function toolbarKeydownAction(action: ToolbarAction): string | undefined {
-	const primaryModifier = primaryModifierExpression();
-	if (action === "commands") {
-		return `if (${primaryModifier} && evt.code === 'KeyK') {
-			evt.preventDefault();
-			${toggleDialogAction()}
-		}`;
-	}
-	if (action === "review") {
-		return `if (${primaryModifier} && !evt.shiftKey && !evt.altKey && evt.code === 'KeyG') {
-			evt.preventDefault();
-			${toggleWorkspaceReviewAction()};
-		}`;
-	}
-	if (action === "new-chat") {
-		return `if (${primaryModifier} && !evt.altKey && evt.code === 'KeyO') {
-			evt.preventDefault();
-			${newSessionAction()}
-		}`;
-	}
-	if (action === "new-temporary-chat") {
-		return `if (${primaryModifier} && evt.altKey && evt.code === 'KeyO') {
-			evt.preventDefault();
-			${newSessionAction(true)}
-		}`;
-	}
-	if (action === "sessions") {
-		return `if (${primaryModifier} && evt.code === 'KeyR') {
-			evt.preventDefault();
-			${toggleDialogAction()}
-		}`;
-	}
 	return undefined;
 }

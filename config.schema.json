@@ -251,6 +251,101 @@
 			"default": true,
 			"description": "Show keyboard shortcut hints in the interface."
 		},
+		"keybinds": {
+			"type": "object",
+			"properties": {
+				"new-chat": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"new-temporary-chat": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"resume-session": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"previous-session": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"command-palette": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"toggle-minimal-mode": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"toggle-tool-output": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"switch-model": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"cycle-model": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"cycle-thinking": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"cycle-thinking-backward": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"toggle-thinking": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"toggle-review": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"change-workspace": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"cycle-model-backward": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"toggle-sessions": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"focus-prompt": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"focus-conversation": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"focus-sessions": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"focus-workspace-files": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"focus-workspace-changes": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"focus-workspace-editor": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				}
+			},
+			"description": "Keyboard shortcut overrides by action id, for example ctrl O, ctrl alt O, or alt shift T.",
+			"additionalProperties": false
+		},
 		"minimalMode": {
 			"type": "boolean",
 			"default": false,

@@ -7,6 +7,7 @@ import { RuntimeController } from "../agent/runtime-controller.ts";
 import { SessionTransitionController } from "../agent/session-transition-controller.ts";
 import { defaultCodeThemes, validCodeThemes } from "../code-themes.ts";
 import { defaultFonts, setActiveFonts, validFonts } from "../fonts.ts";
+import { parseKeybindOverrides, setActiveKeybinds } from "../keybinds.ts";
 import { setActiveCodeTheme } from "../pierre-theme.ts";
 import {
 	normalizeSessionSidebarPreferences,
@@ -31,6 +32,7 @@ export async function createApp() {
 	const fdReady = ensureTool("fd", ({ message }) => console.error(message));
 	const staticAssets = await createStaticAssetServer(staticRoot);
 	const appConfig = await ensureAppConfig();
+	setActiveKeybinds(parseKeybindOverrides(appConfig.keybinds));
 	const codeTheme = validCodeThemes(appConfig.codeTheme) ?? defaultCodeThemes();
 	const fonts = validFonts(appConfig.fonts) ?? defaultFonts();
 	const autoTitle = parseAutoTitleConfig(appConfig.autoTitle);

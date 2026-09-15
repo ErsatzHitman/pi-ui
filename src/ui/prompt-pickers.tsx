@@ -4,10 +4,10 @@ import {
 	cycleThinkingAction,
 	toggleDialogAction,
 } from "../commands/actions.ts";
+import { activeKeybind, keybindAction, keybindActions } from "../keybinds.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppThinkingLevel } from "../state/app-store.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
-import { primaryModifierExpression } from "../utils/keyboard.ts";
 import { workspaceDisplayName } from "../utils/workspace.ts";
 import { Icon } from "./icon.tsx";
 import { Brain, Folder, Star } from "./icons.ts";
@@ -30,10 +30,10 @@ export function renderWorkspacePicker(state: AppStateSnapshot): string {
 			commandfor="workspace-dialog"
 			command="show-modal"
 			data-on:click="$_workspaceAction = 'open'"
-			data-on:keydown__window={`if (${primaryModifierExpression()} && !evt.altKey && !evt.shiftKey && evt.code === 'Slash') {
-			evt.preventDefault();
-			${toggleDialogAction()}
-			}`}
+			data-on:keydown__window={keybindAction(
+				"change-workspace",
+				toggleDialogAction(),
+			)}
 			data-tooltip="Workspace"
 			data-tooltip-delay
 		>
@@ -41,7 +41,10 @@ export function renderWorkspacePicker(state: AppStateSnapshot): string {
 			<span class="prompt-context-label" safe>
 				{label}
 			</span>
-			<ShortcutTooltip label="Workspace" shortcut="ctrl /" />
+			<ShortcutTooltip
+				label="Workspace"
+				shortcut={activeKeybind("change-workspace")}
+			/>
 		</button>,
 	);
 }
@@ -56,15 +59,10 @@ export function renderThinkingPicker(state: AppStateSnapshot): string {
 			<div
 				id="thinking-select"
 				class="dropdown-menu"
-				data-on:keydown__window={`if (
-				evt.altKey &&
-				!evt.ctrlKey &&
-				!evt.metaKey &&
-				evt.code === 'KeyT'
-				) {
-				evt.preventDefault();
-				${cycleThinkingAction("event-shift")};
-				}`}
+				data-on:keydown__window={keybindActions(
+					["cycle-thinking", cycleThinkingAction("forward")],
+					["cycle-thinking-backward", cycleThinkingAction("backward")],
+				)}
 			>
 				<button
 					type="button"
@@ -82,7 +80,10 @@ export function renderThinkingPicker(state: AppStateSnapshot): string {
 				>
 					<Icon icon={Brain} class="prompt-context-icon" />
 					<span class="prompt-context-label">{thinkingLabel(current)}</span>
-					<ShortcutTooltip label="Thinking" shortcut="alt T" />
+					<ShortcutTooltip
+						label="Thinking"
+						shortcut={activeKeybind("cycle-thinking")}
+					/>
 				</button>
 				<div
 					id="thinking-select-popover"
@@ -101,7 +102,7 @@ export function renderThinkingPicker(state: AppStateSnapshot): string {
 							class="picker-heading"
 						>
 							<span>Thinking</span>
-							<ShortcutKbd shortcut="alt T" />
+							<ShortcutKbd shortcut={activeKeybind("cycle-thinking")} />
 						</div>
 						{state.thinkingLevels.map((level) => (
 							<button
@@ -194,13 +195,14 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 			<div
 				id="model-select"
 				class="popover model-select"
-				data-on:keydown__window={`if (${primaryModifierExpression()} && evt.code === 'KeyL') {
-				evt.preventDefault();
-				document.getElementById('model-select-trigger')?.click();
-				} else if (${primaryModifierExpression()} && evt.code === 'KeyP') {
-				evt.preventDefault();
-				${cycleModelAction("event-shift")};
-				}`}
+				data-on:keydown__window={keybindActions(
+					[
+						"switch-model",
+						"document.getElementById('model-select-trigger')?.click();",
+					],
+					["cycle-model", cycleModelAction("forward")],
+					["cycle-model-backward", cycleModelAction("backward")],
+				)}
 			>
 				<button
 					type="button"
@@ -222,7 +224,10 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 					<span class="prompt-context-label" safe>
 						{currentLabel}
 					</span>
-					<ShortcutTooltip label="Model" shortcut="ctrl L" />
+					<ShortcutTooltip
+						label="Model"
+						shortcut={activeKeybind("switch-model")}
+					/>
 				</button>
 				<dialog
 					id="model-select-popover"
@@ -267,7 +272,9 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 									class="picker-heading"
 								>
 									<span>Models</span>
-									<ShortcutKbd shortcut="ctrl L" />
+									<ShortcutKbd
+										shortcut={activeKeybind("switch-model")}
+									/>
 								</div>
 								{state.models.map((model, index) => {
 									const value = `${model.provider}/${model.id}`;

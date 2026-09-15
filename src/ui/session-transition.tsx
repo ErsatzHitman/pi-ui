@@ -41,13 +41,6 @@ export function previousSessionAction(): string {
 	}`;
 }
 
-export function previousSessionShortcutAction(): string {
-	return `if (${primaryModifierExpression()} && !evt.altKey && evt.key === '^') {
-		evt.preventDefault();
-		${previousSessionAction()}
-	}`;
-}
-
 export function renderSessionTransition(state: AppStateSnapshot): string {
 	const transition = state.sessionTransition;
 	const visible = sessionTransitionOverlayVisible(transition);

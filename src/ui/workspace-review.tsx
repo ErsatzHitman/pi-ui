@@ -1,3 +1,4 @@
+import { activeKeybind, keybindActions, keybindAria } from "../keybinds.ts";
 import { workspaceTreeStyle } from "../workspace-review-tree.ts";
 import {
 	changesRatioDefault,
@@ -15,7 +16,7 @@ import {
 } from "../workspace-review-types.ts";
 import { Icon } from "./icon.tsx";
 import { SquareSplitHorizontal, SquareSplitVertical, TextWrap, X } from "./icons.ts";
-import { altShortcutAction, ShortcutKbd } from "./keyboard.tsx";
+import { ShortcutKbd } from "./keyboard.tsx";
 import { syncHtml } from "./sync-html.ts";
 
 type ResizePreference = "changesRatio" | "gitPaneRatio" | "reviewSidebarWidth";
@@ -92,15 +93,18 @@ export function renderWorkspaceReview(
 			id="workspace-review"
 
 			aria-label="Workspace"
-			aria-keyshortcuts="Alt+E Alt+F Alt+G"
+			aria-keyshortcuts={keybindAria(
+				"focus-workspace-editor",
+				"focus-workspace-files",
+				"focus-workspace-changes",
+			)}
 			aria-hidden="true"
 			inert
-			data-on:keydown__window={`${altShortcutAction(
-				"KeyF",
-				"window.piUi.workspaceReview.focusFiles();",
+			data-on:keydown__window={keybindActions(
+				["focus-workspace-files", "window.piUi.workspaceReview.focusFiles();"],
+				["focus-workspace-changes", "window.piUi.workspaceReview.focusGit();"],
+				["focus-workspace-editor", "window.piUi.workspaceReview.focusEditor();"],
 			)}
-			${altShortcutAction("KeyG", "window.piUi.workspaceReview.focusGit();")}
-			${altShortcutAction("KeyE", "window.piUi.workspaceReview.focusEditor();")}`}
 			data-attr:aria-hidden="$_workspaceReviewOpen ? 'false' : 'true'"
 			data-attr:inert="!$_workspaceReviewOpen"
 		>
@@ -265,7 +269,7 @@ export function renderWorkspaceReview(
 					id="workspace-file-main"
 					class="review-main"
 					aria-label="File editor"
-					aria-keyshortcuts="Alt+E"
+					aria-keyshortcuts={keybindAria("focus-workspace-editor")}
 					tabindex="-1"
 					style={
 						snapshot.isGitRepository && preferences.tab !== "files"
@@ -288,7 +292,9 @@ export function renderWorkspaceReview(
 							/>
 						</div>
 						<div class="review-toolbar-controls">
-							<ShortcutKbd shortcut="alt E" />
+							<ShortcutKbd
+								shortcut={activeKeybind("focus-workspace-editor")}
+							/>
 							<div class="segmented-control review-icon-control">
 								<button
 									id="workspace-file-wrap"
@@ -338,7 +344,7 @@ export function renderWorkspaceReview(
 							id="workspace-file-view"
 							class="review-scroll-view"
 							aria-label="File contents"
-							aria-keyshortcuts="Alt+E"
+							aria-keyshortcuts={keybindAria("focus-workspace-editor")}
 							tabindex="-1"
 						/>
 						<div id="workspace-file-empty" class="review-empty">
@@ -369,7 +375,9 @@ export function renderWorkspaceReview(
 							{snapshot.branch ?? ""}
 						</span>
 						<div class="review-toolbar-controls">
-							<ShortcutKbd shortcut="alt E" />
+							<ShortcutKbd
+								shortcut={activeKeybind("focus-workspace-editor")}
+							/>
 							<div class="segmented-control" aria-label="Diff scope">
 								<button
 									id="review-mode-all"
@@ -455,7 +463,7 @@ export function renderWorkspaceReview(
 							id="review-diff-view"
 							class="review-scroll-view review-diff-view"
 							aria-label="Code changes"
-							aria-keyshortcuts="Alt+E"
+							aria-keyshortcuts={keybindAria("focus-workspace-editor")}
 							tabindex="-1"
 						/>
 						<div id="review-empty" class="review-empty">
@@ -599,10 +607,10 @@ function renderWorkspaceModeHeader(
 						!$_workspaceReviewGitAvailable ? 'true' : 'false'
 					"
 					data-workspace-mode="files"
-					aria-keyshortcuts="Alt+F"
+					aria-keyshortcuts={keybindAria("focus-workspace-files")}
 				>
 					<span>Files</span>
-					<ShortcutKbd shortcut="alt F" />
+					<ShortcutKbd shortcut={activeKeybind("focus-workspace-files")} />
 				</button>
 				<button
 					type="button"
@@ -615,10 +623,10 @@ function renderWorkspaceModeHeader(
 					data-workspace-mode="git"
 					disabled={!gitAvailable}
 					data-attr:disabled="!$_workspaceReviewGitAvailable"
-					aria-keyshortcuts="Alt+G"
+					aria-keyshortcuts={keybindAria("focus-workspace-changes")}
 				>
 					<span>Git</span>
-					<ShortcutKbd shortcut="alt G" />
+					<ShortcutKbd shortcut={activeKeybind("focus-workspace-changes")} />
 				</button>
 			</div>
 		</header>
