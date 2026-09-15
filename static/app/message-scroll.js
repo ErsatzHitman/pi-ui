@@ -106,21 +106,6 @@ export function bindMessageScroll() {
 			{ capture: true, passive: true },
 		);
 	}
-	// Press only. `auxclick` fires on middle-button release and would undo the
-	// re-arm that happened while the drag reached the live edge.
-	document.addEventListener(
-		"mousedown",
-		(event) => {
-			if (event.button === 1) {
-				state.middleScrolling = true;
-				markUnpinned();
-			}
-		},
-		{
-			capture: true,
-			passive: true,
-		},
-	);
 	document.addEventListener(
 		"wheel",
 		(event) => {
@@ -239,7 +224,6 @@ export function trimOldMessages() {
 	if (
 		!lastCandidate ||
 		!shouldTrimOldMessages(
-			state.pinnedToBottom,
 			excess,
 			lastCandidate.getBoundingClientRect().bottom,
 			messages.getBoundingClientRect().top,
@@ -253,13 +237,8 @@ export function retainedAnchorScrollTop(scrollTop, currentOffset, targetOffset) 
 	return scrollTop + currentOffset - targetOffset;
 }
 
-export function shouldTrimOldMessages(
-	pinnedToBottom,
-	excess,
-	candidateBottom,
-	viewportTop,
-) {
-	return pinnedToBottom && excess > 0 && candidateBottom <= viewportTop;
+export function shouldTrimOldMessages(excess, candidateBottom, viewportTop) {
+	return excess > 0 && candidateBottom <= viewportTop;
 }
 
 function messageAtViewportTop(messages, viewport) {

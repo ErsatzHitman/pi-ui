@@ -22,10 +22,9 @@ test("pointer presses require drag intent before releasing follow mode", () => {
 });
 
 test("old messages trim only when every candidate is above the viewport", () => {
-	assertEquals(shouldTrimOldMessages(true, 1, 99, 100), true);
-	assertEquals(shouldTrimOldMessages(true, 1, 101, 100), false);
-	assertEquals(shouldTrimOldMessages(false, 1, 99, 100), false);
-	assertEquals(shouldTrimOldMessages(true, 0, 99, 100), false);
+	assertEquals(shouldTrimOldMessages(1, 99, 100), true);
+	assertEquals(shouldTrimOldMessages(1, 101, 100), false);
+	assertEquals(shouldTrimOldMessages(0, 99, 100), false);
 });
 
 test("downward scrolling that reaches the live edge re-arms following", () => {
