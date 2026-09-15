@@ -96,6 +96,10 @@ export function bindMessageScroll() {
 		document.addEventListener(
 			type,
 			() => {
+				// Middle-button intent is global (autoscroll, X11 paste), so releasing
+				// the button must drop it. Otherwise a later layout clamp during
+				// streaming reads as an upward scroll and silently unpins follow mode.
+				state.middleScrolling = false;
 				state.pointerScrolling = false;
 				pointerStart = undefined;
 			},
