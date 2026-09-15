@@ -25,6 +25,11 @@ const results = await Promise.all([
 		},
 		define: { "process.env.NODE_ENV": JSON.stringify("production") },
 		minify: true,
+		// Pierre registers the diffs-container custom element (and its adopted
+		// base stylesheet) through an import side effect. Bun's tree shaking
+		// drops that module on Windows by missing the package sideEffects entry,
+		// which renders file previews unstyled.
+		ignoreDCEAnnotations: true,
 	}),
 	Bun.build({
 		entrypoints: [pierreWorker],
