@@ -35,7 +35,7 @@
 		background: var(--surface-raised);
 		padding: 1rem 1.25rem;
 		color: var(--text);
-		font-size: var(--text-sm);
+		font-size: var(--text-base);
 		box-shadow: var(--shadow-lg);
 		scale: 0.95;
 		transition: scale 100ms ease-out;
@@ -112,7 +112,7 @@
 		justify-content: center;
 		padding: 2rem;
 		color: var(--text-muted);
-		font-size: var(--text-sm);
+		font-size: var(--text-base);
 	}
 
 	.dialog-medium {

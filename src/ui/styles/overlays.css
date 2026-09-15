@@ -45,7 +45,7 @@
 		background: var(--surface-raised);
 		padding: 1rem;
 		color: var(--text);
-		font-size: var(--text-sm);
+		font-size: var(--text-base);
 		box-shadow: var(--shadow-lg);
 	}
 
@@ -55,7 +55,7 @@
 	}
 
 	:where(.dialog, .alert-dialog) > * > header h2 {
-		font-size: var(--text-base);
+		font-size: var(--text-xl);
 		font-weight: 500;
 		line-height: 1.25;
 		text-wrap: balance;
@@ -149,7 +149,7 @@
 		outline: 0;
 		background: transparent;
 		padding-inline-start: 0.375rem;
-		font-size: var(--text-sm);
+		font-size: var(--text-base);
 	}
 
 	.command :where([role="menu"]) {
@@ -179,7 +179,7 @@
 		gap: 0.5rem;
 		border-radius: var(--radius-sm);
 		padding: 0.375rem 0.5rem;
-		font-size: var(--text-sm);
+		font-size: var(--text-base);
 		text-align: start;
 		cursor: default;
 	}
@@ -216,7 +216,7 @@
 		display: block;
 		padding: 1.5rem;
 		color: var(--text-muted);
-		font-size: var(--text-sm);
+		font-size: var(--text-base);
 		text-align: center;
 		content: attr(data-empty);
 	}
@@ -229,7 +229,7 @@
 		margin: 0;
 		border-radius: var(--radius-lg);
 		padding: 0.625rem;
-		font-size: var(--text-sm);
+		font-size: var(--text-base);
 		box-shadow:
 			0 0 0 1px var(--border),
 			var(--shadow-md);

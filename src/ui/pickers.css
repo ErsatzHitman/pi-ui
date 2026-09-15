@@ -21,7 +21,7 @@
 	.picker-empty {
 		padding: 1rem 0.75rem;
 		color: var(--text-muted);
-		font-size: var(--text-sm);
+		font-size: var(--text-base);
 		text-align: center;
 	}
 	.picker-row {
@@ -111,7 +111,7 @@
 		gap: 1rem;
 	}
 	.workspace-browser-header h2 {
-		font-size: var(--text-base);
+		font-size: var(--text-xl);
 		font-weight: 600;
 	}
 	.workspace-browser-path {
@@ -131,7 +131,7 @@
 	.workspace-browser-empty {
 		padding: 1rem 0.75rem;
 		color: var(--text-muted);
-		font-size: var(--text-sm);
+		font-size: var(--text-base);
 	}
 	.workspace-browser-footer {
 		display: flex;
@@ -151,7 +151,7 @@
 		flex-shrink: 0;
 		border-top: 1px solid var(--border);
 		padding: 0.75rem 1.25rem 1.25rem;
-		font-size: var(--text-sm);
+		font-size: var(--text-base);
 	}
 	.workspace-folder-controls {
 		display: flex;
@@ -168,7 +168,7 @@
 	.workspace-browser-error-message {
 		padding: 1.5rem 1.25rem;
 		color: var(--status-danger);
-		font-size: var(--text-sm);
+		font-size: var(--text-base);
 	}
 	.workspace-browser-error-path {
 		font-family: var(--font-mono);
@@ -180,7 +180,7 @@
 		gap: 0.75rem;
 		border-radius: var(--radius-md);
 		padding: 0.5rem 0.75rem;
-		font: var(--text-sm)/1.25 var(--font-mono);
+		font: var(--text-base)/1.25 var(--font-mono);
 		text-align: start;
 	}
 	.workspace-browser-directory:is(:hover, :focus-visible) {
@@ -216,7 +216,7 @@
 		min-width: 0;
 		overflow: hidden;
 		color: var(--text);
-		font: 0.8125rem/1 var(--font-mono);
+		font: var(--text-sm)/1 var(--font-mono);
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
@@ -248,7 +248,7 @@
 		flex: 1;
 		overflow: hidden;
 		color: var(--text);
-		font-size: 0.8125rem;
+		font-size: var(--text-sm);
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
@@ -344,7 +344,7 @@
 		background: oklch(from var(--tree-kind-color) l c h / 10%);
 		padding-inline: 0.375rem;
 		color: color-mix(in oklch, var(--tree-kind-color) 82%, var(--text));
-		font-size: 0.625rem;
+		font-size: var(--text-3xs);
 		font-weight: 600;
 		line-height: 1rem;
 		text-overflow: ellipsis;
@@ -372,7 +372,7 @@
 		white-space: nowrap;
 	}
 	.tree-entry-tool {
-		font: 0.6875rem/1.25rem var(--font-mono);
+		font: var(--text-2xs)/1.25rem var(--font-mono);
 	}
 	.tree-meta {
 		display: flex;
@@ -383,7 +383,7 @@
 	}
 	.tree-date {
 		color: var(--text-muted);
-		font-size: 0.6875rem;
+		font-size: var(--text-2xs);
 		text-align: end;
 	}
 }

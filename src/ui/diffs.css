@@ -5,7 +5,7 @@
 		--diffs-font-family: var(--font-mono);
 		--diffs-header-font-family: var(--font-sans);
 		--diffs-font-features: normal;
-		--diffs-font-size: 13px;
+		--diffs-font-size: var(--text-sm);
 		--diffs-line-height: 22px;
 		--diffs-tab-size: 4;
 		--diffs-gap-block: 0px;
@@ -24,7 +24,7 @@
 
 	@media (width < 40rem) {
 		#messages :where(.pierre-diff, .pierre-code) {
-			--diffs-font-size: 12px;
+			--diffs-font-size: var(--text-xs);
 			--diffs-line-height: 18px;
 		}
 	}

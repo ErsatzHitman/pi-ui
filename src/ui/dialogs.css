@@ -71,7 +71,7 @@
 	.dialog-device-code {
 		display: block;
 		margin-block-start: 0.25rem;
-		font-size: var(--text-lg);
+		font-size: var(--text-2xl);
 		font-weight: 600;
 	}
 	.dialog-progress-messages {
@@ -107,7 +107,7 @@
 	.dialog-model-name {
 		min-width: 0;
 		overflow: hidden;
-		font: var(--text-sm)/1.25 var(--font-mono);
+		font: var(--text-base)/1.25 var(--font-mono);
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
