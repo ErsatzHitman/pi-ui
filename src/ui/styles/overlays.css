@@ -255,6 +255,17 @@
 		margin-block-start: 0.5rem;
 	}
 
+	:is(.dropdown-menu, .popover) {
+		anchor-name: --picker;
+		anchor-scope: --picker;
+	}
+
+	:is(.dropdown-menu, .popover) > [data-popover] {
+		/* Anchor to the stable wrapper, not the trigger button, so the
+		   press scale on the button cannot move the open popover. */
+		position-anchor: --picker;
+	}
+
 	:is(.dropdown-menu, .popover):has(> [data-popover]:popover-open) > button {
 		background: var(--surface-muted);
 	}

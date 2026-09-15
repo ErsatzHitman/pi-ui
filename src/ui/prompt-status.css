@@ -197,7 +197,14 @@
 		color: var(--action-primary);
 	}
 
+	.update-anchor {
+		display: flex;
+		anchor-name: --update;
+		anchor-scope: --update;
+	}
+
 	.update-popover {
+		position-anchor: --update;
 		width: 20rem;
 		max-width: calc(100vw - 2rem);
 		gap: 0.625rem;

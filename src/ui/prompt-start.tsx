@@ -9,8 +9,12 @@ export function renderPromptStart(state: AppStateSnapshot): string {
 	return syncHtml(
 		<div id="prompt-start" class="prompt-start">
 			{renderWorkspacePicker(state)}
-			{update && renderUpdateBadge(update)}
-			{update && renderUpdatePopover(update)}
+			{update && (
+				<span class="update-anchor">
+					{renderUpdateBadge(update)}
+					{renderUpdatePopover(update)}
+				</span>
+			)}
 		</div>,
 	);
 }
