@@ -9,7 +9,6 @@ export const Check = icons.icons.check;
 export const ChevronRight = icons.icons["chevron-right"];
 export const Command = icons.icons.command;
 export const Copy = icons.icons.copy;
-export const Ellipsis = icons.icons.ellipsis;
 export const FileDiff = icons.icons["file-diff"];
 export const FileUp = icons.icons["file-up"];
 export const Folder = icons.icons.folder;

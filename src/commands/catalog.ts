@@ -26,7 +26,7 @@ export type AppCommandMetadata = {
 	id: AppCommandId;
 	title: string;
 	description: string;
-	shortcut: string;
+	shortcut?: string;
 };
 
 export const appCommandCatalog: AppCommandMetadata[] = [
@@ -58,7 +58,6 @@ export const appCommandCatalog: AppCommandMetadata[] = [
 		id: "session-tree",
 		title: "Session tree",
 		description: "Navigate and branch within the current session.",
-		shortcut: "",
 	},
 	{
 		id: "command-palette",
@@ -70,19 +69,16 @@ export const appCommandCatalog: AppCommandMetadata[] = [
 		id: "change-code-theme",
 		title: "Change code theme",
 		description: "Choose syntax colors for code and diffs.",
-		shortcut: "",
 	},
 	{
 		id: "change-fonts",
 		title: "Change fonts",
 		description: "Choose fonts for the interface and code.",
-		shortcut: "",
 	},
 	{
 		id: "toggle-keybind-hints",
 		title: "Toggle keybind hints",
 		description: "Show or hide keyboard shortcut labels.",
-		shortcut: "",
 	},
 	{
 		id: "toggle-minimal-mode",
@@ -100,7 +96,6 @@ export const appCommandCatalog: AppCommandMetadata[] = [
 		id: "toggle-toolbar",
 		title: "Toggle toolbar",
 		description: "Hide the toolbar.",
-		shortcut: "",
 	},
 	{
 		id: "switch-model",
@@ -142,13 +137,11 @@ export const appCommandCatalog: AppCommandMetadata[] = [
 		id: "login",
 		title: "Log in",
 		description: "Add a subscription or API key.",
-		shortcut: "",
 	},
 	{
 		id: "logout",
 		title: "Log out",
 		description: "Remove stored provider credentials.",
-		shortcut: "",
 	},
 	{
 		id: "change-workspace",
@@ -160,6 +153,5 @@ export const appCommandCatalog: AppCommandMetadata[] = [
 		id: "fork-session-to-workspace",
 		title: "Fork session to workspace",
 		description: "Fork this session and continue it in another workspace.",
-		shortcut: "",
 	},
 ];

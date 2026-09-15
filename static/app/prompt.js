@@ -3,10 +3,6 @@ export function promptInput() {
 	return input instanceof HTMLTextAreaElement ? input : undefined;
 }
 
-export function promptValue() {
-	return promptInput()?.value ?? "";
-}
-
 export function setPromptValue(value) {
 	const input = promptInput();
 	if (!input) return;

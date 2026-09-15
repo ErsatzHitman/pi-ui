@@ -4,7 +4,6 @@ import { operatingSystem } from "../utils/platform.ts";
 function shortcutGlyph(part: string): string {
 	const key = part.toLowerCase();
 	if (key === "alt") return "⌥";
-	if (key === "ctrl") return "⌃";
 	if (key === "shift") return "⇧";
 	return part;
 }
@@ -13,11 +12,10 @@ export function ShortcutKbd(props: { shortcut: string }) {
 	const symbolic = operatingSystem === "darwin";
 	const label = symbolic ? formatShortcut(props.shortcut) : undefined;
 	return (
-		<span class="shortcut" data-keybind-hint aria-label={label} title={label}>
+		<span class="shortcut" data-keybind-hint title={label}>
 			{shortcutParts(props.shortcut).map((part) => (
 				<kbd class="kbd">{symbolic ? shortcutGlyph(part) : part}</kbd>
 			))}
-			<span hidden aria-hidden="true" />
 		</span>
 	);
 }

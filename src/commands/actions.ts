@@ -37,7 +37,7 @@ function openTreeAction(): string {
 	return `@post('${endpoints.treeOpen}', { payload: {} })`;
 }
 
-export function openWorkspaceDialogAction(
+function openWorkspaceDialogAction(
 	closeCommandDialog = false,
 	action: "open" | "fork" = "open",
 ): string {
@@ -60,7 +60,7 @@ export function toggleToolOutputAction(): string {
 	return `$_toolOutputHidden = !$_toolOutputHidden; @post('${endpoints.toolOutput}', { payload: { toolOutputHidden: $_toolOutputHidden } })`;
 }
 
-export function toggleToolbarAction(): string {
+function toggleToolbarAction(): string {
 	return `document.body.setAttribute('data-toolbar-animated', ''); document.body.toggleAttribute('data-toolbar-hidden'); @post('${endpoints.toolbar}', { payload: { toolbarHidden: document.body.hasAttribute('data-toolbar-hidden') } })`;
 }
 

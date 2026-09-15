@@ -233,10 +233,6 @@ function emptyChatHints(): AppKeybindHint[] {
 	});
 	return [
 		...commandHints,
-		{
-			keys: formatShortcut(activeKeybind("cycle-thinking")),
-			description: "Cycle thinking level.",
-		},
 		{ keys: "@", description: "Attach a file path." },
 		{ keys: "/", description: "Open slash commands and skills." },
 	];
