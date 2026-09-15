@@ -190,22 +190,32 @@ export function restoreAnchor() {
 		messages.contains(retainedMessage) &&
 		saved.offset !== undefined
 	) {
-		const currentOffset =
-			retainedMessage.getBoundingClientRect().top -
-			messages.getBoundingClientRect().top;
 		const targetOffset = saved.offset - saved.userScrollDelta;
-		messages.scrollTop = retainedAnchorScrollTop(
-			messages.scrollTop,
-			currentOffset,
-			targetOffset,
-		);
-	} else {
-		messages.scrollTop =
-			saved.scrollTop +
-			saved.userScrollDelta +
-			messages.scrollHeight -
-			saved.scrollHeight;
+		const applyAnchor = () => {
+			if (!messages.contains(retainedMessage)) return;
+			const currentOffset =
+				retainedMessage.getBoundingClientRect().top -
+				messages.getBoundingClientRect().top;
+			messages.scrollTop = retainedAnchorScrollTop(
+				messages.scrollTop,
+				currentOffset,
+				targetOffset,
+			);
+			messages.style.removeProperty("overflow-anchor");
+			state.scrollTop = messages.scrollTop;
+			updateScrollControl();
+		};
+		applyAnchor();
+		// Datastar applies `data-show` after inserting the batch, which shrinks the
+		// rows above the anchor. Re-measure once the DOM has settled.
+		requestAnimationFrame(applyAnchor);
+		return;
 	}
+	messages.scrollTop =
+		saved.scrollTop +
+		saved.userScrollDelta +
+		messages.scrollHeight -
+		saved.scrollHeight;
 	messages.style.removeProperty("overflow-anchor");
 	state.scrollTop = messages.scrollTop;
 	updateScrollControl();
