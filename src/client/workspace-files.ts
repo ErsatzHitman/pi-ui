@@ -23,6 +23,14 @@ type WorkspaceFilesOptions = {
 	initialWorkspacePath: string;
 };
 
+export function focusTreeHost(treeHost: HTMLElement): void {
+	requestAnimationFrame(() => {
+		const container = treeHost.querySelector("file-tree-container");
+		const root = container?.shadowRoot?.querySelector<HTMLElement>('[role="tree"]');
+		(root ?? treeHost).focus({ preventScroll: true });
+	});
+}
+
 export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 	const api = createWorkspaceFilesApi(options.endpoint);
 	const treeHost = requiredElement("workspace-file-tree");
@@ -629,12 +637,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		const path =
 			tree.getSelectedPaths()[0] ?? tree.getFocusedPath() ?? loadedPaths[0];
 		if (path) tree.scrollToPath(path, { focus: true });
-		requestAnimationFrame(() => {
-			const container = treeHost.querySelector("file-tree-container");
-			const root =
-				container?.shadowRoot?.querySelector<HTMLElement>('[role="tree"]');
-			(root ?? treeHost).focus({ preventScroll: true });
-		});
+		focusTreeHost(treeHost);
 	}
 
 	function focusEditor(): void {

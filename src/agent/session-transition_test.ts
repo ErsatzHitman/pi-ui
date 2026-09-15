@@ -7,13 +7,11 @@ import { DatastarClientHub } from "../server/datastar-client-hub.ts";
 import { sessionTransitionResponse } from "../server/routes/sessions.ts";
 import { AppStore } from "../state/app-store.ts";
 import { assertStringExcludes } from "../testing/assertions.ts";
+import { readUntil, responseReader } from "../testing/streams.ts";
 import { renderMessages } from "../ui/messages.tsx";
 import { renderSessionPicker } from "../ui/pickers.tsx";
 import { renderSessionSidebar } from "../ui/session-sidebar.tsx";
-import {
-	renderSessionTransition,
-	resumeSessionAction,
-} from "../ui/session-transition.tsx";
+import { renderSessionTransition } from "../ui/session-transition.tsx";
 import { appRenderSnapshot } from "../ui/test-fixtures.ts";
 import { renderToolbar } from "../ui/toolbar.tsx";
 import { UiRenderer } from "../ui/ui-renderer.ts";
@@ -79,21 +77,6 @@ test("session request indicators lock controls without hiding the transcript", (
 	assertStringIncludes(messages, "$_sessionTransitionLoading");
 });
 
-test("shared resume action drives every immediate loading signal", () => {
-	const action = resumeSessionAction("/sessions/one.json", {
-		closeDialog: true,
-	});
-	for (const expected of [
-		"$_sessionLoading",
-		"$_sessionTransitionLoading",
-		'payload: { sessionPath: "/sessions/one.json" }',
-		"/sessions/resume",
-		"session-dialog",
-	]) {
-		assertStringIncludes(action, expected);
-	}
-});
-
 test("empty chat shows login instead of recent sessions without auth", () => {
 	const html = renderMessages(
 		[],
@@ -149,17 +132,8 @@ test("resume renderers share loading behavior and disable controls", () => {
 });
 
 test("session picker command state morphs on the app stream", async () => {
-	const state = new AppStore();
-	const renderer = new UiRenderer(state, new DatastarClientHub());
-	const controller = new AbortController();
+	const { state, controller, read } = openTransitionStream();
 	try {
-		const response = renderer.createStream(controller.signal);
-		state.setSessionTransition({
-			status: "loading",
-			generation: 1,
-			targetPath: "/sessions/one.jsonl",
-			overlay: true,
-		});
 		state.setSessionCatalog([
 			{
 				path: "/sessions/one.jsonl",
@@ -171,9 +145,7 @@ test("session picker command state morphs on the app stream", async () => {
 		]);
 		state.setSessionTransition({ status: "idle", generation: 1 });
 
-		const output = await readUntil(response, (text) =>
-			text.includes("Fresh session"),
-		);
+		const output = await read((text) => text.includes("Fresh session"));
 		assertStringExcludes(output, "component.refresh");
 	} finally {
 		controller.abort();
@@ -181,22 +153,11 @@ test("session picker command state morphs on the app stream", async () => {
 });
 
 test("completed session transition scrolls the transcript to bottom", async () => {
-	const state = new AppStore();
-	const renderer = new UiRenderer(state, new DatastarClientHub());
-	const controller = new AbortController();
+	const { state, controller, read } = openTransitionStream();
 	try {
-		const response = renderer.createStream(controller.signal);
-		state.setSessionTransition({
-			status: "loading",
-			generation: 1,
-			targetPath: "/sessions/one.jsonl",
-			overlay: true,
-		});
 		state.setSessionTransition({ status: "idle", generation: 1 });
 
-		await readUntil(response, (text) =>
-			text.includes("messageScroll.scrollBottom()"),
-		);
+		await read((text) => text.includes("messageScroll.scrollBottom()"));
 	} finally {
 		controller.abort();
 	}
@@ -214,19 +175,25 @@ test("session transition responses use meaningful statuses", () => {
 	}
 });
 
-async function readUntil(
-	response: Response,
-	complete: (text: string) => boolean,
-): Promise<string> {
-	const reader = response.body?.getReader();
-	if (!reader) throw new Error("Missing response body");
-	const decoder = new TextDecoder();
-	let output = "";
-	for (let index = 0; index < 30; index++) {
-		const chunk = await reader.read();
-		if (chunk.done) break;
-		output += decoder.decode(chunk.value, { stream: true });
-		if (complete(output)) return output;
-	}
-	throw new Error("Expected transition stream output was not received");
+function openTransitionStream() {
+	const state = new AppStore();
+	const renderer = new UiRenderer(state, new DatastarClientHub());
+	const controller = new AbortController();
+	const response = renderer.createStream(controller.signal);
+	state.setSessionTransition({
+		status: "loading",
+		generation: 1,
+		targetPath: "/sessions/one.jsonl",
+		overlay: true,
+	});
+	return {
+		state,
+		controller,
+		read: (complete: (text: string) => boolean) =>
+			readUntil(
+				responseReader(response),
+				complete,
+				"Expected transition stream output was not received",
+			),
+	};
 }

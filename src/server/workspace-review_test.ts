@@ -118,11 +118,8 @@ test("commit metadata and name-status parsing preserve Git data", () => {
 });
 
 test("workspace review combines repository files with tracked and untracked changes", async () => {
-	const repository = await makeTempDir();
+	const repository = await makeGitRepository();
 	try {
-		await git(repository, "init", "--quiet");
-		await git(repository, "config", "user.email", "pi-ui@example.invalid");
-		await git(repository, "config", "user.name", "pi-ui test");
 		await mkdir(`${repository}/src`);
 		await Bun.write(`${repository}/src/old.ts`, "export const old = 1;\n");
 		await Bun.write(`${repository}/README.md`, "before\n");
@@ -200,11 +197,8 @@ test("workspace review combines repository files with tracked and untracked chan
 
 for (const committed of [false, true]) {
 	test(`${committed ? "commit" : "working-tree"} patches preserve blank context and whitespace`, async () => {
-		const repository = await makeTempDir();
+		const repository = await makeGitRepository();
 		try {
-			await git(repository, "init", "--quiet");
-			await git(repository, "config", "user.email", "pi-ui@example.invalid");
-			await git(repository, "config", "user.name", "pi-ui test");
 			await Bun.write(`${repository}/tracked.txt`, "before\n\t \n\n");
 			await git(repository, "add", ".");
 			await git(repository, "commit", "--quiet", "-m", "initial");
@@ -238,9 +232,8 @@ for (const committed of [false, true]) {
 }
 
 test("large untracked trees stay metadata-only; explicit diffs are bounded and cancellable", async () => {
-	const repository = await makeTempDir();
+	const repository = await makeGitRepository();
 	try {
-		await git(repository, "init", "--quiet");
 		await Bun.write(
 			`${repository}/node_modules/large.js`,
 			"x".repeat(maximumWorkspaceDiffBytes * 2),
@@ -305,11 +298,8 @@ test("large untracked trees stay metadata-only; explicit diffs are bounded and c
 });
 
 test("workspace review discards one tracked or untracked file at a time", async () => {
-	const repository = await makeTempDir();
+	const repository = await makeGitRepository();
 	try {
-		await git(repository, "init", "--quiet");
-		await git(repository, "config", "user.email", "pi-ui@example.invalid");
-		await git(repository, "config", "user.name", "pi-ui test");
 		await Bun.write(`${repository}/keep.txt`, "before\n");
 		await Bun.write(`${repository}/old.txt`, "rename me\n");
 		await git(repository, "add", ".");
@@ -350,6 +340,14 @@ test("workspace review reports non-repositories without throwing", async () => {
 		await rm(workspace, { recursive: true });
 	}
 });
+
+async function makeGitRepository(): Promise<string> {
+	const repository = await makeTempDir();
+	await git(repository, "init", "--quiet");
+	await git(repository, "config", "user.email", "pi-ui@example.invalid");
+	await git(repository, "config", "user.name", "pi-ui test");
+	return repository;
+}
 
 async function git(cwd: string, ...args: string[]): Promise<void> {
 	const output = await outputCommand("git", {

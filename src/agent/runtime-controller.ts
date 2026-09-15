@@ -7,6 +7,7 @@ import {
 	createAgentSessionServices,
 	getAgentDir,
 	SessionManager,
+	type SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 
 import { sessionPerformance } from "../perf/session-performance.ts";
@@ -462,18 +463,11 @@ export class RuntimeController {
 		const active = this.isCurrentRuntimeActive();
 		if (active || !persisted) {
 			const cwd = session.sessionManager.getCwd();
-			await this.leaveCurrentRuntimeForReplacement();
-			this.state.resetChat();
-			const runtime = await this.dependencies.createRuntime(this.runtimeFactory, {
+			await this.replaceRuntime(
 				cwd,
-				agentDir: this.dependencies.getAgentDir(),
-				sessionManager: this.dependencies.createSessionManager(
-					cwd,
-					this.sessionDir,
-				),
-				sessionStartEvent: { type: "session_start", reason: "new" },
-			});
-			this.adoptRuntime(runtime);
+				this.dependencies.createSessionManager(cwd, this.sessionDir),
+				{ type: "session_start", reason: "new" },
+			);
 		} else {
 			this.resetChatOnInvalidation = true;
 			let result: { cancelled: boolean };
@@ -503,22 +497,33 @@ export class RuntimeController {
 	private async createNewTemporarySession(): Promise<boolean> {
 		const previousSessionFile = this.runtime.session.sessionManager.getSessionFile();
 		const cwd = this.runtime.session.sessionManager.getCwd();
-		await this.leaveCurrentRuntimeForReplacement();
-
-		this.state.resetChat();
-		const runtime = await this.dependencies.createRuntime(this.runtimeFactory, {
+		await this.replaceRuntime(
 			cwd,
-			agentDir: this.dependencies.getAgentDir(),
-			sessionManager: this.dependencies.createMemorySessionManager(cwd),
-			sessionStartEvent: {
+			this.dependencies.createMemorySessionManager(cwd),
+			{
 				type: "session_start",
 				reason: "new",
 				previousSessionFile,
 			},
-		});
-		this.adoptRuntime(runtime);
+		);
 		await this.bindSession();
 		return true;
+	}
+
+	private async replaceRuntime(
+		cwd: string,
+		sessionManager: SessionManager,
+		sessionStartEvent: SessionStartEvent,
+	): Promise<void> {
+		await this.leaveCurrentRuntimeForReplacement();
+		this.state.resetChat();
+		const runtime = await this.dependencies.createRuntime(this.runtimeFactory, {
+			cwd,
+			agentDir: this.dependencies.getAgentDir(),
+			sessionManager,
+			sessionStartEvent,
+		});
+		this.adoptRuntime(runtime);
 	}
 
 	async listSessions(): Promise<void> {

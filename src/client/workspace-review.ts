@@ -29,7 +29,7 @@ import {
 	type WorkspaceReviewSnapshot,
 } from "../workspace-review-types.ts";
 import { requiredButton, requiredElement } from "./dom.ts";
-import { createWorkspaceFiles } from "./workspace-files.ts";
+import { createWorkspaceFiles, focusTreeHost } from "./workspace-files.ts";
 import { createWorkspaceReviewApi } from "./workspace-review-api.ts";
 import {
 	createWorkspaceReviewComments,
@@ -877,12 +877,7 @@ function focusGit(): void {
 			tree.getFocusedPath() ??
 			snapshot.changes[0]?.path;
 		if (path) tree.scrollToPath(path, { focus: true });
-		requestAnimationFrame(() => {
-			const container = treeHost.querySelector("file-tree-container");
-			const root =
-				container?.shadowRoot?.querySelector<HTMLElement>('[role="tree"]');
-			(root ?? treeHost).focus({ preventScroll: true });
-		});
+		focusTreeHost(treeHost);
 	});
 }
 

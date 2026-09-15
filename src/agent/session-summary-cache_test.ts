@@ -9,11 +9,8 @@ import { listCachedSessions } from "./session-catalog.ts";
 import { readSessionSummaryCache } from "./session-summary-cache.ts";
 
 test("sessions reuse and incrementally update the summary cache", async () => {
-	const root = await makeTempDir();
-	const sessionsRoot = join(root, "sessions");
-	const workspace = join(sessionsRoot, "workspace");
+	const { root, sessionsRoot, workspace, cachePath } = await makeSessionDirs();
 	const sessionPath = join(workspace, "session.jsonl");
-	const cachePath = join(root, "cache", "session-index.json");
 	await mkdir(workspace, { recursive: true });
 	try {
 		await Bun.write(
@@ -63,10 +60,7 @@ test("sessions reuse and incrementally update the summary cache", async () => {
 });
 
 test("the cached catalog indexes every session and drops deleted files", async () => {
-	const root = await makeTempDir();
-	const sessionsRoot = join(root, "sessions");
-	const workspace = join(sessionsRoot, "workspace");
-	const cachePath = join(root, "cache", "session-index.json");
+	const { root, sessionsRoot, workspace, cachePath } = await makeSessionDirs();
 	await mkdir(workspace, { recursive: true });
 	try {
 		for (const index of [1, 2]) {
@@ -102,9 +96,7 @@ test("the cached catalog indexes every session and drops deleted files", async (
 });
 
 test("flat custom session dirs and symlinked workspaces are discovered", async () => {
-	const root = await makeTempDir();
-	const sessionsRoot = join(root, "sessions");
-	const cachePath = join(root, "cache", "session-index.json");
+	const { root, sessionsRoot, cachePath } = await makeSessionDirs();
 	await mkdir(sessionsRoot, { recursive: true });
 	try {
 		// A custom session dir stores files directly in the root.
@@ -155,10 +147,7 @@ test("flat custom session dirs and symlinked workspaces are discovered", async (
 });
 
 test("attachment references produce readable session titles", async () => {
-	const root = await makeTempDir();
-	const sessionsRoot = join(root, "sessions");
-	const workspace = join(sessionsRoot, "workspace");
-	const cachePath = join(root, "cache", "session-index.json");
+	const { root, sessionsRoot, workspace, cachePath } = await makeSessionDirs();
 	await mkdir(workspace, { recursive: true });
 	try {
 		const prompts = [
@@ -197,11 +186,8 @@ test("attachment references produce readable session titles", async () => {
 });
 
 test("a corrupt summary cache is rebuilt", async () => {
-	const root = await makeTempDir();
-	const sessionsRoot = join(root, "sessions");
-	const workspace = join(sessionsRoot, "workspace");
+	const { root, sessionsRoot, workspace, cachePath } = await makeSessionDirs();
 	const sessionPath = join(workspace, "session.jsonl");
-	const cachePath = join(root, "cache", "session-index.json");
 	await mkdir(workspace, { recursive: true });
 	await mkdir(join(root, "cache"), { recursive: true });
 	try {
@@ -227,6 +213,14 @@ test("a corrupt summary cache is rebuilt", async () => {
 		await rm(root, { recursive: true });
 	}
 });
+
+async function makeSessionDirs() {
+	const root = await makeTempDir();
+	const sessionsRoot = join(root, "sessions");
+	const workspace = join(sessionsRoot, "workspace");
+	const cachePath = join(root, "cache", "session-index.json");
+	return { root, sessionsRoot, workspace, cachePath };
+}
 
 function message(role: "assistant" | "user", text: string, timestamp: number) {
 	return {

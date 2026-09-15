@@ -11,6 +11,7 @@ import { SessionCatalog } from "../agent/session-catalog.ts";
 import { DatastarClientHub } from "../server/datastar-client-hub.ts";
 import { assertStringExcludes as assertNotIncludes } from "../testing/assertions.ts";
 import { collectElementPatches } from "../testing/element-patches.ts";
+import { readUntil, responseReader } from "../testing/streams.ts";
 import { projectBackendSignals } from "../ui/backend-signals.ts";
 import { renderMarkdownFinal } from "../ui/markdown.tsx";
 import type { MessageRenderServiceOptions } from "../ui/message-render-service.ts";
@@ -83,20 +84,15 @@ test("restored fallback content patches before bounded enhancements", async () =
 });
 
 test("ordinary commits exclude finalized assistant messages", async () => {
-	let resolveEnhancement: ((html: string) => void) | undefined;
-	const state = createState({
-		renderMarkdownFinal: () =>
-			new Promise<string>((resolve) => (resolveEnhancement = resolve)),
-	});
+	const gate = gatedMarkdownState();
+	const { state } = gate;
 	const controller = new AbortController();
 	try {
 		const response = state.createStream(controller.signal);
 		state.replaceMessages([markdownMessage("lightweight source")]);
-		while (!resolveEnhancement) await Promise.resolve();
-		resolveEnhancement("<p>large finalized HTML</p>");
-		await waitFor(() => projectedMessages(state)[0].presentationState === "final");
-		state.setUsage({ text: "$1.000 • 1 token", costText: "$1.000" });
-		const patches = await collectElementPatches(response, 4);
+		while (!gate.ready) await Promise.resolve();
+		gate.resolve("<p>large finalized HTML</p>");
+		const patches = await collectFinalizedPatches(state, response);
 
 		assertIncludes(patches.patches[2], "large finalized HTML");
 		assertIncludes(patches.patches[2], "data-ignore-morph");
@@ -124,9 +120,7 @@ test("ordinary commits exclude finalized tool messages", async () => {
 				format: "diff",
 			},
 		]);
-		await waitFor(() => projectedMessages(state)[0].presentationState === "final");
-		state.setUsage({ text: "$1.000 • 1 token", costText: "$1.000" });
-		const patches = await collectElementPatches(response, 4);
+		const patches = await collectFinalizedPatches(state, response);
 
 		assertIncludes(patches.patches[2], "highlighted edit");
 		assertNotIncludes(patches.patches[3], "highlighted edit");
@@ -234,16 +228,12 @@ test("session transitions patch signals and replace only the transcript", async 
 });
 
 test("session loading clears after fallback and before enhancement", async () => {
-	let resolveEnhancement: ((html: string) => void) | undefined;
-	const state = createState({
-		renderMarkdownFinal: () =>
-			new Promise<string>((resolve) => (resolveEnhancement = resolve)),
-	});
+	const gate = gatedMarkdownState();
+	const { state } = gate;
 	const controller = new AbortController();
 	try {
 		const response = state.createStream(controller.signal);
-		const reader = response.body?.getReader();
-		if (!reader) throw new Error("Missing response body");
+		const reader = responseReader(response);
 		state.setSessionTransition({
 			status: "loading",
 			generation: 1,
@@ -270,7 +260,7 @@ test("session loading clears after fallback and before enhancement", async () =>
 		if (!(loading >= 0 && fallback > loading && idle > fallback)) {
 			throw new Error("Expected loading → fallback → idle ordering");
 		}
-		resolveEnhancement?.("<p>enhancement ready</p>");
+		gate.resolve("<p>enhancement ready</p>");
 		const enhanced = await readUntil(reader, (text) =>
 			text.includes("enhancement ready"),
 		);
@@ -351,14 +341,7 @@ test("theme changes highlight only loaded messages and invalidate older cached p
 });
 
 test("older messages insert after the trigger before rearming it", async () => {
-	const state = createState();
-	state.replaceMessages(
-		Array.from({ length: 130 }, (_, index) => ({
-			role: "user" as const,
-			text: `message ${index}`,
-			timestamp,
-		})),
-	);
+	const state = stateWithMessages(130);
 	const controller = new AbortController();
 	try {
 		const reader = await openInitializedStateStream(state, controller.signal);
@@ -386,14 +369,7 @@ test("older messages insert after the trigger before rearming it", async () => {
 });
 
 test("trimming removes old DOM messages with one structural selector", async () => {
-	const state = createState();
-	state.replaceMessages(
-		Array.from({ length: 130 }, (_, index) => ({
-			role: "user" as const,
-			text: `message ${index}`,
-			timestamp,
-		})),
-	);
+	const state = stateWithMessages(130);
 	const controller = new AbortController();
 	try {
 		const reader = await openInitializedStateStream(state, controller.signal);
@@ -448,12 +424,7 @@ test("repaging replaces the transcript and moves to the recent page", async () =
 });
 
 test("replacement discards stale enhancement completion", async () => {
-	const gates: Array<{ text: string; resolve: (html: string) => void }> = [];
-	const state = createState({
-		enhancementConcurrency: 1,
-		renderMarkdownFinal: (text) =>
-			new Promise<string>((resolve) => gates.push({ text, resolve })),
-	});
+	const { state, gates } = gatedEnhancementQueue();
 	connect(state);
 	state.replaceMessages([markdownMessage("session A")]);
 	while (gates.length < 1) await Promise.resolve();
@@ -690,14 +661,7 @@ test("a thrown update still commits its completed mutations", async () => {
 		} catch {
 			// The mutator error is expected; already-applied state remains authoritative.
 		}
-		const output = await readUntil(
-			reader,
-			(text) =>
-				text.includes("event: datastar-patch-elements") &&
-				text.includes("event: datastar-patch-signals"),
-		);
-		assertEqual(count(output, "event: datastar-patch-elements"), 1);
-		assertEqual(count(output, "event: datastar-patch-signals"), 1);
+		await readElementAndSignalPatches(reader);
 	} finally {
 		controller.abort();
 	}
@@ -714,16 +678,8 @@ test("headless updates initialize one current view and tolerate disconnect", asy
 	state.setWorkspacePath("/tmp/headless");
 	const controller = new AbortController();
 	const response = state.createStream(controller.signal);
-	const reader = response.body?.getReader();
-	if (!reader) throw new Error("Missing response body");
-	const output = await readUntil(
-		reader,
-		(text) =>
-			text.includes("event: datastar-patch-elements") &&
-			text.includes("event: datastar-patch-signals"),
-	);
-	assertEqual(count(output, "event: datastar-patch-elements"), 1);
-	assertEqual(count(output, "event: datastar-patch-signals"), 1);
+	const reader = responseReader(response);
+	await readElementAndSignalPatches(reader);
 
 	controller.abort();
 	state.setActivityText("disconnected");
@@ -737,8 +693,7 @@ test("headless updates initialize one current view and tolerate disconnect", asy
 
 	const reconnect = new AbortController();
 	try {
-		const reader = state.createStream(reconnect.signal).body?.getReader();
-		if (!reader) throw new Error("Missing response body");
+		const reader = responseReader(state.createStream(reconnect.signal));
 		const output = await readUntil(reader, (text) =>
 			text.includes("event: datastar-patch-signals"),
 		);
@@ -809,12 +764,7 @@ test("reconnecting during a turn resumes streaming and final highlighting", asyn
 });
 
 test("last-client disconnect discards in-flight rendering before reconnect", async () => {
-	const gates: Array<{ text: string; resolve: (html: string) => void }> = [];
-	const state = createState({
-		enhancementConcurrency: 1,
-		renderMarkdownFinal: (text) =>
-			new Promise<string>((resolve) => gates.push({ text, resolve })),
-	});
+	const { state, gates } = gatedEnhancementQueue();
 	const first = connect(state);
 	state.replaceMessages([markdownMessage("old content")]);
 	await waitFor(() => gates.length === 1);
@@ -898,24 +848,16 @@ test("workspace review snapshots travel through the app stream", async () => {
 		revision: "review-1",
 	});
 	state.flush();
-	const controller = new AbortController();
-	try {
-		const response = state.createStream(controller.signal);
-		const reader = response.body?.getReader();
-		if (!reader) throw new Error("Missing response body");
-		const output = await readUntil(
-			reader,
-			(text) => text.includes("workspace-review-data") && text.includes("review-1"),
-		);
-		assertIncludes(output, '"branch":"main"');
-		const signals = projectBackendSignals(state.snapshot());
-		assertEqual(signals._workspaceReviewChangeCount, 1);
-		assertEqual(signals._workspaceReviewStatsKnown, false);
-		assertIncludes(output, 'id="workspace-review-data"');
-		assertNotIncludes(output, 'id="workspace-review-data-region"');
-	} finally {
-		controller.abort();
-	}
+	const output = await readStateOutput(
+		state,
+		(text) => text.includes("workspace-review-data") && text.includes("review-1"),
+	);
+	assertIncludes(output, '"branch":"main"');
+	const signals = projectBackendSignals(state.snapshot());
+	assertEqual(signals._workspaceReviewChangeCount, 1);
+	assertEqual(signals._workspaceReviewStatsKnown, false);
+	assertIncludes(output, 'id="workspace-review-data"');
+	assertNotIncludes(output, 'id="workspace-review-data-region"');
 });
 
 test("initial streams reopen active backend dialogs", async () => {
@@ -927,21 +869,13 @@ test("initial streams reopen active backend dialogs", async () => {
 		progress: [],
 	});
 	state.flush();
-	const controller = new AbortController();
-	try {
-		const response = state.createStream(controller.signal);
-		const reader = response.body?.getReader();
-		if (!reader) throw new Error("Missing response body");
-		const output = await readUntil(
-			reader,
-			(text) =>
-				text.includes("auth-dialog") &&
-				text.includes("if (dialog && !dialog.open) dialog.showModal()"),
-		);
-		assertIncludes(output, "if (dialog && !dialog.open) dialog.showModal()");
-	} finally {
-		controller.abort();
-	}
+	const output = await readStateOutput(
+		state,
+		(text) =>
+			text.includes("auth-dialog") &&
+			text.includes("if (dialog && !dialog.open) dialog.showModal()"),
+	);
+	assertIncludes(output, "if (dialog && !dialog.open) dialog.showModal()");
 });
 
 test("app stream refreshes current and background session statuses", async () => {
@@ -963,8 +897,7 @@ test("app stream refreshes current and background session statuses", async () =>
 	};
 	try {
 		const response = state.renderer.createStream(controller.signal);
-		const reader = response.body?.getReader();
-		if (!reader) throw new Error("Missing response body");
+		const reader = responseReader(response);
 		await readUntil(reader, (text) => text.includes("event: datastar-patch-signals"));
 
 		state.update(
@@ -1147,6 +1080,45 @@ function createState(options: MessageRenderServiceOptions = {}): TestStore {
 	});
 }
 
+function stateWithMessages(count: number): TestStore {
+	const state = createState();
+	state.replaceMessages(
+		Array.from({ length: count }, (_, index) => ({
+			role: "user" as const,
+			text: `message ${index}`,
+			timestamp,
+		})),
+	);
+	return state;
+}
+
+function gatedMarkdownState() {
+	let resolveEnhancement: ((html: string) => void) | undefined;
+	const state = createState({
+		renderMarkdownFinal: () =>
+			new Promise<string>((resolve) => (resolveEnhancement = resolve)),
+	});
+	return {
+		state,
+		get ready(): boolean {
+			return resolveEnhancement !== undefined;
+		},
+		resolve(html: string): void {
+			resolveEnhancement?.(html);
+		},
+	};
+}
+
+function gatedEnhancementQueue() {
+	const gates: Array<{ text: string; resolve: (html: string) => void }> = [];
+	const state = createState({
+		enhancementConcurrency: 1,
+		renderMarkdownFinal: (text) =>
+			new Promise<string>((resolve) => gates.push({ text, resolve })),
+	});
+	return { state, gates };
+}
+
 const connections: AbortController[] = [];
 afterEach(() => {
 	for (const controller of connections.splice(0)) controller.abort();
@@ -1183,25 +1155,38 @@ async function openInitializedStateStream(
 	state: TestStore,
 	signal: AbortSignal,
 ): Promise<ReadableStreamDefaultReader<Uint8Array>> {
-	const reader = state.createStream(signal).body?.getReader();
-	if (!reader) throw new Error("Missing response body");
+	const reader = responseReader(state.createStream(signal));
 	await readUntil(reader, (text) => text.includes("event: datastar-patch-signals"));
 	return reader;
 }
 
-async function readUntil(
-	reader: ReadableStreamDefaultReader<Uint8Array>,
+async function readStateOutput(
+	state: TestStore,
 	complete: (text: string) => boolean,
 ): Promise<string> {
-	const decoder = new TextDecoder();
-	let output = "";
-	for (let index = 0; index < 30; index += 1) {
-		const chunk = await reader.read();
-		if (chunk.done) break;
-		output += decoder.decode(chunk.value, { stream: true });
-		if (complete(output)) return output;
-	}
-	throw new Error("Expected stream output was not received");
+	const controller = new AbortController();
+	connections.push(controller);
+	return readUntil(responseReader(state.createStream(controller.signal)), complete);
+}
+
+async function readElementAndSignalPatches(
+	reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<string> {
+	const output = await readUntil(
+		reader,
+		(text) =>
+			text.includes("event: datastar-patch-elements") &&
+			text.includes("event: datastar-patch-signals"),
+	);
+	assertEqual(count(output, "event: datastar-patch-elements"), 1);
+	assertEqual(count(output, "event: datastar-patch-signals"), 1);
+	return output;
+}
+
+async function collectFinalizedPatches(state: TestStore, response: Response) {
+	await waitFor(() => projectedMessages(state)[0].presentationState === "final");
+	state.setUsage({ text: "$1.000 • 1 token", costText: "$1.000" });
+	return collectElementPatches(response, 4);
 }
 
 function count(value: string, search: string): number {

@@ -72,11 +72,26 @@ function resumeHarness(
 	};
 }
 
+async function expectResume(
+	fake: ReturnType<typeof resumeHarness>,
+	expected: {
+		path?: string;
+		accepted?: boolean;
+		logicalOpenCount: number;
+		events: string[];
+	},
+): Promise<void> {
+	assertEqual(
+		await executeSessionResume(expected.path ?? "session.jsonl", fake.operations),
+		expected.accepted ?? true,
+	);
+	assertEqual(fake.logicalOpenCount, expected.logicalOpenCount);
+	assertEvents(fake.events, expected.events);
+}
+
 test("idle persisted resume delegates to one SDK logical open", async () => {
 	const fake = resumeHarness({ streaming: false, persisted: true });
-	assertEqual(await executeSessionResume("session.jsonl", fake.operations), true);
-	assertEqual(fake.logicalOpenCount, 1);
-	assertEvents(fake.events, ["switch"]);
+	await expectResume(fake, { logicalOpenCount: 1, events: ["switch"] });
 });
 
 test("background activation performs no session open", async () => {
@@ -85,16 +100,19 @@ test("background activation performs no session open", async () => {
 		{ streaming: true, persisted: true },
 		{ backgroundPath: target },
 	);
-	assertEqual(await executeSessionResume("./session.jsonl", fake.operations), true);
-	assertEqual(fake.logicalOpenCount, 0);
-	assertEvents(fake.events, ["activate-background"]);
+	await expectResume(fake, {
+		path: "./session.jsonl",
+		logicalOpenCount: 0,
+		events: ["activate-background"],
+	});
 });
 
 test("streaming foreground opens one manager and backgrounds the runtime", async () => {
 	const fake = resumeHarness({ streaming: true, persisted: true });
-	assertEqual(await executeSessionResume("session.jsonl", fake.operations), true);
-	assertEqual(fake.logicalOpenCount, 1);
-	assertEvents(fake.events, ["open", "background", "create"]);
+	await expectResume(fake, {
+		logicalOpenCount: 1,
+		events: ["open", "background", "create"],
+	});
 });
 
 test("observed lifecycle preserves a persisted runtime when SDK streaming is false", async () => {
@@ -103,9 +121,10 @@ test("observed lifecycle preserves a persisted runtime when SDK streaming is fal
 		observedRunning: true,
 		persisted: true,
 	});
-	assertEqual(await executeSessionResume("session.jsonl", fake.operations), true);
-	assertEqual(fake.logicalOpenCount, 1);
-	assertEvents(fake.events, ["open", "background", "create"]);
+	await expectResume(fake, {
+		logicalOpenCount: 1,
+		events: ["open", "background", "create"],
+	});
 });
 
 test("temporary foreground opens once and preserves cross-workspace cwd", async () => {
@@ -113,17 +132,19 @@ test("temporary foreground opens once and preserves cross-workspace cwd", async 
 		{ streaming: true, persisted: false },
 		{ managerCwd: "/another-workspace" },
 	);
-	assertEqual(await executeSessionResume("session.jsonl", fake.operations), true);
-	assertEqual(fake.logicalOpenCount, 1);
+	await expectResume(fake, {
+		logicalOpenCount: 1,
+		events: ["open", "discard", "create"],
+	});
 	assertEqual(fake.replacementManager?.cwd, "/another-workspace");
-	assertEvents(fake.events, ["open", "discard", "create"]);
 });
 
 test("idle temporary foreground opens once and disposes the runtime", async () => {
 	const fake = resumeHarness({ streaming: false, persisted: false });
-	assertEqual(await executeSessionResume("session.jsonl", fake.operations), true);
-	assertEqual(fake.logicalOpenCount, 1);
-	assertEvents(fake.events, ["open", "dispose", "create"]);
+	await expectResume(fake, {
+		logicalOpenCount: 1,
+		events: ["open", "dispose", "create"],
+	});
 });
 
 test("malformed replacement target fails before runtime invalidation", async () => {
@@ -140,9 +161,11 @@ test("extension cancellation keeps the idle persisted runtime", async () => {
 		{ streaming: false, persisted: true },
 		{ cancelSwitch: true },
 	);
-	assertEqual(await executeSessionResume("session.jsonl", fake.operations), false);
-	assertEqual(fake.logicalOpenCount, 1);
-	assertEvents(fake.events, ["switch"]);
+	await expectResume(fake, {
+		accepted: false,
+		logicalOpenCount: 1,
+		events: ["switch"],
+	});
 });
 
 test("session paths use SDK-compatible POSIX and Windows lexical resolution", () => {

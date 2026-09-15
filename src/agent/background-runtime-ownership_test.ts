@@ -11,23 +11,14 @@ import {
 type FakeRuntime = OwnedBackgroundRuntime & { name: string };
 
 test("activation rollback retains its runtime", () => {
-	const ownership = new BackgroundRuntimeOwnership<FakeRuntime>();
-	const target = fakeRuntime("A", ownership.allocateGeneration());
-	ownership.register("A", target);
-
-	const activation = ownership.beginActivation("A");
-	if (!activation) throw new Error("missing activation");
+	const { ownership, target, activation } = activateOwnedRuntime();
 	activation.rollback();
 
 	assertStrictEquals(ownership.get("A"), target);
 });
 
 test("activation commit removes its runtime exactly once", () => {
-	const ownership = new BackgroundRuntimeOwnership<FakeRuntime>();
-	const target = fakeRuntime("A", ownership.allocateGeneration());
-	ownership.register("A", target);
-	const activation = ownership.beginActivation("A");
-	if (!activation) throw new Error("missing activation");
+	const { ownership, target, activation } = activateOwnedRuntime();
 
 	target.observedRunning = false;
 	target.status = "completed";
@@ -51,6 +42,15 @@ test("register rejects replacing an owned runtime", () => {
 	assertStrictEquals(ownership.get("A"), first);
 	assertEquals(ownership.invariantFailureCount, 1);
 });
+
+function activateOwnedRuntime() {
+	const ownership = new BackgroundRuntimeOwnership<FakeRuntime>();
+	const target = fakeRuntime("A", ownership.allocateGeneration());
+	ownership.register("A", target);
+	const activation = ownership.beginActivation("A");
+	if (!activation) throw new Error("missing activation");
+	return { ownership, target, activation };
+}
 
 function fakeRuntime(name: string, generation: number): FakeRuntime {
 	return {

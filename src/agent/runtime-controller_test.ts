@@ -242,6 +242,39 @@ function dependencies(runtimes: RuntimeFake[]): RuntimeControllerDependencies {
 	};
 }
 
+async function activate(
+	state: AppStore,
+	runtimes: RuntimeFake[],
+	workspace = "/workspace",
+): Promise<RuntimeController> {
+	const controller = await RuntimeController.prepare(state, workspace, {
+		dependencies: dependencies(runtimes),
+	});
+	controller.activate();
+	return controller;
+}
+
+function streamingRuntimes(): [RuntimeFake, RuntimeFake] {
+	const a = fakeRuntime("/sessions/a.jsonl");
+	const b = fakeRuntime("/sessions/b.jsonl");
+	a.setStreaming(true);
+	b.setStreaming(true);
+	return [a, b];
+}
+
+async function expectSourceRestored(
+	controller: RuntimeController,
+	state: AppStore,
+	source: RuntimeFake,
+	replacement: RuntimeFake,
+): Promise<void> {
+	assertEquals(state.workspacePath, "/work/source");
+	assertEquals(source.disposeCount, 0);
+	assertEquals(replacement.disposeCount, 1);
+	await controller.dispose();
+	assertEquals(source.disposeCount, 1);
+}
+
 test("RuntimeController abort preserves the live transcript and interrupted reply", async () => {
 	const state = new AppStore();
 	const fake = fakeRuntime();
@@ -294,10 +327,7 @@ test("RuntimeController production path binds callbacks before activation", asyn
 test("RuntimeController opens tree commands without prompting the model", async () => {
 	const state = new AppStore();
 	const fake = fakeRuntime();
-	const controller = await RuntimeController.prepare(state, "/workspace", {
-		dependencies: dependencies([fake]),
-	});
-	controller.activate();
+	const controller = await activate(state, [fake], "/workspace");
 	assertEquals(await controller.prompt("/tree"), true);
 	assertEquals(fake.promptInputs, []);
 	await controller.dispose();
@@ -387,10 +417,7 @@ test("RuntimeController loads the full catalog once during activation", async ()
 
 test("RuntimeController binds extension session controls to the active runtime", async () => {
 	const fake = fakeRuntime();
-	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
-		dependencies: dependencies([fake]),
-	});
-	controller.activate();
+	const controller = await activate(new AppStore(), [fake], "/workspace");
 
 	const actions = fake.extensionBindings[0]?.commandContextActions;
 	if (!actions) throw new Error("missing extension command context actions");
@@ -409,10 +436,7 @@ test("RuntimeController binds extension session controls to the active runtime",
 
 test("RuntimeController treats the current session as an immediate no-op", async () => {
 	const fake = fakeRuntime();
-	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
-		dependencies: dependencies([fake]),
-	});
-	controller.activate();
+	const controller = await activate(new AppStore(), [fake], "/workspace");
 	const calls = [...fake.calls];
 
 	assertEquals(await controller.resumeSession("/sessions/a.jsonl"), {
@@ -424,10 +448,7 @@ test("RuntimeController treats the current session as an immediate no-op", async
 
 test("RuntimeController renames the active pi session", async () => {
 	const fake = fakeRuntime("/sessions/current.jsonl");
-	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
-		dependencies: dependencies([fake]),
-	});
-	controller.activate();
+	const controller = await activate(new AppStore(), [fake], "/workspace");
 
 	assertEquals(
 		await controller.renameSession("/sessions/current.jsonl", "  lowercase title  "),
@@ -484,10 +505,7 @@ test("RuntimeController clears chat at authoritative session invalidation", asyn
 	};
 	const store = new AppStore();
 	store.appendMessage("user", "old session");
-	const controller = await RuntimeController.prepare(store, "/workspace", {
-		dependencies: dependencies([fake]),
-	});
-	controller.activate();
+	const controller = await activate(store, [fake], "/workspace");
 
 	const transition = controller.newSession();
 	await Promise.resolve();
@@ -535,10 +553,7 @@ test("RuntimeController keeps chat when new session is cancelled", async () => {
 	fake.runtime.newSession = () => Promise.resolve({ cancelled: true });
 	const store = new AppStore();
 	store.appendMessage("user", "old session");
-	const controller = await RuntimeController.prepare(store, "/workspace", {
-		dependencies: dependencies([fake]),
-	});
-	controller.activate();
+	const controller = await activate(store, [fake], "/workspace");
 
 	assertEquals((await controller.newSession()).status, "cancelled");
 	assertEquals(
@@ -559,10 +574,7 @@ test("RuntimeController ignores callbacks captured before in-place replacement",
 		}
 		setSessionTransition(transition);
 	};
-	const controller = await RuntimeController.prepare(store, "/workspace", {
-		dependencies: dependencies([fake]),
-	});
-	controller.activate();
+	const controller = await activate(store, [fake], "/workspace");
 	const oldInvalidate = fake.beforeInvalidate[0];
 	const oldRebind = fake.rebind[0];
 	assertEquals((await controller.newSession()).status, "success");
@@ -580,10 +592,11 @@ test("RuntimeController disposal awaits and attempts foreground and background r
 	const foreground = fakeRuntime();
 	const replacement = fakeRuntime("/sessions/b.jsonl");
 	foreground.setStreaming(true);
-	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
-		dependencies: dependencies([foreground, replacement]),
-	});
-	controller.activate();
+	const controller = await activate(
+		new AppStore(),
+		[foreground, replacement],
+		"/workspace",
+	);
 	assertEquals((await controller.newSession()).status, "success");
 
 	let releaseForeground!: () => void;
@@ -616,10 +629,7 @@ test("RuntimeController disposal awaits and attempts foreground and background r
 test("RuntimeController shows one error when manual compaction fails", async () => {
 	const state = new AppStore();
 	const fake = fakeRuntime();
-	const controller = await RuntimeController.prepare(state, "/workspace", {
-		dependencies: dependencies([fake]),
-	});
-	controller.activate();
+	const controller = await activate(state, [fake], "/workspace");
 	fake.setCompact(async () => {
 		fake.emit(
 			agentSessionEventStub({
@@ -645,10 +655,7 @@ test("RuntimeController shows one error when manual compaction fails", async () 
 test("RuntimeController handles share without sending it to the model", async () => {
 	const state = new AppStore();
 	const fake = fakeRuntime();
-	const controller = await RuntimeController.prepare(state, "/workspace", {
-		dependencies: dependencies([fake]),
-	});
-	controller.activate();
+	const controller = await activate(state, [fake], "/workspace");
 
 	assertEquals(await controller.prompt("/share"), true);
 	await new Promise((resolve) => setTimeout(resolve, 0));
@@ -672,10 +679,7 @@ test("RuntimeController handles share without sending it to the model", async ()
 test("RuntimeController reloads resources without sending the command to the model", async () => {
 	const state = new AppStore();
 	const fake = fakeRuntime();
-	const controller = await RuntimeController.prepare(state, "/workspace", {
-		dependencies: dependencies([fake]),
-	});
-	controller.activate();
+	const controller = await activate(state, [fake], "/workspace");
 
 	assertEquals(await controller.prompt("/reload"), true);
 	await new Promise((resolve) => setTimeout(resolve, 0));
@@ -697,10 +701,7 @@ test("RuntimeController reloads resources without sending the command to the mod
 test("RuntimeController shows prompts queued during compaction and sends them afterward", async () => {
 	const state = new AppStore();
 	const fake = fakeRuntime();
-	const controller = await RuntimeController.prepare(state, "/workspace", {
-		dependencies: dependencies([fake]),
-	});
-	controller.activate();
+	const controller = await activate(state, [fake], "/workspace");
 	fake.setCompacting(true);
 
 	assertEquals(await controller.prompt("remove me"), true);
@@ -735,10 +736,7 @@ test("RuntimeController shows prompts queued during compaction and sends them af
 test("RuntimeController removes one message from the active agent queue", async () => {
 	const state = new AppStore();
 	const fake = fakeRuntime();
-	const controller = await RuntimeController.prepare(state, "/workspace", {
-		dependencies: dependencies([fake]),
-	});
-	controller.activate();
+	const controller = await activate(state, [fake], "/workspace");
 	fake.setStreaming(true);
 	fake.emit(
 		agentSessionEventStub({
@@ -780,14 +778,8 @@ test("RuntimeController create activates event handling and keeps activity visib
 
 test("RuntimeController reuses streaming runtimes across repeated background activation", async () => {
 	const state = new AppStore();
-	const a = fakeRuntime("/sessions/a.jsonl");
-	const b = fakeRuntime("/sessions/b.jsonl");
-	a.setStreaming(true);
-	b.setStreaming(true);
-	const controller = await RuntimeController.prepare(state, "/workspace", {
-		dependencies: dependencies([a, b]),
-	});
-	controller.activate();
+	const [a, b] = streamingRuntimes();
+	const controller = await activate(state, [a, b]);
 	a.emit(
 		agentSessionEventStub({
 			type: "tool_execution_start",
@@ -844,14 +836,8 @@ test("RuntimeController reuses streaming runtimes across repeated background act
 
 test("RuntimeController tracks the previous session for alternate jumps", async () => {
 	const state = new AppStore();
-	const a = fakeRuntime("/sessions/a.jsonl");
-	const b = fakeRuntime("/sessions/b.jsonl");
-	a.setStreaming(true);
-	b.setStreaming(true);
-	const controller = await RuntimeController.prepare(state, "/workspace", {
-		dependencies: dependencies([a, b]),
-	});
-	controller.activate();
+	const [a, b] = streamingRuntimes();
+	const controller = await activate(state, [a, b]);
 	assertEquals(state.currentSessionPath, "/sessions/a.jsonl");
 	assertEquals(state.previousSessionPath, undefined);
 
@@ -908,10 +894,7 @@ test("RuntimeController preserves a streaming session across workspace changes",
 		"/work/replacement",
 	);
 	source.setStreaming(true);
-	const controller = await RuntimeController.prepare(state, "/work/source", {
-		dependencies: dependencies([source, replacement]),
-	});
-	controller.activate();
+	const controller = await activate(state, [source, replacement], "/work/source");
 
 	assertEquals(await controller.openWorkspace("/work/replacement"), true);
 	assertEquals(state.workspacePath, "/work/replacement");
@@ -921,12 +904,7 @@ test("RuntimeController preserves a streaming session across workspace changes",
 	assertEquals(await controller.resumeSession("/sessions/source.jsonl"), {
 		status: "success",
 	});
-	assertEquals(state.workspacePath, "/work/source");
-	assertEquals(source.disposeCount, 0);
-	assertEquals(replacement.disposeCount, 1);
-
-	await controller.dispose();
-	assertEquals(source.disposeCount, 1);
+	await expectSourceRestored(controller, state, source, replacement);
 });
 
 test("RuntimeController preserves the current workspace when replacement preparation fails", async () => {
@@ -939,21 +917,14 @@ test("RuntimeController preserves the current workspace when replacement prepara
 	);
 	replacement.runtime.session.bindExtensions = () =>
 		Promise.reject(new Error("bind failed"));
-	const controller = await RuntimeController.prepare(state, "/work/source", {
-		dependencies: dependencies([source, replacement]),
-	});
-	controller.activate();
+	const controller = await activate(state, [source, replacement], "/work/source");
 
 	await assertRejects(
 		() => controller.openWorkspace("/work/replacement"),
 		Error,
 		"bind failed",
 	);
-	assertEquals(state.workspacePath, "/work/source");
-	assertEquals(source.disposeCount, 0);
-	assertEquals(replacement.disposeCount, 1);
-	await controller.dispose();
-	assertEquals(source.disposeCount, 1);
+	await expectSourceRestored(controller, state, source, replacement);
 });
 
 test("RuntimeController disposes an idle session on workspace change", async () => {
@@ -963,10 +934,11 @@ test("RuntimeController disposes an idle session on workspace change", async () 
 		true,
 		"/work/replacement",
 	);
-	const controller = await RuntimeController.prepare(new AppStore(), "/work/source", {
-		dependencies: dependencies([source, replacement]),
-	});
-	controller.activate();
+	const controller = await activate(
+		new AppStore(),
+		[source, replacement],
+		"/work/source",
+	);
 
 	assertEquals(await controller.openWorkspace("/work/replacement"), true);
 	assertEquals(source.disposeCount, 1);
@@ -981,10 +953,11 @@ test("RuntimeController preserves a runtime while accepted prompt work is pendin
 	source.promptResult = new Promise((resolve) => {
 		finishPrompt = resolve;
 	});
-	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
-		dependencies: dependencies([source, replacement]),
-	});
-	controller.activate();
+	const controller = await activate(
+		new AppStore(),
+		[source, replacement],
+		"/workspace",
+	);
 
 	assertEquals(await controller.prompt("hello"), true);
 	assertEquals((await controller.newSession()).status, "success");
@@ -1003,10 +976,11 @@ test("RuntimeController aborts and disposes an active temporary runtime", async 
 	const temporary = fakeRuntime(undefined, false);
 	const replacement = fakeRuntime("/sessions/replacement.jsonl");
 	temporary.setStreaming(true);
-	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
-		dependencies: dependencies([temporary, replacement]),
-	});
-	controller.activate();
+	const controller = await activate(
+		new AppStore(),
+		[temporary, replacement],
+		"/workspace",
+	);
 	assertEquals((await controller.newSession()).status, "success");
 	assertEquals(
 		temporary.calls.filter((call) =>
@@ -1043,10 +1017,11 @@ for (const abortFails of [false, true]) {
 			started.resolve();
 			return dispose();
 		};
-		const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
-			dependencies: dependencies([temporary, replacement]),
-		});
-		controller.activate();
+		const controller = await activate(
+			new AppStore(),
+			[temporary, replacement],
+			"/workspace",
+		);
 		const transition = controller.newSession();
 		try {
 			await started.promise;
@@ -1066,10 +1041,11 @@ for (const abortFails of [false, true]) {
 test("RuntimeController does not create a replacement when departure disposal fails", async () => {
 	const source = fakeRuntime(undefined, false);
 	const replacement = fakeRuntime("/sessions/replacement.jsonl");
-	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
-		dependencies: dependencies([source, replacement]),
-	});
-	controller.activate();
+	const controller = await activate(
+		new AppStore(),
+		[source, replacement],
+		"/workspace",
+	);
 	source.disposeError = new Error("dispose failed");
 	try {
 		assertEquals(await controller.newSession(), { status: "error" });
@@ -1088,10 +1064,7 @@ test("RuntimeController adopts a prepared workspace despite idle disposal failur
 		"/work/replacement",
 	);
 	const state = new AppStore();
-	const controller = await RuntimeController.prepare(state, "/work/source", {
-		dependencies: dependencies([source, replacement]),
-	});
-	controller.activate();
+	const controller = await activate(state, [source, replacement], "/work/source");
 	source.disposeError = new Error("dispose failed");
 	try {
 		assertEquals(await controller.openWorkspace("/work/replacement"), true);
@@ -1106,10 +1079,11 @@ test("RuntimeController completes and aborts background runtimes exactly once", 
 	const completed = fakeRuntime("/sessions/completed.jsonl");
 	const foreground = fakeRuntime("/sessions/foreground.jsonl");
 	completed.setStreaming(true);
-	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
-		dependencies: dependencies([completed, foreground]),
-	});
-	controller.activate();
+	const controller = await activate(
+		new AppStore(),
+		[completed, foreground],
+		"/workspace",
+	);
 	assertEquals((await controller.newSession()).status, "success");
 	completed.emit(agentSessionEventStub({ type: "agent_end" }));
 	completed.emit(agentSessionEventStub({ type: "agent_settled" }));

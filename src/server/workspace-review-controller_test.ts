@@ -13,9 +13,7 @@ test.concurrent("workspace review controller publishes Git changes to AppStore",
 	const store = new AppStore();
 	const controller = new WorkspaceReviewController(store);
 	try {
-		await git(workspace, "init");
-		await git(workspace, "config", "user.email", "pi-ui@example.test");
-		await git(workspace, "config", "user.name", "pi-ui");
+		await initGit(workspace);
 		await Bun.write(`${workspace}/example.txt`, "first\n");
 		await git(workspace, "add", "example.txt");
 		await git(workspace, "commit", "-m", "initial");
@@ -55,9 +53,7 @@ test.concurrent("ignored writes still notify the file browser; mixed writes and 
 	const store = new MeasuredStore();
 	const controller = new WorkspaceReviewController(store);
 	try {
-		await git(workspace, "init");
-		await git(workspace, "config", "user.email", "pi-ui@example.test");
-		await git(workspace, "config", "user.name", "pi-ui");
+		await initGit(workspace);
 		await Bun.write(`${workspace}/.gitignore`, "*.log\n");
 		await Bun.write(`${workspace}/tracked.log`, "initial\n");
 		await Bun.write(`${workspace}/ignored.log`, "initial\n");
@@ -94,9 +90,7 @@ for (const linkedWorktree of [false, true]) {
 		const store = new AppStore();
 		const controller = new WorkspaceReviewController(store);
 		try {
-			await git(repository, "init");
-			await git(repository, "config", "user.email", "pi-ui@example.test");
-			await git(repository, "config", "user.name", "pi-ui");
+			await initGit(repository);
 			await git(repository, "commit", "--allow-empty", "-m", "initial");
 			if (linkedWorktree)
 				await git(repository, "worktree", "add", "-b", "linked", workspace);
@@ -167,6 +161,12 @@ test.concurrent("tree revisions preserve structural changes across later content
 		await rm(workspace, { recursive: true });
 	}
 });
+
+async function initGit(cwd: string): Promise<void> {
+	await git(cwd, "init");
+	await git(cwd, "config", "user.email", "pi-ui@example.test");
+	await git(cwd, "config", "user.name", "pi-ui");
+}
 
 async function git(cwd: string, ...args: string[]): Promise<void> {
 	const output = await outputCommand("git", {
