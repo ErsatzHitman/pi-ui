@@ -1,4 +1,4 @@
-import { promptInput } from "./prompt.js";
+import { focusPromptEnd, promptInput, setPromptValue } from "./prompt.js";
 
 let activeFilePrefix;
 let filePickerSuppressUntilInput = false;
@@ -128,7 +128,7 @@ function handleKeydown(event) {
 	if (event.code === "ArrowDown" || event.code === "ArrowUp") {
 		event.preventDefault();
 		selectPickerRow(selector, event.code === "ArrowDown" ? 1 : -1);
-	} else if (event.code === "Enter") {
+	} else if (event.code === "Enter" || event.code === "Tab") {
 		event.preventDefault();
 		selectedPickerRow(selector)?.click();
 	}
@@ -145,6 +145,12 @@ function applyFileCompletion(value) {
 	input.focus();
 	if (value.endsWith("/") || value.endsWith('/"')) queueFileSearch(input);
 	else closeFilePicker();
+}
+
+export function completeSlashCommand(name) {
+	setPromptValue(`/${name} `);
+	focusPromptEnd();
+	closePickers();
 }
 
 function insertFilePrefix() {

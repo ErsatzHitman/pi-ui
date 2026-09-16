@@ -70,6 +70,12 @@ function slashCommandName(item: AppSlashCommand): string {
 function renderSlashRow(item: AppSlashCommand, index: number): string {
 	const label = `/${item.name}`;
 	const name = slashCommandName(item);
+	const runsImmediately = item.source === "system" && !item.argumentHint;
+	const clickAction = runsImmediately
+		? `window.piUi.messageScroll.scrollBottom();
+			$prompt = '';
+			@post('${endpoints.prompt}', { payload: { prompt: ${JSON.stringify(label)} } });`
+		: `window.piUi.pickers.complete(${JSON.stringify(item.name)});`;
 	return syncHtml(
 		<li
 			id={`slash-option-${encodeURIComponent(name)}`}
@@ -81,11 +87,7 @@ function renderSlashRow(item: AppSlashCommand, index: number): string {
 			data-slash-name={name}
 			data-slash-order={index}
 			data-picker-kind="slash"
-			data-on:click={`
-				window.piUi.messageScroll.scrollBottom();
-				$prompt = '';
-				@post('${endpoints.prompt}', { payload: { prompt: ${JSON.stringify(label)} } });
-			`}
+			data-on:click={clickAction}
 			data-show={`
 				$_slashPickerOpen &&
 				window.piUi.pickers.fuzzyMatch($prompt.slice(1), ${JSON.stringify(name)}).matches

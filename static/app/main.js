@@ -18,6 +18,7 @@ import { filterModelSearch } from "./model-search.js";
 import {
 	bindPickers,
 	closePickers,
+	completeSlashCommand,
 	isFileOpen,
 	isOpen as isPickerOpen,
 	syncPickerSelection,
@@ -51,6 +52,7 @@ window.piUi = {
 	modelSearch: { filter: filterModelSearch },
 	pickers: {
 		close: closePickers,
+		complete: completeSlashCommand,
 		fuzzyMatch,
 		isFileOpen,
 		isOpen: isPickerOpen,

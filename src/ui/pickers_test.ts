@@ -38,6 +38,28 @@ test("slash picker anchors its selected result nearest the prompt", () => {
 	assertStringIncludes(html, "payload: { prompt: &#34;/login&#34; }");
 });
 
+test("slash picker completes user-defined commands instead of running them", () => {
+	const html = renderSlashPicker(
+		appRenderSnapshot({
+			slashCommands: [
+				{ name: "skill:review", description: "Review code", source: "skill" },
+				{ name: "plan", description: "Plan", source: "prompt" },
+				{
+					name: "compact",
+					description: "Compact",
+					source: "system",
+					argumentHint: "[instructions]",
+				},
+				{ name: "reload", description: "Reload", source: "system" },
+			],
+		}),
+	);
+	assertStringIncludes(html, "window.piUi.pickers.complete(&#34;skill:review&#34;)");
+	assertStringIncludes(html, "window.piUi.pickers.complete(&#34;plan&#34;)");
+	assertStringIncludes(html, "window.piUi.pickers.complete(&#34;compact&#34;)");
+	assertStringIncludes(html, "payload: { prompt: &#34;/reload&#34; }");
+});
+
 test("file suggestions have stable option ids without nested focus targets", () => {
 	const html = renderFilePickerResults([
 		{ value: '@"src/my file.ts"', label: "my file.ts" },
