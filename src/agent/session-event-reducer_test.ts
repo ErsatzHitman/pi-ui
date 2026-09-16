@@ -216,6 +216,25 @@ test("surfaces the provider error when an assistant message fails", () => {
 	]);
 });
 
+test("does not surface a canonical abort as a provider error", () => {
+	const { state, context } = fixture();
+	reduceSessionEvent(
+		event({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [],
+				stopReason: "error",
+				errorMessage: "The operation was aborted.",
+			},
+		}),
+		context,
+	);
+
+	assertEquals(state.finishCount, 1);
+	assertEquals(state.appended, []);
+});
+
 test("uses a fallback when a provider omits its error message", () => {
 	const { state, context } = fixture();
 	reduceSessionEvent(

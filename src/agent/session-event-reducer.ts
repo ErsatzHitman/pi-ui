@@ -8,7 +8,10 @@ import type {
 import type { JsonValue } from "../utils/json-types.ts";
 import { isString } from "../utils/type-guards.ts";
 import type { formatCacheMissNotice } from "./cache-miss.ts";
-import { formatProviderErrorMessage } from "./provider-error-message.ts";
+import {
+	formatProviderErrorMessage,
+	isAbortErrorMessage,
+} from "./provider-error-message.ts";
 
 type EventOf<Type extends AgentSessionEvent["type"]> = Extract<
 	AgentSessionEvent,
@@ -242,7 +245,10 @@ export function reduceSessionEvent(
 		case "message_end":
 			if (event.message.role === "assistant") {
 				state.finishAssistant();
-				if (event.message.stopReason === "error") {
+				if (
+					event.message.stopReason === "error" &&
+					!isAbortErrorMessage(event.message.errorMessage)
+				) {
 					state.appendMessage(
 						"system",
 						formatProviderErrorMessage(event.message.errorMessage),

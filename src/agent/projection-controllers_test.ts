@@ -154,6 +154,17 @@ test("transcript projection restores persisted provider errors", () => {
 	);
 });
 
+test("transcript projection hides persisted canonical abort errors", () => {
+	const message = assistantMessageStub({
+		role: "assistant",
+		content: [],
+		stopReason: "error",
+		errorMessage: "The operation was aborted.",
+	});
+
+	assertEquals(new TranscriptProjector().message(message, new Date(0)), []);
+});
+
 test("user projection keeps image data and hides transfer implementation text", () => {
 	const [message] = new TranscriptProjector().message(
 		{

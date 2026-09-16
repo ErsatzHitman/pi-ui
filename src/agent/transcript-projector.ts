@@ -15,7 +15,10 @@ import {
 } from "../utils/attachment-references.ts";
 import { isRecord, isString } from "../utils/type-guards.ts";
 import { collectCacheMisses, formatCacheMissNotice } from "./cache-miss.ts";
-import { formatProviderErrorMessage } from "./provider-error-message.ts";
+import {
+	formatProviderErrorMessage,
+	isAbortErrorMessage,
+} from "./provider-error-message.ts";
 import type { ToolArguments } from "./session-event-reducer.ts";
 import {
 	compactToolOutput,
@@ -116,7 +119,8 @@ export class TranscriptProjector {
 				const messages = assistantContentToMessages(message.content, timestamp);
 				if (
 					options.includeAssistantError !== false &&
-					message.stopReason === "error"
+					message.stopReason === "error" &&
+					!isAbortErrorMessage(message.errorMessage)
 				) {
 					messages.push({
 						role: "system",

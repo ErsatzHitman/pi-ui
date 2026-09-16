@@ -2,7 +2,10 @@ import { test } from "bun:test";
 
 import { assertEquals } from "#testing/assertions";
 
-import { formatProviderErrorMessage } from "./provider-error-message.ts";
+import {
+	formatProviderErrorMessage,
+	isAbortErrorMessage,
+} from "./provider-error-message.ts";
 
 test("pretty prints a structured provider error without dropping fields", () => {
 	assertEquals(
@@ -28,6 +31,13 @@ test("pretty prints nested provider errors without assuming their schema", () =>
 	}
 }`,
 	);
+});
+
+test("recognizes the canonical abort error without hiding other failures", () => {
+	assertEquals(isAbortErrorMessage("The operation was aborted."), true);
+	assertEquals(isAbortErrorMessage(" the operation was aborted "), true);
+	assertEquals(isAbortErrorMessage("Provider operation was aborted"), false);
+	assertEquals(isAbortErrorMessage(), false);
 });
 
 test("preserves unstructured and malformed provider errors", () => {

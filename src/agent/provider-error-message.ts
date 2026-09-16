@@ -32,6 +32,11 @@ export function providerErrorPresentation(raw: string) {
 }
 
 const structuredProviderErrorPattern = /^(\d{3}):\s*(\{[\s\S]*\})$/u;
+const abortErrorPattern = /^the operation was aborted\.?$/iu;
+
+export function isAbortErrorMessage(errorMessage?: string): boolean {
+	return abortErrorPattern.test(errorMessage?.trim() ?? "");
+}
 
 export function formatProviderErrorMessage(errorMessage?: string): string {
 	const raw = errorMessage?.trim() || "Unknown error";
