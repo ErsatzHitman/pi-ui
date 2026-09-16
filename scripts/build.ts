@@ -8,8 +8,10 @@ const result = await Bun.build({
 		outfile: "./dist/pi-ui",
 	},
 	external: ["@silvia-odwyer/photon-node"],
+	format: "esm",
 	minify: true,
 	sourcemap: "linked",
+	bytecode: true,
 });
 
 for (const log of result.logs) console.warn(log);
