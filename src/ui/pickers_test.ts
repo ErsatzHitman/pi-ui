@@ -237,6 +237,7 @@ test("workspace picker shows only the workspace folder name", () => {
 	);
 	assertStringIncludes(nested, ">Blenderanimation</span>");
 	assertStringIncludes(nested, 'aria-label="/home/user/Documents/Blenderanimation"');
+	assertStringIncludes(nested, "$_workspaceAction = 'open'");
 
 	const home = renderWorkspacePicker(
 		appRenderSnapshot({

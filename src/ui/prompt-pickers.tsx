@@ -32,7 +32,7 @@ export function renderWorkspacePicker(state: AppStateSnapshot): string {
 			data-on:click="$_workspaceAction = 'open'"
 			data-on:keydown__window={keybindAction(
 				"change-workspace",
-				toggleDialogAction(),
+				`$_workspaceAction = 'open'; ${toggleDialogAction()}`,
 			)}
 			data-tooltip="Workspace"
 			data-tooltip-delay
