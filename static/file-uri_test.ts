@@ -2,7 +2,7 @@ import { test } from "bun:test";
 
 import { assertEquals } from "#testing/assertions";
 
-import { fileUriToPath, isHtmlFileUri } from "./file-uri.js";
+import { fileUriToPath, isHtmlFilePath } from "./file-uri.js";
 
 test("HTML file links render only html and htm paths, ignoring query and fragment", () => {
 	for (const uri of [
@@ -10,14 +10,14 @@ test("HTML file links render only html and htm paths, ignoring query and fragmen
 		"file:///tmp/My%20report.HTM?mode=dark#chart",
 		"file:///tmp/report%2Ehtml",
 	])
-		assertEquals(isHtmlFileUri(uri), true);
+		assertEquals(isHtmlFilePath(fileUriToPath(uri) ?? ""), true);
 	for (const uri of [
 		"file:///tmp/report.ts#html",
 		"file:///tmp/report.html.txt",
 		"https://example.com/report.html",
 		"file:///tmp/%ZZ.html",
 	])
-		assertEquals(isHtmlFileUri(uri), false);
+		assertEquals(isHtmlFilePath(fileUriToPath(uri) ?? ""), false);
 });
 
 const cases = [

@@ -1,5 +1,5 @@
 import { responseErrorMessage } from "../../src/utils/errors.ts";
-import { isHtmlFileUri } from "../file-uri.js";
+import { fileUriToPath, isHtmlFilePath } from "../file-uri.js";
 
 export function bindFileLinks() {
 	document.addEventListener(
@@ -10,13 +10,15 @@ export function bindFileLinks() {
 				event.target instanceof Element ? event.target.closest("a[href]") : null;
 			if (!(link instanceof HTMLAnchorElement)) return;
 			const markedUri = link.getAttribute("data-pi-file-link") ?? "";
-			const uri = isFileUri(markedUri) ? markedUri : link.href;
-			if (!isFileUri(uri)) return;
+			const markedPath = markedUri ? fileUriToPath(markedUri) : undefined;
+			const uri = markedPath === undefined ? link.href : markedUri;
+			const path = markedPath ?? fileUriToPath(uri);
+			if (path === undefined) return;
 
 			// File navigation is forbidden from the HTTP UI. Claim the click even if
 			// another client handler already prevented it, then delegate to the backend.
 			event.preventDefault();
-			if (isHtmlFileUri(uri)) {
+			if (isHtmlFilePath(path)) {
 				const endpoint = document.body.dataset.filesOpenEndpoint;
 				if (endpoint)
 					window.open(
@@ -30,10 +32,6 @@ export function bindFileLinks() {
 		},
 		{ capture: true },
 	);
-}
-
-export function isFileUri(uri) {
-	return URL.parse(uri)?.protocol === "file:";
 }
 
 async function followFileLink(uri) {

@@ -1,7 +1,6 @@
-/** @param {string} uri */
-export function isHtmlFileUri(uri) {
-	const path = fileUriToPath(uri);
-	return path !== undefined && /\.html?$/i.test(path);
+/** @param {string} path */
+export function isHtmlFilePath(path) {
+	return /\.html?$/i.test(path);
 }
 
 /** @param {string} uri */

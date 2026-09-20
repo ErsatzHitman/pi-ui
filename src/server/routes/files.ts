@@ -2,7 +2,7 @@ import { isAbsolute, relative } from "node:path";
 
 import { detectSupportedImageMimeTypeFromFile } from "@earendil-works/pi-coding-agent";
 
-import { fileUriToPath, isHtmlFileUri } from "../../../static/file-uri.js";
+import { fileUriToPath, isHtmlFilePath } from "../../../static/file-uri.js";
 import { renderFilePickerResults } from "../../ui/pickers.tsx";
 import { readActionSignals, requiredString, stringField } from "../action-input.ts";
 import { datastarResponse } from "../datastar.ts";
@@ -68,7 +68,7 @@ async function openLinkedFile(
 			: relativePath;
 	await resolveFile(workspacePath, filePath);
 	if (request.method === "GET") {
-		if (!isHtmlFileUri(uri))
+		if (!isHtmlFilePath(path))
 			throw new RouteError(400, "Only HTML files can be previewed.");
 		const source = new URL(uri);
 		return new Response(null, {
