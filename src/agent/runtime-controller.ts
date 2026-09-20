@@ -1049,7 +1049,7 @@ export class RuntimeController {
 		this.prompts.dispose();
 
 		const results = await Promise.allSettled(
-			runtimes.map((runtime) => Promise.resolve().then(() => runtime.dispose())),
+			runtimes.map((runtime) => Promise.try(() => runtime.dispose())),
 		);
 		const errors = results.flatMap((result) =>
 			result.status === "rejected" ? [result.reason] : [],
