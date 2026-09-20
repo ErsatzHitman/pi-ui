@@ -1,3 +1,4 @@
+import { stripAnsi } from "../../node_modules/@earendil-works/pi-coding-agent/dist/utils/ansi.js";
 import type { TranscriptMessageTitlePart } from "../state/transcript-state.ts";
 import type { JsonValue } from "../utils/json-types.ts";
 import { asRecord, isNumber, isRecord, isString } from "../utils/type-guards.ts";
@@ -226,14 +227,7 @@ export function contentToText<Content>(content: Content): string {
 		.join("\n");
 }
 
-const ansiPattern = new RegExp(
-	String.raw`[\u001B\u009B][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[a-zA-Z\d]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))`,
-	"g",
-);
-
-export function stripAnsi(value: string): string {
-	return value.replace(ansiPattern, "");
-}
+export { stripAnsi };
 
 export function summarizeValue<Value>(value: Value): string {
 	if (isString(value)) {
