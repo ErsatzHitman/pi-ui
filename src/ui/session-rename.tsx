@@ -44,9 +44,7 @@ export function SessionRenameTitle(props: { session: AppSessionSummary }): strin
 		<span
 			class="session-rename"
 			data-session-rename-title
-			attrs={{
-				"data-on:click__stop__debounce.300ms": `if (!(${editing})) document.getElementById('session-dialog')?.close()`,
-			}}
+			data-on:click__stop="true"
 			data-on:dblclick={startSessionRenameAction(props.session)}
 		>
 			<span class="session-rename-title" data-show={`!(${editing})`} safe>
