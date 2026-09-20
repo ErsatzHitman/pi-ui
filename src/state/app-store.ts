@@ -249,9 +249,7 @@ function datastarInspectorEnabled(): boolean {
 	return process.env.PI_UI_INSPECTOR === "1";
 }
 function uniqueStrings(values: string[]): string[] {
-	const unique: string[] = [];
-	for (const value of values) if (value && !unique.includes(value)) unique.push(value);
-	return unique;
+	return [...new Set(values.filter(Boolean))];
 }
 
 /** Mutable authoritative application state. It has no renderer or transport dependency. */
