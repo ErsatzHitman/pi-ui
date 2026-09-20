@@ -7,12 +7,12 @@ import {
 	gitPaneRatioDefault,
 	gitPaneRatioMax,
 	gitPaneRatioMin,
-	hasTrackedWorkspaceChanges,
 	reviewSidebarWidthDefault,
 	reviewSidebarWidthMax,
 	reviewSidebarWidthMin,
 	type WorkspaceReviewPreferences,
 	type WorkspaceReviewSnapshot,
+	workspaceChangeStats,
 } from "../workspace-review-types.ts";
 import { Icon } from "./icon.tsx";
 import { SquareSplitHorizontal, SquareSplitVertical, TextWrap, X } from "./icons.ts";
@@ -80,14 +80,7 @@ export function renderWorkspaceReview(
 	snapshot: WorkspaceReviewSnapshot,
 	preferences: WorkspaceReviewPreferences,
 ): string {
-	const additions = snapshot.changes.reduce(
-		(total, change) => total + change.additions,
-		0,
-	);
-	const deletions = snapshot.changes.reduce(
-		(total, change) => total + change.deletions,
-		0,
-	);
+	const stats = workspaceChangeStats(snapshot.changes);
 	return syncHtml(
 		<section
 			id="workspace-review"
@@ -173,21 +166,21 @@ export function renderWorkspaceReview(
 								class="review-change-totals"
 								title="Tracked line changes"
 								data-attr:hidden="!$_workspaceReviewStatsKnown"
-								hidden={!hasTrackedWorkspaceChanges(snapshot.changes)}
+								hidden={!stats.tracked}
 							>
 								<span
 									id="review-total-additions"
 									class="review-additions"
 									data-text="'+' + $_workspaceReviewAdditions"
 								>
-									+{additions}
+									+{stats.additions}
 								</span>
 								<span
 									id="review-total-deletions"
 									class="review-deletions"
 									data-text="'-' + $_workspaceReviewDeletions"
 								>
-									-{deletions}
+									-{stats.deletions}
 								</span>
 							</span>
 						</header>

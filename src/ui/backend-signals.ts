@@ -2,7 +2,7 @@ import { sessionTransitionOverlayVisible } from "../agent/session-transition-con
 import { getActiveFonts } from "../fonts.ts";
 import { getPierreThemes } from "../pierre-theme.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
-import { hasTrackedWorkspaceChanges } from "../workspace-review-types.ts";
+import { workspaceChangeStats } from "../workspace-review-types.ts";
 
 export type BackendSignals = {
 	_codeThemeDark: string;
@@ -28,6 +28,7 @@ export type BackendSignals = {
 export function projectBackendSignals(state: AppStateSnapshot): BackendSignals {
 	const codeThemes = getPierreThemes();
 	const fonts = getActiveFonts();
+	const stats = workspaceChangeStats(state.workspaceReview.changes);
 	return {
 		_codeThemeDark: codeThemes.dark,
 		_codeThemeLight: codeThemes.light,
@@ -43,19 +44,11 @@ export function projectBackendSignals(state: AppStateSnapshot): BackendSignals {
 		_sessionTransitionVisible: sessionTransitionOverlayVisible(
 			state.sessionTransition,
 		),
-		_workspaceReviewAdditions: state.workspaceReview.changes.reduce(
-			(total, change) => total + change.additions,
-			0,
-		),
+		_workspaceReviewAdditions: stats.additions,
 		_workspaceReviewBranch: state.workspaceReview.branch ?? "",
-		_workspaceReviewDeletions: state.workspaceReview.changes.reduce(
-			(total, change) => total + change.deletions,
-			0,
-		),
+		_workspaceReviewDeletions: stats.deletions,
 		_workspaceReviewGitAvailable: state.workspaceReview.isGitRepository,
 		_workspaceReviewChangeCount: state.workspaceReview.changeCount,
-		_workspaceReviewStatsKnown: hasTrackedWorkspaceChanges(
-			state.workspaceReview.changes,
-		),
+		_workspaceReviewStatsKnown: stats.tracked,
 	};
 }
