@@ -134,7 +134,7 @@ export async function writeWorkspaceFile(
 	contents: string,
 	expectedRevision: string,
 ): Promise<WorkspaceFile> {
-	if (new TextEncoder().encode(contents).byteLength > maximumWorkspaceFileBytes) {
+	if (Buffer.byteLength(contents) > maximumWorkspaceFileBytes) {
 		throw new WorkspaceFileError(413, "File is too large to save in pi-ui.");
 	}
 	const { path: resolved, size } = await resolveFile(workspacePath, filePath);

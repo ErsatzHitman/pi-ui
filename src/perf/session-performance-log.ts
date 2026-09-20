@@ -18,7 +18,7 @@ export function appendSessionPerformanceRecord(record: JsonValue): void {
 	const path = sessionPerformanceLogPath();
 	if (!path) return;
 	const line = `${JSON.stringify(record)}\n`;
-	const bytes = new TextEncoder().encode(line).byteLength;
+	const bytes = Buffer.byteLength(line);
 	pendingWrite = pendingWrite
 		.catch(() => undefined)
 		.then(async () => {
