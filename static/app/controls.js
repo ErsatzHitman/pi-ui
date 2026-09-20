@@ -3,7 +3,7 @@ const menuPopoverSelector = "[popover][role='menu']";
 
 export function bindControls() {
 	document.addEventListener("keydown", handleKeydown);
-	document.addEventListener("mouseover", handleMouseOver);
+	document.addEventListener("mousemove", handlePointerMove);
 	document.addEventListener("click", handleClick);
 	refreshControls();
 }
@@ -140,8 +140,15 @@ function handleKeydown(event) {
 	}
 }
 
-function handleMouseOver(event) {
+function handlePointerMove(event) {
 	if (!(event.target instanceof Element)) return;
+	const option = event.target.closest('[role="option"]');
+	if (
+		option instanceof HTMLElement &&
+		option.getAttribute("aria-selected") !== "true"
+	) {
+		activateListboxOption(option);
+	}
 	const commandItem = event.target.closest('[role="menuitem"]');
 	const command = commandItem?.closest(commandSelector);
 	if (
@@ -152,6 +159,19 @@ function handleMouseOver(event) {
 	) {
 		activateCommandItem(command, commandItem);
 	}
+}
+
+function activateListboxOption(active) {
+	const listbox = active.closest('[role="listbox"]');
+	if (!(listbox instanceof HTMLElement)) return;
+	for (const option of listbox.querySelectorAll(
+		'[role="option"][aria-selected="true"]',
+	)) {
+		option.setAttribute("aria-selected", "false");
+	}
+	active.setAttribute("aria-selected", "true");
+	const input = document.querySelector(`[aria-controls="${CSS.escape(listbox.id)}"]`);
+	input?.setAttribute("aria-activedescendant", active.id);
 }
 
 function handleClick(event) {
