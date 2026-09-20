@@ -165,57 +165,6 @@ export function compareModelPickerOrder(
 	return providerOrder || a.id.localeCompare(b.id);
 }
 
-export function resolveScopedModels<T extends ScopedModelCandidate>(
-	patterns: string[],
-	models: readonly T[],
-): Array<{ model: T; thinkingLevel?: AppThinkingLevel }> {
-	const scoped: Array<{ model: T; thinkingLevel?: AppThinkingLevel }> = [];
-	const seen = new Set<string>();
-	for (const pattern of patterns) {
-		const parsed = parseScopedModelPattern(pattern);
-		if (!parsed.modelPattern) continue;
-		for (const model of models) {
-			if (!modelMatchesPattern(model, parsed.modelPattern)) continue;
-			const key = `${model.provider}/${model.id}`;
-			if (seen.has(key)) continue;
-			seen.add(key);
-			scoped.push({ model, thinkingLevel: parsed.thinkingLevel });
-		}
-	}
-	return scoped;
-}
-
-export type ScopedModelPattern = {
-	modelPattern: string;
-	thinkingLevel?: AppThinkingLevel;
-};
-
-export function parseScopedModelPattern(pattern: string): ScopedModelPattern {
-	const trimmed = pattern.trim();
-	const colon = trimmed.lastIndexOf(":");
-	if (colon === -1) return { modelPattern: trimmed };
-	const thinkingLevel = trimmed.slice(colon + 1);
-	if (!isThinkingLevel(thinkingLevel)) return { modelPattern: trimmed };
-	return {
-		modelPattern: trimmed.slice(0, colon),
-		thinkingLevel,
-	};
-}
-
-export function modelMatchesPattern(
-	model: ScopedModelCandidate,
-	pattern: string,
-): boolean {
-	const normalized = pattern.toLowerCase();
-	const refs = [model.id, model.name ?? "", `${model.provider}/${model.id}`].map(
-		(value) => value.toLowerCase(),
-	);
-	if (!normalized.includes("*"))
-		return refs.some((value) => value === normalized || value.includes(normalized));
-	const regex = new RegExp(`^${normalized.split("*").map(RegExp.escape).join(".*")}$`);
-	return refs.some((value) => regex.test(value));
-}
-
 function isThinkingLevel(level: string): level is AppThinkingLevel {
 	return thinkingLevels.has(level);
 }

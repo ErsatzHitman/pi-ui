@@ -9,12 +9,7 @@ import { makeTempDir } from "#testing/temp";
 
 import { AppStore } from "../state/app-store.ts";
 import { formatTokens } from "../utils/format.ts";
-import {
-	compareModelPickerOrder,
-	modelMatchesPattern,
-	parseScopedModelPattern,
-	resolveScopedModels,
-} from "./model-controller.ts";
+import { compareModelPickerOrder } from "./model-controller.ts";
 import {
 	formatSessionSummary,
 	listCachedSessions,
@@ -213,22 +208,6 @@ test("model picker keeps scoped models above the current model", () => {
 			.map((model) => model.id),
 		["starred-a", "starred-z", "current"],
 	);
-});
-
-test("model patterns preserve wildcards, thinking suffixes, and first-match ordering", () => {
-	const models = [
-		{ provider: "openai", id: "gpt-5", name: "GPT Five" },
-		{ provider: "anthropic", id: "claude-sonnet", name: "Sonnet" },
-	];
-	assertEquals(parseScopedModelPattern("openai/*:high"), {
-		modelPattern: "openai/*",
-		thinkingLevel: "high",
-	});
-	assertEquals(modelMatchesPattern(models[1], "*sonnet"), true);
-	assertEquals(resolveScopedModels(["*sonnet:medium", "openai/*", "*sonnet"], models), [
-		{ model: models[1], thinkingLevel: "medium" },
-		{ model: models[0], thinkingLevel: undefined },
-	]);
 });
 
 test("tree projection orders the active branch first", () => {

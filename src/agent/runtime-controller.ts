@@ -10,6 +10,7 @@ import {
 	type SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 
+import { resolveModelScopeFromModels } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/model-resolver.js";
 import { sessionPerformance } from "../perf/session-performance.ts";
 import {
 	type AppSlashCommand,
@@ -36,7 +37,7 @@ import { detectCacheMiss, formatCacheMissNotice } from "./cache-miss.ts";
 import { ExtensionUiController } from "./extension-ui-controller.ts";
 import { LlamaController } from "./llama-controller.ts";
 import { llamaProviderExtension } from "./llama-provider-extension.ts";
-import { ModelController, resolveScopedModels } from "./model-controller.ts";
+import { ModelController } from "./model-controller.ts";
 import {
 	PromptLifecycle,
 	type PromptStreamingBehavior,
@@ -300,10 +301,10 @@ export class RuntimeController {
 			const scopedModels = sessionPerformance.measureSync(
 				"scopedModelResolution",
 				() =>
-					resolveScopedModels(
+					resolveModelScopeFromModels(
 						services.settingsManager.getEnabledModels() ?? [],
 						availableModels,
-					),
+					).scopedModels,
 			);
 			const readIsOverridden = services.resourceLoader
 				.getExtensions()

@@ -292,8 +292,9 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 													? "true"
 													: "false"
 											}
-											data-model-search-text={`${model.id} ${model.provider}`}
-											data-model-search-keywords={model.name}
+											data-model-id={model.id}
+											data-model-provider={model.provider}
+											data-model-name={model.name}
 											data-model-search-order={index}
 											data-on:click={`
 												$_modelQuery = '';

@@ -1,5 +1,6 @@
 import { fuzzyFilter } from "@earendil-works/pi-tui/dist/fuzzy.js";
 
+import { getModelSelectorSearchText } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/model-search.js";
 import { refreshControls } from "./controls.js";
 
 export function filterModelSearch(input, query) {
@@ -16,8 +17,9 @@ export function filterModelSearch(input, query) {
 	);
 	const matches = fuzzyFilter(originalItems, query, (item) =>
 		modelSearchText(
-			item.dataset.modelSearchText ?? "",
-			item.dataset.modelSearchKeywords ?? "",
+			item.dataset.modelId ?? "",
+			item.dataset.modelProvider ?? "",
+			item.dataset.modelName ?? "",
 		),
 	);
 	const visible = new Set(matches);
@@ -32,8 +34,8 @@ export function filterModelSearch(input, query) {
 	refreshControls(command);
 }
 
-export function modelSearchText(modelAndProvider, name) {
+export function modelSearchText(id, provider, name) {
 	// Preserve camel-case boundaries that pi's case-insensitive matcher cannot see.
 	const expandedName = name.replace(/([\p{Ll}\d])(\p{Lu})/gu, "$1 $2");
-	return `${expandedName} ${modelAndProvider} ${name}`;
+	return `${expandedName} ${id} ${provider} ${name} ${getModelSelectorSearchText({ id, provider, name })}`;
 }
