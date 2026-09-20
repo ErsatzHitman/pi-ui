@@ -150,14 +150,6 @@ export function formatToolResult<Result>(
 	return { text, format: "output" };
 }
 
-// oxlint-disable-next-line no-unused-vars -- Retained while narrowing the accidental API.
-function compactReadOutput(text: string): string {
-	return text
-		.replace(/\n\n\[[^\]]*more lines in file[\s\S]*?\]$/i, "")
-		.replace(/\n\n\[Showing lines [^\]]+\]$/i, "")
-		.trimEnd();
-}
-
 function shouldHideBashOutput(args: JsonValue | undefined): boolean {
 	const command = stringValue(asRecord(args)?.command).trimStart();
 	const executable = command.match(
