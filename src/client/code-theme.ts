@@ -105,9 +105,7 @@ function applyStatusColors(): void {
 }
 
 async function loadFontPreviews(theme: string): Promise<void> {
-	const previews = [
-		...document.querySelectorAll<HTMLElement>("[data-font-code-preview]"),
-	];
+	const previews = document.querySelectorAll<HTMLElement>("[data-font-code-preview]");
 	const code = previews[0]?.textContent;
 	if (!code) return;
 
@@ -135,7 +133,7 @@ async function loadPreviews(): Promise<void> {
 		if (!highlighter) throw new Error("Highlighter unavailable");
 
 		const cards = document.querySelectorAll<HTMLButtonElement>("[data-theme-name]");
-		for (const [index, card] of [...cards].entries()) {
+		for (const [index, card] of cards.entries()) {
 			const name = card.dataset.themeName;
 			const preview = card.querySelector<HTMLElement>(".code-theme-preview");
 			if (!name || !preview) continue;
