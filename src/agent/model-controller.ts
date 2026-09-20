@@ -3,6 +3,16 @@ import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 import type { AppStore, AppThinkingLevel } from "../state/app-store.ts";
 
+const thinkingLevels: ReadonlySet<string> = new Set([
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+]);
+
 export type ScopedModelCandidate = { id: string; provider: string; name?: string };
 
 export class ModelController {
@@ -163,9 +173,8 @@ export function resolveScopedModels<T extends ScopedModelCandidate>(
 	for (const pattern of patterns) {
 		const parsed = parseScopedModelPattern(pattern);
 		if (!parsed.modelPattern) continue;
-		for (const model of models.filter((candidate) =>
-			modelMatchesPattern(candidate, parsed.modelPattern),
-		)) {
+		for (const model of models) {
+			if (!modelMatchesPattern(model, parsed.modelPattern)) continue;
 			const key = `${model.provider}/${model.id}`;
 			if (seen.has(key)) continue;
 			seen.add(key);
@@ -207,5 +216,5 @@ export function modelMatchesPattern(
 }
 
 function isThinkingLevel(level: string): level is AppThinkingLevel {
-	return ["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(level);
+	return thinkingLevels.has(level);
 }
