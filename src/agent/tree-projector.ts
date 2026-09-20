@@ -210,7 +210,8 @@ function shouldDisplayTreeNode(node: SessionTreeNode, activeId: string | null): 
 		entry.type === "custom" ||
 		entry.type === "model_change" ||
 		entry.type === "thinking_level_change" ||
-		entry.type === "session_info"
+		entry.type === "session_info" ||
+		entry.type === "usage"
 	)
 		return false;
 	if (
@@ -321,6 +322,14 @@ function formatTreeEntry(
 			kind: "other",
 			role: "label",
 			text: entry.label ?? "(cleared)",
+			...metadata,
+		};
+	}
+	if (entry.type === "usage") {
+		return {
+			kind: "other",
+			role: "usage",
+			text: entry.note ?? entry.kind,
 			...metadata,
 		};
 	}

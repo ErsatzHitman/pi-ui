@@ -106,6 +106,8 @@ export class TranscriptProjector {
 		options: { includeAssistantError?: boolean } = {},
 	): TranscriptMessageInput[] {
 		switch (message.role) {
+			case "system":
+				return [];
 			case "user": {
 				const text = userContentRawText(message.content);
 				const { prompt, paths } = splitLeadingAttachmentReferences(text);
