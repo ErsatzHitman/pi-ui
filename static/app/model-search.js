@@ -26,7 +26,6 @@ export function filterModelSearch(input, query) {
 		: originalItems;
 
 	for (const item of orderedItems) {
-		item.classList.remove("active");
 		item.hidden = !visible.has(item);
 		item.parentElement?.append(item);
 	}

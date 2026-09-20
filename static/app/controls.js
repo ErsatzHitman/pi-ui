@@ -3,7 +3,7 @@ const menuPopoverSelector = "[popover][role='menu']";
 
 export function bindControls() {
 	document.addEventListener("keydown", handleKeydown);
-	document.addEventListener("mousemove", handlePointerMove);
+	document.addEventListener("mouseover", handleMouseOver);
 	document.addEventListener("click", handleClick);
 	refreshControls();
 }
@@ -140,14 +140,15 @@ function handleKeydown(event) {
 	}
 }
 
-function handlePointerMove(event) {
+function handleMouseOver(event) {
 	if (!(event.target instanceof Element)) return;
 	const commandItem = event.target.closest('[role="menuitem"]');
 	const command = commandItem?.closest(commandSelector);
 	if (
 		command instanceof HTMLElement &&
 		commandItem instanceof HTMLElement &&
-		!commandItem.hidden
+		!commandItem.hidden &&
+		!commandItem.classList.contains("active")
 	) {
 		activateCommandItem(command, commandItem);
 	}
