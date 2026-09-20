@@ -50,10 +50,11 @@ export const fileRoutes = {
 async function openLinkedFile(
 	request: Request,
 	context: RouteContext,
+	url: URL,
 ): Promise<Response> {
 	const uri =
 		request.method === "GET"
-			? (new URL(request.url).searchParams.get("uri") ?? "")
+			? (url.searchParams.get("uri") ?? "")
 			: requiredString(await readActionSignals(request), "uri");
 	const path = fileUriToPath(uri);
 	if (!path) throw new RouteError(400, "Invalid file link.");
@@ -82,8 +83,11 @@ async function openLinkedFile(
 	return Response.json({ path: filePath, workspacePath });
 }
 
-async function previewFile(request: Request, context: RouteContext): Promise<Response> {
-	const url = new URL(request.url);
+async function previewFile(
+	_request: Request,
+	context: RouteContext,
+	url: URL,
+): Promise<Response> {
 	let filePath: string;
 	try {
 		filePath = decodeURIComponent(url.pathname.slice(filesPreviewBase.length));

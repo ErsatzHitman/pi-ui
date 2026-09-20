@@ -5,8 +5,8 @@ import { endpoints } from "./endpoints.ts";
 
 export const streamRoutes = {
 	[endpoints.stream]: {
-		GET: (request, context) => {
-			const parameters = new URL(request.url).searchParams;
+		GET: (request, context, url) => {
+			const parameters = url.searchParams;
 			const clientId = parameters.get("clientId");
 			if (!clientId || !isDisplayClientId(clientId)) {
 				throw new RouteError(400, "Invalid display client ID.");

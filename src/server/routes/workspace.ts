@@ -172,8 +172,8 @@ export const workspaceRoutes = {
 		},
 	},
 	[endpoints.workspaceFileContent]: {
-		GET: async (request, context) => {
-			const params = new URL(request.url).searchParams;
+		GET: async (_request, context, url) => {
+			const params = url.searchParams;
 			const filePath = params.get("path") ?? "";
 			if (params.get("download") === "1") {
 				const { path } = await resolveFile(context.store.workspacePath, filePath);
