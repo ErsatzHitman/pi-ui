@@ -54,6 +54,6 @@ async function followFileLink(uri) {
 			await import("../../src/client/workspace-review.ts");
 		await openLinkedWorkspaceFile(path, workspacePath);
 	} catch (error) {
-		alert(error instanceof Error ? error.message : "Could not open the file.");
+		alert(Error.isError(error) ? error.message : "Could not open the file.");
 	}
 }

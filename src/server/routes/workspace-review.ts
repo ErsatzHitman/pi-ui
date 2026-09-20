@@ -41,7 +41,7 @@ export const workspaceReviewRoutes = {
 			} catch (error) {
 				throw new RouteError(
 					400,
-					error instanceof Error ? error.message : "Invalid review comments.",
+					Error.isError(error) ? error.message : "Invalid review comments.",
 				);
 			}
 			if (

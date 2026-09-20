@@ -58,6 +58,7 @@ type CommitView = { detail: WorkspaceCommitDetail; items: ReviewItem[] };
 
 const diffListEndPadding = 10;
 const workspaceGap = 2;
+const historyNavigationCodes = new Set(["ArrowDown", "ArrowUp", "Home", "End"]);
 const codeThemeLight = document.body.dataset.codeThemeLight;
 const codeThemeDark = document.body.dataset.codeThemeDark;
 if (codeThemeLight && codeThemeDark) {
@@ -547,7 +548,7 @@ async function loadWorkingDiff(key: string): Promise<void> {
 		workingItems = [];
 		displayedWorkingKey = undefined;
 		viewer?.setItems([]);
-		workingError = error instanceof Error ? error.message : "Unable to load diff";
+		workingError = Error.isError(error) ? error.message : "Unable to load diff";
 	} finally {
 		if (!request.signal.aborted) {
 			workingRequest = undefined;
@@ -900,7 +901,7 @@ function handleHistoryKeydown(event: KeyboardEvent): void {
 		event.ctrlKey ||
 		event.metaKey ||
 		event.shiftKey ||
-		!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.code)
+		!historyNavigationCodes.has(event.code)
 	) {
 		return;
 	}

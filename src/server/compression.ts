@@ -188,7 +188,7 @@ async function pumpCompressedBody(
 	} catch (error) {
 		await reader.cancel(error).catch(() => {});
 		if (!compressor.destroyed) {
-			compressor.destroy(error instanceof Error ? error : new Error(String(error)));
+			compressor.destroy(Error.isError(error) ? error : new Error(String(error)));
 		}
 	} finally {
 		compressor.off("close", cancelSource);

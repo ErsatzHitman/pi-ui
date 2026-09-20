@@ -186,7 +186,7 @@ function extractToolText<Result>(result: Result): string {
 	if (record?.text !== undefined) {
 		return stripAnsi(String(record.text));
 	}
-	if (result instanceof Error) {
+	if (Error.isError(result)) {
 		return result.message;
 	}
 	if (isString(result)) {
