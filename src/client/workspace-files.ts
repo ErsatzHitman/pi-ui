@@ -567,20 +567,18 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		entryError.textContent = "";
 		entryError.hidden = true;
 		entryDialog.returnValue = "";
-		return new Promise((resolve) => {
-			entryDialog.addEventListener(
-				"close",
-				() =>
-					resolve(
-						entryDialog.returnValue === "submit"
-							? entryInput.value
-							: undefined,
-					),
-				{ once: true },
-			);
-			entryDialog.showModal();
-			entryInput.select();
-		});
+		const { promise, resolve } = Promise.withResolvers<string | undefined>();
+		entryDialog.addEventListener(
+			"close",
+			() =>
+				resolve(
+					entryDialog.returnValue === "submit" ? entryInput.value : undefined,
+				),
+			{ once: true },
+		);
+		entryDialog.showModal();
+		entryInput.select();
+		return promise;
 	}
 
 	function submitEntryName(): void {
@@ -607,14 +605,14 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		confirmAction.dataset.variant =
 			options.destructive === false ? "default" : "destructive";
 		confirmDialog.returnValue = "";
-		return new Promise((resolve) => {
-			confirmDialog.addEventListener(
-				"close",
-				() => resolve(confirmDialog.returnValue === "confirm"),
-				{ once: true },
-			);
-			confirmDialog.showModal();
-		});
+		const { promise, resolve } = Promise.withResolvers<boolean>();
+		confirmDialog.addEventListener(
+			"close",
+			() => resolve(confirmDialog.returnValue === "confirm"),
+			{ once: true },
+		);
+		confirmDialog.showModal();
+		return promise;
 	}
 
 	async function requestNotice(title: string, description: string): Promise<void> {

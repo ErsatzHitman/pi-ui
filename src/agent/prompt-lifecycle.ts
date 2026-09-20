@@ -34,20 +34,13 @@ export class PromptLifecycle {
 		return (this.pending.get(runtime) ?? 0) > 0;
 	}
 
-	async submit(
+	submit(
 		runtime: AgentSessionRuntime,
 		text: string,
 		options: RuntimePromptOptions = {},
 	): Promise<boolean> {
-		let resolveAccepted: (accepted: boolean) => void = () => {};
-		let settled = false;
-		const accepted = new Promise<boolean>((resolve) => {
-			resolveAccepted = (value) => {
-				if (settled) return;
-				settled = true;
-				resolve(value);
-			};
-		});
+		const { promise: accepted, resolve: resolveAccepted } =
+			Promise.withResolvers<boolean>();
 
 		this.markPending(runtime);
 		runtime.session
@@ -64,7 +57,7 @@ export class PromptLifecycle {
 			})
 			.finally(() => this.markSettled(runtime));
 
-		return await accepted;
+		return accepted;
 	}
 
 	queueAfterCompaction(

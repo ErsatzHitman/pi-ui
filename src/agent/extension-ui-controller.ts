@@ -174,25 +174,25 @@ export class ExtensionUiController {
 		dialogOptions?: ExtensionUIDialogOptions,
 	): Promise<string | undefined> {
 		if (!isActive()) return Promise.resolve(undefined);
-		return new Promise((resolve) => {
-			this.enqueue(
-				{
-					dialog: {
-						id: crypto.randomUUID(),
-						kind: "select",
-						title,
-						options: [...options],
-					},
-					respond: (value, cancelled) =>
-						resolve(
-							!cancelled && value !== undefined && options.includes(value)
-								? value
-								: undefined,
-						),
+		const { promise, resolve } = Promise.withResolvers<string | undefined>();
+		this.enqueue(
+			{
+				dialog: {
+					id: crypto.randomUUID(),
+					kind: "select",
+					title,
+					options: [...options],
 				},
-				dialogOptions,
-			);
-		});
+				respond: (value, cancelled) =>
+					resolve(
+						!cancelled && value !== undefined && options.includes(value)
+							? value
+							: undefined,
+					),
+			},
+			dialogOptions,
+		);
+		return promise;
 	}
 
 	private confirm(
@@ -202,16 +202,15 @@ export class ExtensionUiController {
 		dialogOptions?: ExtensionUIDialogOptions,
 	): Promise<boolean> {
 		if (!isActive()) return Promise.resolve(false);
-		return new Promise((resolve) => {
-			this.enqueue(
-				{
-					dialog: { id: crypto.randomUUID(), kind: "confirm", title, message },
-					respond: (value, cancelled) =>
-						resolve(!cancelled && value === "confirm"),
-				},
-				dialogOptions,
-			);
-		});
+		const { promise, resolve } = Promise.withResolvers<boolean>();
+		this.enqueue(
+			{
+				dialog: { id: crypto.randomUUID(), kind: "confirm", title, message },
+				respond: (value, cancelled) => resolve(!cancelled && value === "confirm"),
+			},
+			dialogOptions,
+		);
+		return promise;
 	}
 
 	private input(
@@ -251,16 +250,16 @@ export class ExtensionUiController {
 		dialogOptions?: ExtensionUIDialogOptions,
 	): Promise<string | undefined> {
 		if (!isActive()) return Promise.resolve(undefined);
-		return new Promise((resolve) => {
-			this.enqueue(
-				{
-					dialog,
-					respond: (value, cancelled) =>
-						resolve(cancelled ? undefined : (value ?? "")),
-				},
-				dialogOptions,
-			);
-		});
+		const { promise, resolve } = Promise.withResolvers<string | undefined>();
+		this.enqueue(
+			{
+				dialog,
+				respond: (value, cancelled) =>
+					resolve(cancelled ? undefined : (value ?? "")),
+			},
+			dialogOptions,
+		);
+		return promise;
 	}
 
 	private enqueue(

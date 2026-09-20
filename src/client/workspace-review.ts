@@ -1153,22 +1153,22 @@ function writePreferences(): void {
 function submitWorkspaceReviewComments(
 	comments: readonly WorkspaceReviewComment[],
 ): Promise<boolean> {
-	return new Promise((resolve) => {
-		const timeout = setTimeout(() => resolve(false), 10_000);
-		window.addEventListener(
-			"pi-ui-workspace-review-submitted",
-			() => {
-				clearTimeout(timeout);
-				resolve(true);
-			},
-			{ once: true },
-		);
-		document.body.dispatchEvent(
-			new CustomEvent("pi-ui-workspace-review-submit", {
-				detail: { comments },
-			}),
-		);
-	});
+	const { promise, resolve } = Promise.withResolvers<boolean>();
+	const timeout = setTimeout(() => resolve(false), 10_000);
+	window.addEventListener(
+		"pi-ui-workspace-review-submitted",
+		() => {
+			clearTimeout(timeout);
+			resolve(true);
+		},
+		{ once: true },
+	);
+	document.body.dispatchEvent(
+		new CustomEvent("pi-ui-workspace-review-submit", {
+			detail: { comments },
+		}),
+	);
+	return promise;
 }
 
 function writeWorkspaceReviewPreferences(value: WorkspaceReviewPreferences): void {

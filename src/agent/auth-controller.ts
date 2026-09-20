@@ -278,18 +278,18 @@ export class AuthController {
 			error: undefined,
 		});
 
-		return new Promise<string>((resolve, reject) => {
-			const finish: AuthInputResolver = (value) => {
-				if (run.inputResolver !== finish) return;
-				run.inputResolver = undefined;
-				prompt.signal?.removeEventListener("abort", cancel);
-				if (value === undefined) reject(new Error("Login cancelled"));
-				else resolve(value);
-			};
-			const cancel = () => finish(undefined);
-			run.inputResolver = finish;
-			prompt.signal?.addEventListener("abort", cancel, { once: true });
-		});
+		const { promise, resolve, reject } = Promise.withResolvers<string>();
+		const finish: AuthInputResolver = (value) => {
+			if (run.inputResolver !== finish) return;
+			run.inputResolver = undefined;
+			prompt.signal?.removeEventListener("abort", cancel);
+			if (value === undefined) reject(new Error("Login cancelled"));
+			else resolve(value);
+		};
+		const cancel = () => finish(undefined);
+		run.inputResolver = finish;
+		prompt.signal?.addEventListener("abort", cancel, { once: true });
+		return promise;
 	}
 
 	private notifyAuthentication(run: AuthLoginRun, event: AuthEvent): void {
