@@ -147,11 +147,8 @@ function ToolbarButton(props: {
 					: undefined
 			}
 			inert={props.unavailable}
-			style={props.unavailable ? "visibility: hidden" : undefined}
 			data-preserve-attr={
-				props.action === "review"
-					? "aria-pressed data-variant inert style"
-					: undefined
+				props.action === "review" ? "aria-pressed data-variant inert" : undefined
 			}
 			data-size="icon-sm"
 			type="button"

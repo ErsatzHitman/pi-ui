@@ -7,6 +7,9 @@
 		grid-column: 1;
 		justify-self: start;
 	}
+	.toolbar-button[inert] {
+		visibility: hidden;
+	}
 	.toolbar-actions {
 		display: flex;
 		grid-column: 2;

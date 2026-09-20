@@ -1080,7 +1080,6 @@ function createVisibility(
 		);
 		if (!button) return;
 		button.inert = !available;
-		button.style.visibility = available ? "visible" : "hidden";
 	};
 	const requestOpen = (next: boolean) => {
 		app.dispatchEvent(
