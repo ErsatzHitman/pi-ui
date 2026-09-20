@@ -56,9 +56,10 @@ export class ModelController {
 		);
 		if (scoped.length === session.scopedModels.length) scoped.push({ model });
 		const modelRuntime = runtime.services.modelRuntime;
-		const configuredCount = modelRuntime
-			.getModels()
-			.filter((item) => modelRuntime.hasConfiguredAuth(item.provider)).length;
+		let configuredCount = 0;
+		for (const item of modelRuntime.getModels()) {
+			if (modelRuntime.hasConfiguredAuth(item.provider)) configuredCount += 1;
+		}
 		const enabled =
 			scoped.length === 0 || scoped.length === configuredCount
 				? undefined

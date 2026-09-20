@@ -1,5 +1,7 @@
 const commandSelector = ".command";
 const menuPopoverSelector = "[popover][role='menu']";
+const movementKeys = new Set(["ArrowDown", "ArrowUp", "Home", "End"]);
+const verticalMovementKeys = new Set(["ArrowDown", "ArrowUp"]);
 
 export function bindControls() {
 	document.addEventListener("keydown", handleKeydown);
@@ -109,7 +111,7 @@ function handleKeydown(event) {
 			}
 			return;
 		}
-		if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+		if (movementKeys.has(event.key)) {
 			event.preventDefault();
 			moveCommand(command, event.key);
 			return;
@@ -119,7 +121,7 @@ function handleKeydown(event) {
 	const menuPopover = event.target.closest(menuPopoverSelector);
 	if (menuPopover instanceof HTMLElement) {
 		if (event.key === "Tab") menuPopover.hidePopover();
-		if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+		if (movementKeys.has(event.key)) {
 			event.preventDefault();
 			moveInMenuPopover(menuPopover, event.key);
 		}
@@ -128,10 +130,7 @@ function handleKeydown(event) {
 
 	if (!(event.target instanceof HTMLButtonElement)) return;
 	const target = event.target.popoverTargetElement;
-	if (
-		target?.matches(menuPopoverSelector) &&
-		["ArrowDown", "ArrowUp"].includes(event.key)
-	) {
+	if (target?.matches(menuPopoverSelector) && verticalMovementKeys.has(event.key)) {
 		event.preventDefault();
 		event.target.click();
 		const items = menuPopoverItems(target);
