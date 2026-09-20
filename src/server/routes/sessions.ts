@@ -186,7 +186,7 @@ const FOLDER_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="
 
 async function readWorkspaceFavicon(
 	cwd: string,
-): Promise<{ bytes: ArrayBuffer; contentType: string } | undefined> {
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: string } | undefined> {
 	for (const candidate of FAVICON_CANDIDATES) {
 		const favicon = await readFaviconFile(join(cwd, candidate));
 		if (favicon) return favicon;
@@ -197,13 +197,13 @@ async function readWorkspaceFavicon(
 
 async function readFaviconFile(
 	path: string,
-): Promise<{ bytes: ArrayBuffer; contentType: string } | undefined> {
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: string } | undefined> {
 	try {
 		const file = Bun.file(path);
 		if (!(await file.exists())) return undefined;
 		const extension = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
 		return {
-			bytes: await file.arrayBuffer(),
+			bytes: await file.bytes(),
 			contentType:
 				FAVICON_CONTENT_TYPES.get(extension) ?? "application/octet-stream",
 		};

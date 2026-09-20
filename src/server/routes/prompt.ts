@@ -149,7 +149,7 @@ async function readPrompt(
 		};
 	});
 	return {
-		prompt: prompt.replace(/\r\n/g, "\n"),
+		prompt: prompt.replaceAll("\r\n", "\n"),
 		images: images.length > 0 ? images : undefined,
 	};
 }
