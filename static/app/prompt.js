@@ -17,18 +17,3 @@ export function focusPromptEnd() {
 	input.selectionStart = input.value.length;
 	input.selectionEnd = input.value.length;
 }
-
-export function bindPromptInteractions() {
-	document.addEventListener("pointerdown", (event) => {
-		const target = event.target;
-		if (!(target instanceof Element)) return;
-		const trigger = target.closest("[data-tooltip]");
-		if (!(trigger instanceof HTMLElement) || event.pointerType === "touch") return;
-		trigger.setAttribute("data-tooltip-suppressed", "");
-		trigger.addEventListener(
-			"pointerleave",
-			() => trigger.removeAttribute("data-tooltip-suppressed"),
-			{ once: true },
-		);
-	});
-}
