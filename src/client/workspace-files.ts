@@ -541,13 +541,13 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 
 	function showEmpty(message: string): void {
 		empty.textContent = message;
-		empty.style.display = "grid";
-		viewHost.style.display = "none";
+		empty.hidden = false;
+		viewHost.hidden = true;
 	}
 
 	function hideEmpty(): void {
-		empty.style.display = "none";
-		viewHost.style.display = "block";
+		empty.hidden = true;
+		viewHost.hidden = false;
 	}
 
 	function setStatus(message: string): void {

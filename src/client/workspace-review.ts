@@ -1138,7 +1138,7 @@ function emptyMessage(): string {
 }
 
 function showEmpty(message?: string): void {
-	empty.style.display = message ? "grid" : "none";
+	empty.hidden = !message;
 	if (message) empty.textContent = message;
 }
 
