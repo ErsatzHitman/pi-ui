@@ -36,15 +36,9 @@ async function fetchProviderUsagePayloadScoped(
 	}
 	if (!headers.has("user-agent")) headers.set("User-Agent", "pi-ui");
 
-	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), usageTimeoutMs);
-	try {
-		const response = await fetch(url, {
-			headers,
-			signal: controller.signal,
-		});
-		return response.ok ? await response.json() : undefined;
-	} finally {
-		clearTimeout(timeout);
-	}
+	const response = await fetch(url, {
+		headers,
+		signal: AbortSignal.timeout(usageTimeoutMs),
+	});
+	return response.ok ? await response.json() : undefined;
 }
