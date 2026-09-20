@@ -310,13 +310,16 @@ export class AppStore {
 		return this.orderedSessions.slice(0, this.sessionLimit);
 	}
 	private get orderedSessions(): AppSessionSummary[] {
-		const priority = (session: AppSessionSummary) => {
+		const running: AppSessionSummary[] = [];
+		const completed: AppSessionSummary[] = [];
+		const idle: AppSessionSummary[] = [];
+		for (const session of this.sessionCatalog) {
 			const status = sessionStatus(session, this);
-			return status === "running" ? 0 : status === "completed" ? 1 : 2;
-		};
-		return this.sessionCatalog.toSorted(
-			(left, right) => priority(left) - priority(right),
-		);
+			if (status === "running") running.push(session);
+			else if (status === "completed") completed.push(session);
+			else idle.push(session);
+		}
+		return running.concat(completed, idle);
 	}
 	get sessionsHasMore(): boolean {
 		return (
@@ -383,12 +386,12 @@ export class AppStore {
 			thinkingHidden: this.thinkingHidden,
 			usage: { ...this.usage },
 			activityText: this.activityText,
-			queuedSteeringMessages: [...this.queuedSteeringMessages],
-			queuedFollowUpMessages: [...this.queuedFollowUpMessages],
+			queuedSteeringMessages: this.queuedSteeringMessages,
+			queuedFollowUpMessages: this.queuedFollowUpMessages,
 			workspacePath: this.workspacePath,
 			workspaceFilesRevision: this.workspaceFilesRevision,
 			workspaceTreeRevision: this.workspaceTreeRevision,
-			workspaceReview: structuredClone(this.workspaceReview),
+			workspaceReview: this.workspaceReview,
 			workspaceReviewPreferences: { ...this.workspaceReviewPreferences },
 			recentWorkspaces: [...this.recentWorkspaces],
 			sessionTransition: { ...this.sessionTransition },
@@ -579,8 +582,9 @@ export class AppStore {
 		return true;
 	}
 	searchSessions(query: string): AppSessionSummary[] {
-		const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-		if (terms.length === 0) return [...this.sessions];
+		const normalized = query.trim().toLowerCase();
+		if (!normalized) return [...this.sessions];
+		const terms = normalized.split(/\s+/);
 		return this.orderedSessions
 			.values()
 			.filter((session) => {
@@ -705,6 +709,7 @@ export class AppStore {
 		this.commit();
 	}
 	setActivityText(value: string | undefined): void {
+		if (this.activityText === value) return;
 		this.transcript.setActivityText(value);
 		this.presentation?.sessionsChanged();
 		this.commit();
