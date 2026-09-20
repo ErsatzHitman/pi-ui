@@ -58,10 +58,10 @@ export class ExtensionUiController {
 				if (text === undefined) this.#statuses.delete(key);
 				else this.#statuses.set(key, text);
 				this.store.setExtensionStatuses(
-					[...this.#statuses].map(([statusKey, statusText]) => ({
-						key: statusKey,
-						text: statusText,
-					})),
+					this.#statuses
+						.entries()
+						.map(([key, text]) => ({ key, text }))
+						.toArray(),
 				);
 			},
 			setWorkingMessage: (message) => {
@@ -94,7 +94,7 @@ export class ExtensionUiController {
 						placement: options?.placement ?? "aboveEditor",
 					});
 				} else unsupported("component widgets");
-				this.store.setExtensionWidgets([...this.#widgets.values()]);
+				this.store.setExtensionWidgets(this.#widgets.values().toArray());
 			},
 			setFooter: (factory) => {
 				if (isActive() && factory) unsupported("custom footer components");

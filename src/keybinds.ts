@@ -109,7 +109,7 @@ function parseOverride<Value>(value: Value): ShortcutSpec | undefined {
 }
 
 export function keybindIds(): KeybindId[] {
-	return [...defaultDefinitions.keys()];
+	return defaultDefinitions.keys().toArray();
 }
 
 export function setActiveKeybinds(overrides: KeybindOverrides): void {

@@ -179,9 +179,11 @@ function isPopoverVisible(id) {
 }
 
 function visibleRows(selector) {
-	return [...document.querySelectorAll(selector)].filter(
-		(row) => row instanceof HTMLElement && row.checkVisibility(),
-	);
+	return document
+		.querySelectorAll(selector)
+		.values()
+		.filter((row) => row instanceof HTMLElement && row.checkVisibility())
+		.toArray();
 }
 
 function selectedPickerRow(selector) {

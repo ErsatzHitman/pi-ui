@@ -273,7 +273,7 @@ function groupSessionsByDate(
 		}
 		group.sessions.push({ session, index });
 	}
-	return [...groups.values()];
+	return groups.values().toArray();
 }
 
 function sessionDate(dateTime: string | undefined): Date | undefined {
