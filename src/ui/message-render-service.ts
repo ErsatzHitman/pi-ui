@@ -368,19 +368,19 @@ export class MessageRenderService {
 		const messageIndex = this.store.transcript.getMessageIndex(message.id);
 		if (messageIndex === undefined) return undefined;
 		let activityStart = messageIndex;
-		while (
-			activityStart > 0 &&
-			["thought", "tool"].includes(messages[activityStart - 1]!.role)
-		) {
+		let stepCount = 0;
+		while (activityStart > 0) {
+			const activity = messages[activityStart - 1]!;
+			if (activity.role !== "thought" && activity.role !== "tool") break;
 			activityStart -= 1;
+			if (activity.role === "tool") stepCount += 1;
 		}
-		const activity = messages.slice(activityStart, messageIndex);
-		const stepCount = activity.filter((item) => item.role === "tool").length;
 		if (stepCount === 0) return undefined;
 		return {
 			stepCount,
 			duration: formatActivityDuration(
-				message.timestamp.getTime() - activity[0]!.timestamp.getTime(),
+				message.timestamp.getTime() -
+					messages[activityStart]!.timestamp.getTime(),
 			),
 		};
 	}
