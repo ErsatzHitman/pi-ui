@@ -202,8 +202,7 @@ export function modelMatchesPattern(
 	);
 	if (!normalized.includes("*"))
 		return refs.some((value) => value === normalized || value.includes(normalized));
-	const escaped = normalized.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-	const regex = new RegExp(`^${escaped.replaceAll("*", ".*")}$`, "i");
+	const regex = new RegExp(`^${normalized.split("*").map(RegExp.escape).join(".*")}$`);
 	return refs.some((value) => regex.test(value));
 }
 
