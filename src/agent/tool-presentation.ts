@@ -31,12 +31,11 @@ export function toolTitleParts(
 	}
 
 	const target = toolTarget(toolName, args);
+	const range = toolRange(args);
 	return [
 		{ text: toolName },
 		...(target ? [{ text: target, tone: "accent", mono: true } as const] : []),
-		...(toolRange(args)
-			? [{ text: toolRange(args), tone: "muted", mono: true } as const]
-			: []),
+		...(range ? [{ text: range, tone: "muted", mono: true } as const] : []),
 	];
 }
 
