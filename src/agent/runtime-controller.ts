@@ -44,7 +44,6 @@ import {
 	type RuntimePromptOptions,
 } from "./prompt-lifecycle.ts";
 import { createBunReadToolDefinition } from "./read-tool.ts";
-import { configureOpenCodeHeaders } from "./request-headers.ts";
 import {
 	type SessionCatalogWatch,
 	watchSessionCatalog,
@@ -286,10 +285,6 @@ export class RuntimeController {
 						cwd,
 						resourceLoaderOptions: { extensionFactories },
 					}),
-			);
-			configureOpenCodeHeaders(
-				services.modelRuntime,
-				sessionManager.getSessionId(),
 			);
 			configureAgentHttpProxy(
 				services.modelRuntime,
