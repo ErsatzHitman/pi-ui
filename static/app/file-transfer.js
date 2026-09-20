@@ -155,7 +155,9 @@ export function extractTransferredFilePaths(data) {
 	for (const file of transferredFiles(data)) {
 		references.push(file.path ?? "", file.webkitRelativePath ?? "");
 	}
-	return [...new Set(references.map(fileReferenceToPath).filter(Boolean))];
+	const paths = new Set(references.map(fileReferenceToPath));
+	paths.delete(undefined);
+	return [...paths];
 }
 
 function transferredFiles(data) {
@@ -261,10 +263,13 @@ function validateTransferredFiles(files) {
 	if (files.length > MAX_TRANSFER_FILES) {
 		return `Attach at most ${MAX_TRANSFER_FILES} files at a time.`;
 	}
-	if (files.some((file) => file.size > MAX_TRANSFER_FILE_BYTES)) {
-		return "Dropped or pasted files must be 20 MiB or smaller; use the Files button for larger files.";
+	let totalBytes = 0;
+	for (const file of files) {
+		if (file.size > MAX_TRANSFER_FILE_BYTES) {
+			return "Dropped or pasted files must be 20 MiB or smaller; use the Files button for larger files.";
+		}
+		totalBytes += file.size;
 	}
-	const totalBytes = files.reduce((total, file) => total + file.size, 0);
 	if (totalBytes > MAX_TRANSFER_TOTAL_BYTES) {
 		return "Dropped or pasted files must total 50 MiB or less.";
 	}
