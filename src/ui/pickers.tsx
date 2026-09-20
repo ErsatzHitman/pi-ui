@@ -294,7 +294,7 @@ export function renderWorkspaceBrowserContent(
 				<button
 					type="button"
 					class="btn"
-					data-attr:disabled="$_sessionTransitionLoading"
+					data-attr:disabled="$_sessionTransitionStatus === 'loading'"
 					data-on:click={openWorkspaceFromBrowserAction(
 						JSON.stringify(listing.path),
 					)}
@@ -406,7 +406,7 @@ function renderWorkspaceRow(workspacePath: string, current: boolean): string {
 			tabindex="-1"
 			aria-current={current ? "true" : undefined}
 			data-indicator:_session-loading
-			data-attr:aria-disabled="$_sessionTransitionLoading ? 'true' : 'false'"
+			data-attr:aria-disabled="$_sessionTransitionStatus === 'loading' ? 'true' : 'false'"
 			data-on:click={openWorkspaceAction(JSON.stringify(workspacePath))}
 		>
 			<img class="workspace-favicon" src={faviconUrl} alt="" aria-hidden="true" />
@@ -419,7 +419,7 @@ function renderWorkspaceRow(workspacePath: string, current: boolean): string {
 }
 
 function openWorkspaceAction(valueExpression: string): string {
-	return `if (!$_sessionTransitionLoading) {
+	return `if ($_sessionTransitionStatus !== 'loading') {
 		if ($_workspaceAction === 'fork') {
 			@post('${endpoints.sessionsForkToWorkspace}', {
 				payload: { workspacePath: ${valueExpression} },
@@ -446,7 +446,7 @@ function browseWorkspaceAction(
 }
 
 function openWorkspaceFromBrowserAction(valueExpression: string): string {
-	return `if (!$_sessionTransitionLoading) {
+	return `if ($_sessionTransitionStatus !== 'loading') {
 		document.getElementById('workspace-browser-dialog')?.close();
 		if ($_workspaceAction === 'fork') {
 			@post('${endpoints.sessionsForkToWorkspace}', {
@@ -526,7 +526,7 @@ function renderSessionRow(
 			data-preserve-attr="class"
 			data-keep-command-open
 			data-indicator:_session-loading
-			data-attr:aria-disabled="$_sessionTransitionLoading ? 'true' : 'false'"
+			data-attr:aria-disabled="$_sessionTransitionStatus === 'loading' ? 'true' : 'false'"
 			data-on:click={
 				current
 					? "document.getElementById('session-dialog')?.close()"

@@ -52,11 +52,11 @@ export function renderMessages(
 			data-show="!$_sessionTransitionVisible"
 			data-class:messages-loading="
 				$_sessionLoading ||
-				$_sessionTransitionLoading
+				$_sessionTransitionStatus === 'loading'
 			"
 			data-attr:aria-busy="
 				$_sessionLoading ||
-				$_sessionTransitionLoading ? 'true' : 'false'
+				$_sessionTransitionStatus === 'loading' ? 'true' : 'false'
 			"
 			aria-live="polite"
 			aria-keyshortcuts={keybindAria("focus-conversation")}
@@ -187,7 +187,7 @@ function renderRecentSession(session: AppSessionSummary, index: number) {
 			type="button"
 			class="recent-session"
 			data-indicator:_session-loading
-			data-attr:disabled="$_sessionTransitionLoading"
+			data-attr:disabled="$_sessionTransitionStatus === 'loading'"
 			data-on:click={resumeSessionAction(session.path)}
 		>
 			<span class="recent-session-main">

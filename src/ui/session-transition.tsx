@@ -11,7 +11,7 @@ export function resumeSessionAction(
 	path: string,
 	options: { closeDialog?: boolean } = {},
 ): string {
-	return `if (!$_sessionLoading && !$_sessionTransitionLoading) {
+	return `if (!$_sessionLoading && $_sessionTransitionStatus !== 'loading') {
 		${options.closeDialog ? "document.getElementById('session-dialog')?.close();" : ""}
 		window.piUi.sessionPerformance.start();
 		@post('${endpoints.sessionsResume}', {
@@ -34,7 +34,7 @@ export function resumeSessionShortcutAction(
 }
 
 export function previousSessionAction(): string {
-	return `if (!$_sessionLoading && !$_sessionTransitionLoading) {
+	return `if (!$_sessionLoading && $_sessionTransitionStatus !== 'loading') {
 		document.getElementById('session-dialog')?.close();
 		window.piUi.sessionPerformance.start();
 		@post('${endpoints.sessionsPrevious}', { payload: {} });

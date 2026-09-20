@@ -4,7 +4,7 @@ import type { AppCommandId } from "./catalog.ts";
 
 export function newSessionAction(temporary = false): string {
 	const endpoint = temporary ? endpoints.sessionsNewTemporary : endpoints.sessionsNew;
-	return `if (!$_newSessionPending && !$_sessionTransitionLoading) { @post('${endpoint}', { payload: {} }); requestAnimationFrame(() => document.getElementById('prompt-input')?.focus()); }`;
+	return `if (!$_newSessionPending && $_sessionTransitionStatus !== 'loading') { @post('${endpoint}', { payload: {} }); requestAnimationFrame(() => document.getElementById('prompt-input')?.focus()); }`;
 }
 
 export function toggleDialogAction(): string {

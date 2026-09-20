@@ -316,7 +316,7 @@ function renderSessionSidebarRow(
 				aria-current={current ? "true" : undefined}
 				aria-label={session.title}
 				data-indicator:_session-loading
-				data-attr:aria-disabled="$_sessionTransitionLoading ? 'true' : 'false'"
+				data-attr:aria-disabled="$_sessionTransitionStatus === 'loading' ? 'true' : 'false'"
 				data-on:click={current ? undefined : resumeSessionAction(session.path)}
 				data-on:keydown__window={
 					shortcut && !current

@@ -119,7 +119,7 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 							$_fileSearchController = '';
 							$_filePickerOpen = false;
 						`}
-						data-effect={`if (!$_sessionTransitionLoading) {
+						data-effect={`if ($_sessionTransitionStatus !== 'loading') {
 							el.focus({ preventScroll: true });
 							el.selectionStart = el.value.length;
 							el.selectionEnd = el.value.length;
@@ -136,14 +136,11 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 							!evt.metaKey &&
 							!evt.altKey &&
 							!evt.shiftKey &&
-							!window.piUi.pickers.isOpen()
+							!window.piUi.pickers.isOpen() &&
+							document.querySelector('[data-send-trigger]')
 						) {
 							evt.preventDefault();
-							if ($_isBusy) {
-								@post('${endpoints.abort}', { payload: {} });
-							} else {
-								el.blur();
-							}
+							el.blur();
 						}
 						if (evt.altKey && evt.code === 'ArrowUp') {
 							evt.preventDefault();

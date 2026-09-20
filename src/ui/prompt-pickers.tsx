@@ -26,7 +26,7 @@ export function renderWorkspacePicker(state: AppStateSnapshot): string {
 			aria-haspopup="dialog"
 			aria-controls="workspace-dialog"
 			aria-label={state.workspacePath}
-			data-attr:disabled="$_sessionTransitionLoading"
+			data-attr:disabled="$_sessionTransitionStatus === 'loading'"
 			commandfor="workspace-dialog"
 			command="show-modal"
 			data-on:click="$_workspaceAction = 'open'"
