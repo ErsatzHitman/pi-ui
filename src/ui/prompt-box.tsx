@@ -92,9 +92,7 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 							"data-on:input__debounce.150ms": `@post('${endpoints.extensionUiEditor}', { payload: { prompt: $prompt } })`,
 							"data-on:pi-ui-file-query__debounce.20ms": `
 								if (typeof evt.detail?.query === 'string') {
-									if (typeof $_fileSearchController?.abort === 'function') {
-										$_fileSearchController.abort();
-									}
+									$_fileSearchController?.abort?.();
 									$_fileSearchController = new AbortController();
 									$fileQuery = evt.detail.query;
 									@get('${endpoints.filesSearch}', {
@@ -117,10 +115,8 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 						"
 						data-on:pi-ui-picker-close="$_slashPickerOpen = false"
 						data-on:pi-ui-file-close={`
-							if (typeof $_fileSearchController?.abort === 'function') {
-							$_fileSearchController.abort();
-						}
-						$_fileSearchController = '';
+							$_fileSearchController?.abort?.();
+							$_fileSearchController = '';
 							$_filePickerOpen = false;
 						`}
 						data-effect={`if (!$_sessionTransitionLoading) {

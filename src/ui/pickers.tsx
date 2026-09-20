@@ -574,14 +574,10 @@ function renderSessionRow(
 						data-variant="destructive"
 						data-size="icon-xs"
 						aria-label={`Abort ${current ? "current" : "background"} session ${session.title}`}
-						data-on:click={
+						data-on:click__stop={
 							current
-								? `
-						evt.stopPropagation();
-						@post('${endpoints.abort}', { payload: {} });
-						`
+								? `@post('${endpoints.abort}', { payload: {} })`
 								: `
-						evt.stopPropagation();
 						$backgroundSessionPath = ${JSON.stringify(session.path)};
 						@post('${endpoints.sessionsBackgroundAbort}', {
 						payload: { backgroundSessionPath: $backgroundSessionPath },

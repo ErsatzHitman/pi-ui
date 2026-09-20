@@ -14,17 +14,11 @@ export function SessionDeleteButton(props: {
 			type="button"
 			class={["btn session-delete-button", props.class]}
 			data-variant="ghost"
-			data-attr:data-variant={`$sessionDeleteHover === ${path} ? 'destructive' : 'ghost'`}
 			data-size="icon-xs"
 			aria-label={`Delete session ${props.session.title}`}
 			commandfor="session-delete-dialog"
 			command="show-modal"
-			data-on:mouseenter={`$sessionDeleteHover = ${path}`}
-			data-on:mouseleave="$sessionDeleteHover = ''"
-			data-on:focus={`$sessionDeleteHover = ${path}`}
-			data-on:blur="$sessionDeleteHover = ''"
-			data-on:click={`
-				evt.stopPropagation();
+			data-on:click__stop={`
 				$sessionDeletePath = ${path};
 				$sessionDeleteTitle = ${title};
 			`}

@@ -337,12 +337,9 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 													model.scoped ? "true" : "false"
 												}
 												aria-label="Toggle scoped model"
-												data-on:click={`
-													evt.stopPropagation();
-													@post('${endpoints.modelsScopeToggle}', {
-													payload: { model: ${JSON.stringify(value)} },
-												});
-												`}
+												data-on:click__stop={`@post('${endpoints.modelsScopeToggle}', {
+												payload: { model: ${JSON.stringify(value)} },
+												});`}
 											>
 												<Icon
 													icon={Star}

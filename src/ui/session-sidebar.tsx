@@ -98,7 +98,6 @@ export function renderSessionSidebar(
 					$_sessionSidebarWidth + 'px',
 				)`}
 				data-signals:_session-sidebar-pointer-x__ifmissing="0"
-				data-signals:session-delete-hover__ifmissing="''"
 				data-on:keydown__window={keybindActions(
 					[
 						"toggle-sessions",

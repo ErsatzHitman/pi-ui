@@ -4,8 +4,6 @@ import { syncHtml } from "./sync-html.ts";
 
 function startSessionRenameAction(session: AppSessionSummary): string {
 	return `
-		evt.preventDefault();
-		evt.stopPropagation();
 		const title = evt.currentTarget;
 		$sessionRenamePath = ${JSON.stringify(session.path)};
 		$sessionRenameTitle = ${JSON.stringify(session.title)};
@@ -45,7 +43,7 @@ export function SessionRenameTitle(props: { session: AppSessionSummary }): strin
 			class="session-rename"
 			data-session-rename-title
 			data-on:click__stop="true"
-			data-on:dblclick={startSessionRenameAction(props.session)}
+			data-on:dblclick__prevent__stop={startSessionRenameAction(props.session)}
 		>
 			<span class="session-rename-title" data-show={`!(${editing})`} safe>
 				{props.session.title}
@@ -61,19 +59,16 @@ export function SessionRenameTitle(props: { session: AppSessionSummary }): strin
 				data-bind:session-rename-title
 				data-indicator:_session-renaming
 				data-attr:disabled="$_sessionRenaming"
-				data-on:dblclick="evt.stopPropagation()"
-				data-on:keydown={`
-					evt.stopPropagation();
-					if (evt.key === 'Enter') {
-						evt.preventDefault();
-						evt.currentTarget.blur();
-					} else if (evt.key === 'Escape') {
-						evt.preventDefault();
-						$sessionRenamePath = '';
-						$sessionRenameTitle = '';
-						evt.currentTarget.blur();
-					};
-				`}
+				data-on:dblclick__stop="true"
+				data-on:keydown__stop={`if (evt.key === 'Enter') {
+					evt.preventDefault();
+					evt.currentTarget.blur();
+				} else if (evt.key === 'Escape') {
+					evt.preventDefault();
+					$sessionRenamePath = '';
+					$sessionRenameTitle = '';
+					evt.currentTarget.blur();
+				}`}
 				data-on:blur={finishSessionRenameAction(props.session)}
 			/>
 		</span>,
