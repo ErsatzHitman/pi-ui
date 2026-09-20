@@ -514,18 +514,6 @@ function sessionRowId(path: string): string {
 	return `session-row-${encodeURIComponent(path)}`;
 }
 
-const currentSessionPickerClickAction = `
-	const title = evt.target.closest('[data-session-rename-title]');
-	if (title) {
-		clearTimeout(Number(title.dataset.sessionPickerCloseTimer));
-		title.dataset.sessionPickerCloseTimer = setTimeout(() => {
-			document.getElementById('session-dialog')?.close();
-		}, 300);
-	} else {
-		document.getElementById('session-dialog')?.close();
-	}
-`;
-
 function renderSessionRow(
 	session: AppSessionSummary,
 	index: number,
@@ -546,7 +534,7 @@ function renderSessionRow(
 			data-attr:aria-disabled="$_sessionTransitionLoading ? 'true' : 'false'"
 			data-on:click={
 				current
-					? currentSessionPickerClickAction
+					? "document.getElementById('session-dialog')?.close()"
 					: resumeSessionAction(session.path, { closeDialog: true })
 			}
 			data-on:keydown__window={

@@ -7,8 +7,6 @@ function startSessionRenameAction(session: AppSessionSummary): string {
 		evt.preventDefault();
 		evt.stopPropagation();
 		const title = evt.currentTarget;
-		clearTimeout(Number(title?.dataset.sessionPickerCloseTimer));
-		if (title) delete title.dataset.sessionPickerCloseTimer;
 		$sessionRenamePath = ${JSON.stringify(session.path)};
 		$sessionRenameTitle = ${JSON.stringify(session.title)};
 		queueMicrotask(() => {
@@ -46,6 +44,9 @@ export function SessionRenameTitle(props: { session: AppSessionSummary }): strin
 		<span
 			class="session-rename"
 			data-session-rename-title
+			attrs={{
+				"data-on:click__stop__debounce.300ms": `if (!(${editing})) document.getElementById('session-dialog')?.close()`,
+			}}
 			data-on:dblclick={startSessionRenameAction(props.session)}
 		>
 			<span class="session-rename-title" data-show={`!(${editing})`} safe>
@@ -62,7 +63,6 @@ export function SessionRenameTitle(props: { session: AppSessionSummary }): strin
 				data-bind:session-rename-title
 				data-indicator:_session-renaming
 				data-attr:disabled="$_sessionRenaming"
-				data-on:click="evt.stopPropagation()"
 				data-on:dblclick="evt.stopPropagation()"
 				data-on:keydown={`
 					evt.stopPropagation();
