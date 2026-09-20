@@ -69,7 +69,7 @@ function shortcutKey(token: string): ShortcutKey | undefined {
  */
 export function parseShortcut(shortcut: string): ShortcutSpec | undefined {
 	const tokens = shortcut.trim().toLowerCase().split(/\s+/).filter(Boolean);
-	const key = tokens.length > 0 ? shortcutKey(tokens[tokens.length - 1]) : undefined;
+	const key = shortcutKey(tokens.at(-1) ?? "");
 	if (!key) return undefined;
 	const spec: ShortcutSpec = { primary: false, alt: false, shift: false, key };
 	for (const token of tokens.slice(0, -1)) {

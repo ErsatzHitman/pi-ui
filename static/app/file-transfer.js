@@ -24,7 +24,7 @@ const attachments = [];
 export function hasFiles(data) {
 	if (!data) return false;
 	if (data.files?.length) return true;
-	return [...data.types].some((type) => type === "Files" || type === "text/uri-list");
+	return data.types.includes("Files") || data.types.includes("text/uri-list");
 }
 
 export function pick() {
