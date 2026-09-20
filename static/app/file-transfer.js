@@ -188,17 +188,15 @@ export function fileWithDetectedMimeType(file, mimeType) {
 	});
 }
 
-async function prepareTransferredImages(files) {
-	const prepared = [];
-	for (const file of files) {
+function prepareTransferredImages(files) {
+	return Array.fromAsync(files, (file) => {
 		if (isHeicImageFile(file)) {
 			throw new Error(
 				"HEIC and HEIF images are not supported. Convert them to JPEG or PNG first.",
 			);
 		}
-		prepared.push(isAvifImageFile(file) ? await convertAvifToJpeg(file) : file);
-	}
-	return prepared;
+		return isAvifImageFile(file) ? convertAvifToJpeg(file) : file;
+	});
 }
 
 export async function convertAvifToJpeg(file) {

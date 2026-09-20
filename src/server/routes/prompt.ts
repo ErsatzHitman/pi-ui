@@ -135,23 +135,19 @@ async function readPrompt(
 			"Prompt attachments must be JPEG, PNG, GIF, WebP, or BMP images.",
 		);
 	}
-	const images: ImageContent[] = [];
-	for (const file of files) {
-		const resized = await resizeImage(
-			new Uint8Array(await file.arrayBuffer()),
-			file.type,
-		);
+	const images: ImageContent[] = await Array.fromAsync(files, async (file) => {
+		const resized = await resizeImage(await file.bytes(), file.type);
 		if (!resized) {
 			throw new ActionInputError(
 				`Could not process image attachment: ${file.name}`,
 			);
 		}
-		images.push({
+		return {
 			type: "image",
 			data: resized.data,
 			mimeType: resized.mimeType,
-		});
-	}
+		};
+	});
 	return {
 		prompt: prompt.replace(/\r\n/g, "\n"),
 		images: images.length > 0 ? images : undefined,
