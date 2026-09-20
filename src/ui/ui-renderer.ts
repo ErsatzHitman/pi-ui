@@ -395,14 +395,12 @@ export class UiRenderer implements AppStorePresentation {
 		};
 	}
 	private effectSignalOverrides(effects: readonly UiCommitEffect[]): JsonObject {
-		return Object.assign(
-			{},
-			...effects
-				.values()
-				.filter((effect) => effect.type === "signal-overrides")
-				.map((effect) => effect.values)
-				.toArray(),
-		);
+		const overrides: JsonObject = {};
+		for (const effect of effects) {
+			if (effect.type === "signal-overrides")
+				Object.assign(overrides, effect.values);
+		}
+		return overrides;
 	}
 	private mainEffectScripts(effects: readonly UiCommitEffect[]): string[] {
 		const scripts: string[] = [];
@@ -417,21 +415,21 @@ export class UiRenderer implements AppStorePresentation {
 		return scripts;
 	}
 	private pickerEffectScripts(effects: readonly UiCommitEffect[]): string[] {
-		const scripts: string[] = [];
+		const scripts = new Set<string>();
 		for (const effect of effects) {
 			if (effect.type === "restore-model-picker")
-				scripts.push(
+				scripts.add(
 					"requestAnimationFrame(() => document.getElementById('model-select-input')?.focus())",
 				);
 			if (effect.type === "dialog") {
-				scripts.push(
+				scripts.add(
 					effect.open
 						? `{ const dialog = document.getElementById('${effect.id}'); if (dialog && !dialog.open) dialog.showModal(); }`
 						: `{ const dialog = document.getElementById('${effect.id}'); if (dialog?.open) dialog.close(); }`,
 				);
 			}
 		}
-		return [...new Set(scripts)];
+		return [...scripts];
 	}
 	private initialDialogScripts(snapshot: AppStateSnapshot): string[] {
 		return [
