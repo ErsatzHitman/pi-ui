@@ -548,19 +548,16 @@ export class AppStore {
 	}
 	promoteSession(path: string, options: { regroup?: boolean } = {}): boolean {
 		const catalog = this.getSessionCatalog();
-		const session = catalog.find((candidate) => candidate.path === path);
-		if (!session) return false;
-		if (catalog[0]?.path === path) {
+		const index = catalog.findIndex((candidate) => candidate.path === path);
+		if (index < 0) return false;
+		if (index === 0) {
 			if (options.regroup) {
 				this.presentation?.sessionsChanged();
 				this.commit();
 			}
 			return false;
 		}
-		this.sessionCatalog = [
-			session,
-			...catalog.filter((candidate) => candidate.path !== path),
-		];
+		this.sessionCatalog = [catalog[index], ...catalog.toSpliced(index, 1)];
 		this.presentation?.sessionsChanged();
 		this.commit();
 		return true;
