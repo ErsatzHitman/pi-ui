@@ -56,13 +56,14 @@ const markdownHtmlRewriter = new HTMLRewriter()
 	.on("a", {
 		element(element) {
 			const href = element.getAttribute("href");
-			if (!href || !safeUrl(href, { allowDataImage: false })) {
+			const url = href ? safeUrl(href, { allowDataImage: false }) : undefined;
+			if (!href || !url) {
 				element.before("<span>", { html: true });
 				element.after("</span>", { html: true });
 				element.removeAndKeepContent();
 				return;
 			}
-			if (new URL(href, "http://pi-ui.local").protocol === "file:") {
+			if (url.protocol === "file:") {
 				// Keep the local URI out of href so the browser cannot attempt a
 				// forbidden file:// navigation when client-side handling is unavailable.
 				element.setAttribute("href", "#");
@@ -409,6 +410,7 @@ function loadedCodeLanguage(language: string): string | undefined {
 }
 
 const localImagePattern = /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)$/i;
+const safeUrlProtocols = new Set(["http:", "https:", "mailto:", "file:"]);
 
 // The browser cannot load local files, so route existing image files through the
 // server's preview endpoint.
@@ -424,16 +426,16 @@ function localImageUrl(source: string): string | undefined {
 	return filePreviewUrl(path);
 }
 
-function safeUrl(value: string, options: { allowDataImage: boolean }): boolean {
+function safeUrl(value: string, options: { allowDataImage: boolean }): URL | undefined {
 	const url = URL.parse(value, "http://pi-ui.local");
-	if (!url) return false;
+	if (!url) return undefined;
 	if (url.protocol === "data:") {
-		return (
-			options.allowDataImage &&
+		return options.allowDataImage &&
 			/^data:image\/(png|jpeg|gif|webp);base64,/i.test(value)
-		);
+			? url
+			: undefined;
 	}
-	return ["http:", "https:", "mailto:", "file:"].includes(url.protocol);
+	return safeUrlProtocols.has(url.protocol) ? url : undefined;
 }
 
 function decodeHtml(value: string): string {
