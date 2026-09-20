@@ -374,17 +374,16 @@ function renderAttachments() {
 
 function renderAttachment(attachment) {
 	const name = attachment.file?.name || displayName(attachment.path);
+	const item = document.createElement("button");
+	item.type = "button";
+	item.className = `prompt-attachment prompt-attachment-${attachment.previewUrl ? "image" : "file"}`;
+	item.setAttribute("aria-label", `Remove ${name}`);
+	item.addEventListener("click", () => removeAttachment(attachment.path));
 	if (attachment.previewUrl) {
-		const item = document.createElement("button");
-		item.type = "button";
-		item.className = "prompt-attachment prompt-attachment-image";
-		item.setAttribute("aria-label", `Remove ${name}`);
-		item.addEventListener("click", () => removeAttachment(attachment.path));
 		const preview = document.createElement("span");
 		preview.className = "prompt-attachment-preview";
 		const image = document.createElement("img");
 		image.className = "prompt-attachment-image-content";
-		image.style.overflowClipMargin = "unset";
 		image.src = attachment.previewUrl;
 		image.alt = name;
 		preview.append(image);
@@ -392,11 +391,6 @@ function renderAttachment(attachment) {
 		return item;
 	}
 
-	const item = document.createElement("button");
-	item.type = "button";
-	item.className = "prompt-attachment prompt-attachment-file";
-	item.setAttribute("aria-label", `Remove ${name}`);
-	item.addEventListener("click", () => removeAttachment(attachment.path));
 	const extension = attachmentFileExtension(name);
 	const kind = attachmentFileKind(name, attachment.file?.type);
 	const icon = document.createElement("span");
