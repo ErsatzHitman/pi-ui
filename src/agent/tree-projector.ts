@@ -157,7 +157,7 @@ function orderActiveFirst(
 	nodes: SessionTreeNode[],
 	containsActive: Map<SessionTreeNode, boolean>,
 ): SessionTreeNode[] {
-	return [...nodes].sort(
+	return nodes.toSorted(
 		(a, b) => Number(containsActive.get(b)) - Number(containsActive.get(a)),
 	);
 }

@@ -1180,13 +1180,11 @@ function writeWorkspaceReviewPreferences(value: WorkspaceReviewPreferences): voi
 function updateWorkingAnnotations(path: string): void {
 	const index = workingItems.findIndex((item) => item.fileDiff.name === path);
 	if (index < 0) return;
-	const next = [...workingItems];
-	next[index] = {
-		...next[index],
+	workingItems = workingItems.with(index, {
+		...workingItems[index],
 		annotations: comments.annotations.get(path),
 		version: ++version,
-	};
-	workingItems = next;
+	});
 	if (selection.kind === "working") {
 		items = workingItems;
 		itemsByPath = itemMap(items);

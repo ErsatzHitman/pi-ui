@@ -114,7 +114,7 @@ export function bindDisplayRefreshMeasurement() {
 }
 
 function percentile(values, fraction) {
-	const sorted = [...values].sort((left, right) => left - right);
+	const sorted = values.toSorted((left, right) => left - right);
 	return sorted[
 		Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))
 	];
