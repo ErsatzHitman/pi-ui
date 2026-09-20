@@ -1,8 +1,4 @@
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-import { operatingSystem, type OperatingSystem } from "../utils/platform.ts";
+import { resolvePath } from "../../node_modules/@earendil-works/pi-coding-agent/dist/utils/paths.js";
 
 export type SessionResumeRuntimeState = {
 	streaming: boolean;
@@ -22,37 +18,6 @@ export type SessionResumeOperations<TManager, TBackground> = {
 	switchSession: (sessionPath: string) => Promise<{ cancelled: boolean }>;
 };
 
-type PathApi = Pick<typeof path, "join" | "resolve">;
-
-type CanonicalPathOptions = {
-	homeDir?: string;
-	pathApi?: PathApi;
-	platform?: OperatingSystem;
-};
-
-/** Matches the SDK's lexical resolvePath semantics without reading the session. */
-export function canonicalSessionPath(
-	input: string,
-	options: CanonicalPathOptions = {},
-): string {
-	const platform = options.platform ?? operatingSystem;
-	const pathApi = options.pathApi ?? path;
-	const home = options.homeDir ?? os.homedir();
-	let normalized = input;
-	if (normalized === "~") {
-		normalized = home;
-	} else if (
-		normalized.startsWith("~/") ||
-		(platform === "windows" && normalized.startsWith("~\\"))
-	) {
-		normalized = pathApi.join(home, normalized.slice(2));
-	}
-	if (normalized.startsWith("file://")) {
-		normalized = fileURLToPath(normalized);
-	}
-	return pathApi.resolve(normalized);
-}
-
 /** Executes one resume while keeping session parsing behind one branch-specific open. */
 export async function executeSessionResume<TManager, TBackground>(
 	sessionPath: string,
@@ -60,7 +25,7 @@ export async function executeSessionResume<TManager, TBackground>(
 ): Promise<boolean> {
 	if (!sessionPath.trim()) return false;
 
-	const canonicalPath = canonicalSessionPath(sessionPath);
+	const canonicalPath = resolvePath(sessionPath);
 	const backgroundSession = operations.findBackground(canonicalPath);
 	if (backgroundSession) {
 		// Ownership stays in the background registry until activation commits.

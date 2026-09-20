@@ -8,7 +8,6 @@ import {
 } from "#testing/assertions";
 
 import {
-	canonicalSessionPath,
 	executeSessionResume,
 	type SessionResumeRuntimeState,
 } from "./session-resume.ts";
@@ -52,7 +51,7 @@ function resumeHarness(
 				events.push("open");
 				if (options.openError) throw options.openError;
 				return {
-					path: canonicalSessionPath(sessionPath),
+					path: path.resolve(sessionPath),
 					cwd: options.managerCwd ?? "/workspace",
 				};
 			},
@@ -95,7 +94,7 @@ test("idle persisted resume delegates to one SDK logical open", async () => {
 });
 
 test("background activation performs no session open", async () => {
-	const target = canonicalSessionPath("session.jsonl");
+	const target = path.resolve("session.jsonl");
 	const fake = resumeHarness(
 		{ streaming: true, persisted: true },
 		{ backgroundPath: target },
@@ -166,23 +165,4 @@ test("extension cancellation keeps the idle persisted runtime", async () => {
 		logicalOpenCount: 1,
 		events: ["switch"],
 	});
-});
-
-test("session paths use SDK-compatible POSIX and Windows lexical resolution", () => {
-	assertEqual(
-		canonicalSessionPath("~/sessions/../one.jsonl", {
-			homeDir: "/home/test",
-			pathApi: path.posix,
-			platform: "linux",
-		}),
-		"/home/test/one.jsonl",
-	);
-	assertEqual(
-		canonicalSessionPath("~\\sessions\\..\\one.jsonl", {
-			homeDir: "C:\\Users\\test",
-			pathApi: path.win32,
-			platform: "windows",
-		}),
-		"C:\\Users\\test\\one.jsonl",
-	);
 });
