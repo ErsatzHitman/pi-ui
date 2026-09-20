@@ -573,9 +573,7 @@ export class AppStore {
 		const catalog = this.getSessionCatalog();
 		const index = catalog.findIndex((candidate) => candidate.path === path);
 		if (index < 0) return false;
-		this.sessionCatalog = catalog.map((session, candidateIndex) =>
-			candidateIndex === index ? update(session) : session,
-		);
+		this.sessionCatalog = catalog.with(index, update(catalog[index]));
 		if (options.sidebarOnly) this.presentation?.sessionSidebarChanged();
 		else this.presentation?.sessionsChanged();
 		this.commit();
@@ -585,12 +583,14 @@ export class AppStore {
 		const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
 		if (terms.length === 0) return [...this.sessions];
 		return this.orderedSessions
+			.values()
 			.filter((session) => {
 				const haystack =
 					`${session.title} ${formatMessageCount(session.messageCount)} ${session.cwd} ${session.path}`.toLowerCase();
 				return terms.every((term) => haystack.includes(term));
 			})
-			.slice(0, this.sessionLimit);
+			.take(this.sessionLimit)
+			.toArray();
 	}
 	removeSession(path: string): void {
 		this.setSessionCatalog(
