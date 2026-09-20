@@ -33,11 +33,7 @@ export function bindFileLinks() {
 }
 
 export function isFileUri(uri) {
-	try {
-		return new URL(uri).protocol === "file:";
-	} catch {
-		return false;
-	}
+	return URL.parse(uri)?.protocol === "file:";
 }
 
 async function followFileLink(uri) {

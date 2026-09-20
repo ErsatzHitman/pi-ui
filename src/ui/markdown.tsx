@@ -425,18 +425,15 @@ function localImageUrl(source: string): string | undefined {
 }
 
 function safeUrl(value: string, options: { allowDataImage: boolean }): boolean {
-	try {
-		const url = new URL(value, "http://pi-ui.local");
-		if (url.protocol === "data:") {
-			return (
-				options.allowDataImage &&
-				/^data:image\/(png|jpeg|gif|webp);base64,/i.test(value)
-			);
-		}
-		return ["http:", "https:", "mailto:", "file:"].includes(url.protocol);
-	} catch {
-		return false;
+	const url = URL.parse(value, "http://pi-ui.local");
+	if (!url) return false;
+	if (url.protocol === "data:") {
+		return (
+			options.allowDataImage &&
+			/^data:image\/(png|jpeg|gif|webp);base64,/i.test(value)
+		);
 	}
+	return ["http:", "https:", "mailto:", "file:"].includes(url.protocol);
 }
 
 function decodeHtml(value: string): string {
