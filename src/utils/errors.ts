@@ -1,7 +1,7 @@
 import { isRecord, isString } from "./type-guards.ts";
 
 export function errorMessage(error: ErrorOptions["cause"]): string {
-	return error instanceof Error ? error.message : String(error);
+	return Error.isError(error) ? error.message : String(error);
 }
 
 /** Reads an error string from a failed JSON response, else the fallback. */
