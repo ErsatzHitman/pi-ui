@@ -249,7 +249,9 @@ function datastarInspectorEnabled(): boolean {
 	return process.env.PI_UI_INSPECTOR === "1";
 }
 function uniqueStrings(values: string[]): string[] {
-	return [...new Set(values.filter(Boolean))];
+	const unique = new Set(values);
+	unique.delete("");
+	return [...unique];
 }
 
 /** Mutable authoritative application state. It has no renderer or transport dependency. */
@@ -395,7 +397,7 @@ export class AppStore {
 			documentTitle: this.documentTitle,
 			updateAvailable: this.updateAvailable,
 			hasOlderMessages: this.hasOlderMessages,
-			promptHistory: [...this.promptHistory],
+			promptHistory: this.promptHistory,
 			promptEditorText: this.promptEditorText,
 			emptyChatHint: { ...this.emptyChatHint },
 		});

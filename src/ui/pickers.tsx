@@ -461,7 +461,9 @@ function openWorkspaceFromBrowserAction(valueExpression: string): string {
 }
 
 function uniqueWorkspaces(workspaces: readonly string[]): string[] {
-	return [...new Set(workspaces)].filter(Boolean);
+	const unique = new Set(workspaces);
+	unique.delete("");
+	return [...unique];
 }
 
 export function renderSessionPicker(state: AppStateSnapshot): string {
