@@ -1,9 +1,11 @@
+import { contentText } from "@earendil-works/pi-ai";
 import type {
 	AgentSessionEvent,
 	AgentSessionRuntime,
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 
+import { parseModelPattern } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/model-resolver.js";
 import type { JsonValue } from "../utils/json-types.ts";
 import { isBoolean, isRecord, isString } from "../utils/type-guards.ts";
 
@@ -59,22 +61,13 @@ export async function generateAutoTitle(
 	);
 	if (!firstUserMessage) return undefined;
 
-	const available = new Set(
-		runtime.services.modelRuntime
-			.getAvailableSnapshot()
-			.map((model) => `${model.provider}/${model.id}`),
-	);
-	const candidates = config.models
-		.map(parseModelRef)
-		.filter((candidate): candidate is TitleModelRef => Boolean(candidate))
-		.filter((candidate) => available.has(`${candidate.provider}/${candidate.id}`))
-		.flatMap((candidate) => {
-			const model = runtime.services.modelRuntime.getModel(
-				candidate.provider,
-				candidate.id,
-			);
-			return model ? [{ ...candidate, model }] : [];
+	const available = [...runtime.services.modelRuntime.getAvailableSnapshot()];
+	const candidates = config.models.flatMap((pattern) => {
+		const { model, thinkingLevel } = parseModelPattern(pattern, available, {
+			allowInvalidThinkingLevelFallback: false,
 		});
+		return model ? [{ model, reasoning: thinkingLevel ?? "minimal" }] : [];
+	});
 
 	const promptSuffix = config.prompt
 		? ["Follow this user-configured title style:", config.prompt].join(" ")
@@ -115,48 +108,13 @@ export async function generateAutoTitle(
 			if (["error", "aborted", "deferred"].includes(response.stopReason)) {
 				continue;
 			}
-			const text = response.content
-				.filter((block) => block.type === "text")
-				.map((block) => block.text)
-				.join(" ");
-			const title = sanitizeTitle(text);
+			const title = sanitizeTitle(contentText(response.content, " "));
 			if (title && !/[?？]$/.test(title)) return title;
 		} catch {
 			// Try the next explicitly configured model.
 		}
 	}
 	return undefined;
-}
-
-const titleReasoningLevels = [
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-] as const;
-type TitleReasoning = (typeof titleReasoningLevels)[number];
-type TitleModelRef = {
-	provider: string;
-	id: string;
-	reasoning: TitleReasoning;
-};
-
-function parseModelRef(value: string): TitleModelRef | undefined {
-	const slash = value.indexOf("/");
-	if (slash <= 0 || slash === value.length - 1) return undefined;
-	const provider = value.slice(0, slash);
-	const modelRef = value.slice(slash + 1);
-	const colon = modelRef.lastIndexOf(":");
-	const suffix = colon === -1 ? undefined : modelRef.slice(colon + 1);
-	const reasoning = titleReasoningLevels.find((level) => level === suffix);
-	return {
-		provider,
-		id: reasoning ? modelRef.slice(0, colon) : modelRef,
-		reasoning: reasoning ?? "minimal",
-	};
 }
 
 function firstPersistedUserMessage(entries: readonly SessionEntry[]): string | undefined {
@@ -171,13 +129,7 @@ function firstPersistedUserMessage(entries: readonly SessionEntry[]): string | u
 
 function messageText(message: AgentMessage): string {
 	if (message.role !== "user" && message.role !== "assistant") return "";
-	if (isString(message.content)) return normalizeText(message.content);
-	return normalizeText(
-		message.content
-			.filter((block) => block.type === "text")
-			.map((block) => block.text)
-			.join(" "),
-	);
+	return normalizeText(contentText(message.content, " "));
 }
 
 function normalizeText(value: string): string {
