@@ -1,4 +1,4 @@
-import { basename, extname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 
 import { renderMarkdownFinal } from "../../ui/markdown.tsx";
 import {
@@ -266,7 +266,10 @@ async function workspaceFileViewResponse(
 	if (file.preview.kind === "markdown") {
 		if (!("contents" in file))
 			throw new RouteError(415, "This file cannot be previewed.");
-		const html = await renderMarkdownFinal(file.contents);
+		const resolved = await resolveFile(context.store.workspacePath, filePath);
+		const html = await renderMarkdownFinal(file.contents, {
+			localImageBase: dirname(resolved.path),
+		});
 		return workspaceFileResponse(() =>
 			Promise.resolve({ ...file, preview: { ...file.preview, html } }),
 		);

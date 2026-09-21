@@ -929,7 +929,11 @@ test("editable previews include source and sandboxed preview URLs", async () => 
 	try {
 		await Bun.write(`${workspace}/vector.svg`, "<svg></svg>");
 		await Bun.write(`${workspace}/page.html`, "<h1>Preview</h1>");
-		await Bun.write(`${workspace}/README.md`, "# Markdown preview");
+		await Bun.write(
+			`${workspace}/README.md`,
+			"# Markdown preview\n\n![Screenshot](docs/screenshot.png)",
+		);
+		await Bun.write(`${workspace}/docs/screenshot.png`, new Uint8Array([0x89, 0x50]));
 		const svgUrl = `http://localhost${endpoints.workspaceFileContent}?path=vector.svg`;
 		const svg = await (await router.fetch(new Request(svgUrl))).json();
 		assertEquals(svg.contents, "<svg></svg>");
@@ -956,9 +960,15 @@ test("editable previews include source and sandboxed preview URLs", async () => 
 				),
 			)
 		).json();
-		assertEquals(markdown.contents, "# Markdown preview");
+		assertEquals(
+			markdown.contents,
+			"# Markdown preview\n\n![Screenshot](docs/screenshot.png)",
+		);
 		assertEquals(markdown.preview.kind, "markdown");
-		assertEquals(markdown.preview.html, "<h1>Markdown preview</h1>\n");
+		assertEquals(
+			markdown.preview.html,
+			`<h1>Markdown preview</h1>\n<p><img src="${filePreviewUrl(`${workspace}/docs/screenshot.png`)}" alt="Screenshot" /></p>\n`,
+		);
 	} finally {
 		await rm(workspace, { recursive: true });
 	}

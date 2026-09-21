@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 
 import {
 	getFiletypeFromFileName,
@@ -158,13 +159,16 @@ export function markdownCacheStatsForTest(): MarkdownCacheStats {
 	};
 }
 
-export async function renderMarkdownFinal(markdown: string): Promise<string> {
-	const cacheKey = `${getActiveCodeThemeId()}\0${markdown}`;
+export async function renderMarkdownFinal(
+	markdown: string,
+	options: { localImageBase?: string } = {},
+): Promise<string> {
+	const localImageBase = options.localImageBase ?? "";
+	const cacheKey = `${getActiveCodeThemeId()}\0${localImageBase}\0${markdown}`;
 	const cached = highlightedCache.get(cacheKey);
-	if (cached) {
-		return cached;
-	}
-	const html = await highlightCodeBlocksFinal(compileMarkdown(markdown));
+	if (cached) return cached;
+	let html = await highlightCodeBlocksFinal(compileMarkdown(markdown));
+	if (localImageBase) html = rewriteRelativeImageSources(html, localImageBase);
 	highlightedCache.set(cacheKey, html);
 	return html;
 }
@@ -411,6 +415,29 @@ function loadedCodeLanguage(language: string): string | undefined {
 
 const localImagePattern = /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)$/i;
 const safeUrlProtocols = new Set(["http:", "https:", "mailto:", "file:"]);
+
+function rewriteRelativeImageSources(html: string, basePath: string): string {
+	return new HTMLRewriter()
+		.on("img", {
+			element(element) {
+				const source = element.getAttribute("src");
+				if (!source) return;
+				const url = URL.parse(source, "http://pi-ui.local");
+				if (!url || url.origin !== "http://pi-ui.local" || source.startsWith("/"))
+					return;
+				try {
+					const relativePath = decodeURIComponent(
+						source.split(/[?#]/, 1)[0] ?? "",
+					);
+					const local = localImageUrl(resolve(basePath, relativePath));
+					if (local) element.setAttribute("src", local);
+				} catch {
+					// Leave malformed and missing sources untouched so alt text remains visible.
+				}
+			},
+		})
+		.transform(html);
+}
 
 // The browser cannot load local files, so route existing image files through the
 // server's preview endpoint.
