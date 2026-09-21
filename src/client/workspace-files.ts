@@ -14,6 +14,7 @@ import { requiredButton, requiredDialog, requiredElement, requiredInput } from "
 import {
 	createWorkspaceFilesApi,
 	type WorkspaceFileData,
+	type WorkspaceFilePreviewData,
 } from "./workspace-files-api.ts";
 import { syncWorkspaceTreePaths } from "./workspace-tree.ts";
 
@@ -36,11 +37,16 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 	const treeHost = requiredElement("workspace-file-tree");
 	const mainHost = requiredElement("workspace-file-main");
 	const viewHost = requiredElement("workspace-file-view");
+	const previewHost = requiredElement("workspace-file-preview");
 	const empty = requiredElement("workspace-file-empty");
 	const pathLabel = requiredElement("workspace-file-path");
 	const status = requiredElement("workspace-file-status");
 	const editButton = requiredButton("workspace-file-edit");
 	const downloadButton = requiredButton("workspace-file-download");
+	const modeControl = requiredElement("workspace-file-mode");
+	const previewModeButton = requiredButton("workspace-file-preview-mode");
+	const sourceModeButton = requiredButton("workspace-file-source-mode");
+	const wrapControl = requiredElement("workspace-file-wrap-control");
 	const wrapButton = requiredButton("workspace-file-wrap");
 	const entryDialog = requiredDialog("workspace-entry-dialog");
 	const entryTitle = requiredElement("workspace-entry-title");
@@ -63,6 +69,9 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 	let loadGeneration = 0;
 	let fileGeneration = 0;
 	let current: WorkspaceFileData | undefined;
+	let preview: WorkspaceFilePreviewData | undefined;
+	let previewRevision: string | undefined;
+	let mode: "preview" | "source" = "source";
 	let selectedFilePath: string | undefined;
 	let draft = "";
 	let dirty = false;
@@ -110,6 +119,10 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		link.download = path.split("/").at(-1) ?? "download";
 		link.click();
 	});
+	previewModeButton.addEventListener("click", () => {
+		if (!dirty) void setFileMode("preview");
+	});
+	sourceModeButton.addEventListener("click", () => void setFileMode("source"));
 	editButton.addEventListener("click", () => void save());
 	viewHost.addEventListener("keydown", (event) => {
 		if (
@@ -222,8 +235,8 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		if (!name || name === item.name) return;
 		const destination = joinPath(parentPath(item.path), name);
 		const currentDestination =
-			current && entryContainsCurrentFile(item.path)
-				? `${destination}${current.path.slice(item.path.length)}`
+			selectedFilePath && entryContainsCurrentFile(item.path)
+				? `${destination}${selectedFilePath.slice(item.path.length)}`
 				: undefined;
 		try {
 			await api.move(item.path, destination);
@@ -267,17 +280,22 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		fileGeneration += 1;
 		stopEditing();
 		current = undefined;
+		preview = undefined;
+		previewRevision = undefined;
+		mode = "source";
 		draft = "";
 		dirty = false;
 		setSelectedFilePath();
 		pathLabel.textContent = "Select a file";
 		setStatus("");
 		showEmpty("Open a file from the workspace");
-		syncSaveButton();
+		syncToolbar();
 	}
 
 	function entryContainsCurrentFile(path: string): boolean {
-		return current?.path === path || current?.path.startsWith(`${path}/`) === true;
+		return (
+			selectedFilePath === path || selectedFilePath?.startsWith(`${path}/`) === true
+		);
 	}
 
 	function viewerOptions(): FileOptions<undefined, undefined> {
@@ -338,14 +356,18 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 	}
 
 	async function refreshFromDisk(treeChanged = true): Promise<void> {
-		const observed = current;
+		const observedPath = selectedFilePath;
+		const observedRevision = current?.revision ?? previewRevision;
 		const observedGeneration = fileGeneration;
 		await loadFiles(treeChanged);
-		if (!observed || current !== observed || fileGeneration !== observedGeneration)
-			return;
+		if (!observedPath || fileGeneration !== observedGeneration) return;
 		try {
-			const file = await api.read(observed.path);
-			if (current !== observed || fileGeneration !== observedGeneration) return;
+			const file = await api.read(observedPath);
+			if (
+				selectedFilePath !== observedPath ||
+				fileGeneration !== observedGeneration
+			)
+				return;
 			if ("message" in file) {
 				if (dirty) setStatus("File changed on disk");
 				else {
@@ -357,28 +379,37 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 				}
 				return;
 			}
-			if (file.revision === observed.revision) return;
+			if ("revision" in file && observedRevision === file.revision) return;
 			if (dirty) {
 				setStatus("File changed on disk");
 				return;
 			}
 			const generation = ++fileGeneration;
 			stopEditing();
-			current = file;
-			draft = file.contents;
-			viewer.render({
-				file: {
-					cacheKey: `${workspacePath}:${file.path}:${file.revision}`,
-					contents: file.contents,
-					name: file.path,
-				},
-				containerWrapper: viewHost,
-			});
 			setStatus(formatBytes(file.size));
-			syncSaveButton();
-			await startEditing(generation);
+			if ("contents" in file) {
+				current = file;
+				preview = file.preview;
+				previewRevision = file.revision;
+				draft = file.contents;
+				mode = preview ? mode : "source";
+				if (mode === "preview") renderPreview();
+				else await renderSource(generation);
+			} else {
+				current = undefined;
+				preview = file.preview;
+				previewRevision = file.revision;
+				draft = "";
+				mode = "preview";
+				renderPreview();
+			}
+			syncToolbar();
 		} catch (error) {
-			if (current !== observed || fileGeneration !== observedGeneration) return;
+			if (
+				selectedFilePath !== observedPath ||
+				fileGeneration !== observedGeneration
+			)
+				return;
 			setStatus(errorMessage(error));
 		}
 	}
@@ -437,7 +468,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 	}
 
 	async function selectFile(path: string): Promise<void> {
-		if (current?.path === path) return;
+		if (selectedFilePath === path) return;
 		if (
 			dirty &&
 			!(await requestConfirmation({
@@ -452,6 +483,9 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		}
 		const generation = ++fileGeneration;
 		stopEditing();
+		current = undefined;
+		preview = undefined;
+		previewRevision = undefined;
 		dirty = false;
 		pathLabel.textContent = path;
 		setSelectedFilePath();
@@ -460,35 +494,111 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 			const file = await api.read(path);
 			if (generation !== fileGeneration) return;
 			setSelectedFilePath(file.path);
+			pathLabel.textContent = file.path;
 			setStatus(formatBytes(file.size));
 			if ("message" in file) {
-				current = undefined;
+				mode = "source";
 				showEmpty(file.message);
-				syncSaveButton();
+				syncToolbar();
 				return;
 			}
-			current = file;
-			draft = file.contents;
-			pathLabel.textContent = file.path;
-			viewer.render({
-				file: {
-					cacheKey: `${workspacePath}:${file.path}:${file.revision}`,
-					contents: file.contents,
-					name: file.path,
-				},
-				containerWrapper: viewHost,
-			});
-			hideEmpty();
-			setStatus(formatBytes(file.size));
-			syncSaveButton();
-			await startEditing(generation);
+			preview = file.preview;
+			previewRevision = file.revision;
+			mode = preview ? "preview" : "source";
+			if ("contents" in file) {
+				current = file;
+				draft = file.contents;
+				if (mode === "source") await renderSource(generation);
+				else renderPreview();
+			} else {
+				draft = "";
+				renderPreview();
+			}
+			syncToolbar();
 		} catch (error) {
 			if (generation !== fileGeneration) return;
 			current = undefined;
+			preview = undefined;
+			previewRevision = undefined;
+			mode = "source";
 			setStatus("");
 			showEmpty(errorMessage(error));
-			syncSaveButton();
+			syncToolbar();
 		}
+	}
+
+	async function setFileMode(next: "preview" | "source"): Promise<void> {
+		if (next === mode || (next === "preview" && (!preview || dirty))) return;
+		if (next === "source" && !current) return;
+		const generation = ++fileGeneration;
+		mode = next;
+		stopEditing();
+		if (mode === "preview") renderPreview();
+		else await renderSource(generation);
+		syncToolbar();
+	}
+
+	async function renderSource(generation: number): Promise<void> {
+		if (!current) return;
+		previewHost.replaceChildren();
+		previewHost.hidden = true;
+		empty.hidden = true;
+		viewHost.hidden = false;
+		viewer.render({
+			file: {
+				cacheKey: `${workspacePath}:${current.path}:${current.revision}`,
+				contents: draft,
+				name: current.path,
+			},
+			containerWrapper: viewHost,
+		});
+		await startEditing(generation);
+	}
+
+	function renderPreview(): void {
+		if (!preview) return;
+		stopEditing();
+		const label = selectedFilePath?.split("/").at(-1) ?? "file";
+		let element:
+			| HTMLAudioElement
+			| HTMLIFrameElement
+			| HTMLImageElement
+			| HTMLVideoElement;
+		if (preview.kind === "image") {
+			const image = new Image();
+			image.alt = `Preview of ${label}`;
+			image.decoding = "async";
+			if (preview.mimeType === "image/svg+xml") image.role = "img";
+			element = image;
+		} else if (preview.kind === "audio") {
+			const audio = document.createElement("audio");
+			audio.controls = true;
+			audio.preload = "metadata";
+			audio.textContent = "This browser cannot preview this audio file.";
+			element = audio;
+		} else if (preview.kind === "video") {
+			const video = document.createElement("video");
+			video.controls = true;
+			video.playsInline = true;
+			video.preload = "metadata";
+			video.textContent = "This browser cannot preview this video file.";
+			element = video;
+		} else {
+			const frame = document.createElement("iframe");
+			frame.referrerPolicy = "no-referrer";
+			frame.title = `Preview of ${label}`;
+			element = frame;
+		}
+		element.addEventListener("error", () => {
+			if (mode === "preview" && preview?.url === element.getAttribute("src")) {
+				showEmpty("This browser cannot preview this file.");
+			}
+		});
+		element.setAttribute("src", preview.url);
+		previewHost.replaceChildren(element);
+		empty.hidden = true;
+		viewHost.hidden = true;
+		previewHost.hidden = false;
 	}
 
 	async function startEditing(generation: number): Promise<void> {
@@ -512,6 +622,8 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		setStatus("Saving…");
 		try {
 			current = await api.save(current.path, draft, current.revision);
+			preview = current.preview;
+			previewRevision = current.revision;
 			draft = current.contents;
 			dirty = false;
 			setStatus(formatBytes(current.size));
@@ -536,18 +648,26 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 	}
 
 	function syncSaveButton(): void {
-		editButton.disabled = !current || !editor || !dirty;
+		syncToolbar();
+	}
+
+	function syncToolbar(): void {
+		const sourceVisible = Boolean(current) && mode === "source";
+		modeControl.hidden = !current?.preview;
+		previewModeButton.setAttribute("aria-pressed", String(mode === "preview"));
+		previewModeButton.disabled = dirty;
+		sourceModeButton.setAttribute("aria-pressed", String(mode === "source"));
+		wrapControl.hidden = !sourceVisible;
+		editButton.hidden = !sourceVisible;
+		editButton.disabled = !sourceVisible || !editor || !dirty;
 	}
 
 	function showEmpty(message: string): void {
+		previewHost.replaceChildren();
 		empty.textContent = message;
 		empty.hidden = false;
 		viewHost.hidden = true;
-	}
-
-	function hideEmpty(): void {
-		empty.hidden = true;
-		viewHost.hidden = false;
+		previewHost.hidden = true;
 	}
 
 	function setStatus(message: string): void {
@@ -639,11 +759,17 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 	}
 
 	function focusEditor(): void {
-		(current ? viewHost : mainHost).focus({ preventScroll: true });
+		(mode === "preview" && preview
+			? previewHost
+			: current
+				? viewHost
+				: mainHost
+		).focus({ preventScroll: true });
 	}
 
 	function cleanUp(): void {
 		stopEditing();
+		previewHost.replaceChildren();
 		viewer.cleanUp();
 		tree.cleanUp();
 	}

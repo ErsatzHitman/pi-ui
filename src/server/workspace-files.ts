@@ -27,9 +27,22 @@ const ignoredDirectoryNames = new Set([
 
 export type WorkspaceEntryKind = "file" | "folder";
 
+export type WorkspaceFilePreview = {
+	kind: "audio" | "html" | "image" | "pdf" | "video";
+	mimeType: string;
+};
+
 export type WorkspaceFile = {
 	path: string;
 	contents: string;
+	revision: string;
+	size: number;
+	preview?: WorkspaceFilePreview;
+};
+
+export type WorkspacePreviewFile = {
+	path: string;
+	preview: WorkspaceFilePreview;
 	revision: string;
 	size: number;
 };
@@ -106,20 +119,29 @@ export async function removeWorkspaceEntry(
 export async function readWorkspaceFile(
 	workspacePath: string,
 	filePath: string,
-): Promise<WorkspaceFile | WorkspaceUnavailableFile> {
+): Promise<WorkspaceFile | WorkspacePreviewFile | WorkspaceUnavailableFile> {
 	const { path: resolved, size } = await resolveFile(workspacePath, filePath);
 	const path = normalizeRelativePath(filePath);
+	const file = Bun.file(resolved);
+	const preview = workspaceFilePreview(file.type);
+	const hasSource = preview?.kind === "html" || preview?.mimeType === "image/svg+xml";
+	const previewRevision = `${file.lastModified}:${size}`;
+	if (preview && !hasSource) return { path, preview, revision: previewRevision, size };
 	if (size > maximumWorkspaceFileBytes) {
-		return { message: "File is too large to view in pi-ui.", path, size };
+		return preview
+			? { path, preview, revision: previewRevision, size }
+			: { message: "File is too large to view in pi-ui.", path, size };
 	}
-	const bytes = await Bun.file(resolved).bytes();
+	const bytes = await file.bytes();
 	let contents: string;
 	try {
 		contents = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 	} catch {
-		return { message: "Only text files can be viewed.", path, size };
+		return preview
+			? { path, preview, revision: previewRevision, size }
+			: { message: "Only text files can be viewed.", path, size };
 	}
-	return { path, contents, revision: fileRevision(bytes), size };
+	return { path, contents, preview, revision: fileRevision(bytes), size };
 }
 
 export type WorkspaceUnavailableFile = {
@@ -150,7 +172,12 @@ export async function writeWorkspaceFile(
 	}
 	await Bun.write(resolved, contents);
 	const saved = await readWorkspaceFile(workspacePath, filePath);
-	if ("message" in saved) throw new WorkspaceFileError(500, saved.message);
+	if (!("contents" in saved)) {
+		throw new WorkspaceFileError(
+			500,
+			"message" in saved ? saved.message : "Could not read the saved file.",
+		);
+	}
 	return saved;
 }
 
@@ -306,6 +333,16 @@ function isWithinWorkspace(workspace: string, candidate: string): boolean {
 
 function normalizeRelativePath(filePath: string): string {
 	return filePath.replaceAll("\\", "/");
+}
+
+export function workspaceFilePreview(mimeType: string): WorkspaceFilePreview | undefined {
+	const normalized = mimeType.split(";", 1)[0]?.toLowerCase() ?? "";
+	if (normalized.startsWith("image/")) return { kind: "image", mimeType: normalized };
+	if (normalized.startsWith("audio/")) return { kind: "audio", mimeType: normalized };
+	if (normalized.startsWith("video/")) return { kind: "video", mimeType: normalized };
+	if (normalized === "application/pdf") return { kind: "pdf", mimeType: normalized };
+	if (normalized === "text/html") return { kind: "html", mimeType: normalized };
+	return undefined;
 }
 
 function fileRevision(contents: Uint8Array): string {

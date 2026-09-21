@@ -505,6 +505,34 @@
 		color: var(--status-danger);
 	}
 
+	.workspace-file-preview {
+		position: absolute;
+		inset: 0;
+		display: grid;
+		overflow: auto;
+		place-items: center;
+		overscroll-behavior: contain;
+		padding: 0.75rem;
+		background: var(--surface-canvas);
+		outline: 0;
+	}
+	.workspace-file-preview :where(img, video) {
+		display: block;
+		max-inline-size: 100%;
+		max-block-size: 100%;
+		object-fit: contain;
+	}
+	.workspace-file-preview audio {
+		inline-size: min(100%, 40rem);
+	}
+	.workspace-file-preview iframe {
+		inline-size: 100%;
+		block-size: 100%;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: white;
+	}
+
 	#workspace-file-view > diffs-container {
 		display: block;
 		min-width: 100%;

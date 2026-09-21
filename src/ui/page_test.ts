@@ -70,6 +70,14 @@ test("sidebar restores responsive preferences before datastar", () => {
 	}
 });
 
+test("workspace files expose native preview and source controls", () => {
+	assertStringIncludes(html, 'id="workspace-file-mode"');
+	assertStringIncludes(html, 'id="workspace-file-preview-mode"');
+	assertStringIncludes(html, 'id="workspace-file-source-mode"');
+	assertStringIncludes(html, 'id="workspace-file-preview"');
+	assertStringIncludes(html, 'aria-label="File preview"');
+});
+
 test("configured sidebar width is applied before styles", () => {
 	assertStringIncludes(html, "--session-sidebar-preferred-width: 288px");
 	const custom = renderPage(

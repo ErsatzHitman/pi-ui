@@ -855,6 +855,81 @@ test("editor downloads support binary and large files without a text preview", a
 	}
 });
 
+test("native media previews expose metadata and byte ranges", async () => {
+	const workspace = await makeTempDir();
+	const context = fakeContext();
+	context.store.setWorkspacePath(workspace);
+	const router = createRouter(context);
+	const bytes = Uint8Array.from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+	try {
+		await Bun.write(`${workspace}/clip.mp4`, bytes);
+		const url = `http://localhost${endpoints.workspaceFileContent}?path=clip.mp4`;
+		const metadata = await (await router.fetch(new Request(url))).json();
+		assertEquals(metadata, {
+			path: "clip.mp4",
+			preview: {
+				kind: "video",
+				mimeType: "video/mp4",
+				url: `${endpoints.workspaceFileContent}?path=clip.mp4&preview=1`,
+			},
+			revision: `${Bun.file(`${workspace}/clip.mp4`).lastModified}:${bytes.length}`,
+			size: bytes.length,
+		});
+		const partial = await router.fetch(
+			new Request(`${url}&preview=1`, { headers: { range: "bytes=2-5" } }),
+		);
+		assertEquals(partial.status, 206);
+		assertEquals(partial.headers.get("accept-ranges"), "bytes");
+		assertEquals(partial.headers.get("content-range"), "bytes 2-5/10");
+		assertEquals(partial.headers.get("content-type"), "video/mp4");
+		assertEquals(await partial.bytes(), bytes.slice(2, 6));
+		const suffix = await router.fetch(
+			new Request(`${url}&preview=1`, { headers: { range: "bytes=-3" } }),
+		);
+		assertEquals(suffix.headers.get("content-range"), "bytes 7-9/10");
+		assertEquals(await suffix.bytes(), bytes.slice(7));
+		const invalid = await router.fetch(
+			new Request(`${url}&preview=1`, { headers: { range: "bytes=10-" } }),
+		);
+		assertEquals(invalid.status, 416);
+		assertEquals(invalid.headers.get("content-range"), "bytes */10");
+	} finally {
+		await rm(workspace, { recursive: true });
+	}
+});
+
+test("editable previews include source and sandboxed preview URLs", async () => {
+	const workspace = await makeTempDir();
+	const context = fakeContext();
+	context.store.setWorkspacePath(workspace);
+	const router = createRouter(context);
+	try {
+		await Bun.write(`${workspace}/vector.svg`, "<svg></svg>");
+		await Bun.write(`${workspace}/page.html`, "<h1>Preview</h1>");
+		const svgUrl = `http://localhost${endpoints.workspaceFileContent}?path=vector.svg`;
+		const svg = await (await router.fetch(new Request(svgUrl))).json();
+		assertEquals(svg.contents, "<svg></svg>");
+		assertEquals(svg.preview.kind, "image");
+		const image = await router.fetch(new Request(`${svgUrl}&preview=1`));
+		assertStringIncludes(
+			image.headers.get("content-security-policy") ?? "",
+			"sandbox;",
+		);
+		const html = await (
+			await router.fetch(
+				new Request(
+					`http://localhost${endpoints.workspaceFileContent}?path=page.html`,
+				),
+			)
+		).json();
+		assertEquals(html.contents, "<h1>Preview</h1>");
+		assertEquals(html.preview.kind, "html");
+		assertStringIncludes(html.preview.url, filesPreviewBase);
+	} finally {
+		await rm(workspace, { recursive: true });
+	}
+});
+
 test("file routes report missing files and directories", async () => {
 	const workspace = await makeTempDir();
 	const context = fakeContext();
@@ -928,6 +1003,7 @@ test("HTML links render outside the workspace with relative assets", async () =>
 		assertStringExcludes(policy, "allow-same-origin");
 		assertStringIncludes(policy, "connect-src 'none'");
 		assertStringIncludes(policy, "form-action 'none'");
+		assertStringIncludes(policy, "frame-ancestors 'self'");
 		const css = await fetch(new URL("style.css", previewUrl));
 		assertEquals(css.status, 200);
 		assertStringIncludes(css.headers.get("content-type") ?? "", "text/css");

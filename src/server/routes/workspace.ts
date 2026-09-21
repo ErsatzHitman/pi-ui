@@ -22,13 +22,14 @@ import {
 	readWorkspaceFile,
 	removeWorkspaceEntry,
 	resolveFile,
+	workspaceFilePreview,
 	writeWorkspaceFile,
 	WorkspaceFileError,
 } from "../workspace-files.ts";
 import { findGitRoot } from "../workspace-review.ts";
 import { browseWorkspaceDirectories, searchWorkspaces } from "../workspace-search.ts";
 import type { RouteContext } from "./context.ts";
-import { endpoints } from "./endpoints.ts";
+import { endpoints, filePreviewUrl } from "./endpoints.ts";
 
 export const workspaceRoutes = {
 	[endpoints.workspaceSearch]: {
@@ -172,7 +173,7 @@ export const workspaceRoutes = {
 		},
 	},
 	[endpoints.workspaceFileContent]: {
-		GET: async (_request, context, url) => {
+		GET: async (request, context, url) => {
 			const params = url.searchParams;
 			const filePath = params.get("path") ?? "";
 			if (params.get("download") === "1") {
@@ -191,9 +192,25 @@ export const workspaceRoutes = {
 					},
 				});
 			}
-			return workspaceFileResponse(() =>
-				readWorkspaceFile(context.store.workspacePath, filePath),
-			);
+			if (params.get("preview") === "1") {
+				const { path, size } = await resolveFile(
+					context.store.workspacePath,
+					filePath,
+				);
+				const file = Bun.file(path);
+				const preview = workspaceFilePreview(file.type);
+				if (!preview || preview.kind === "html") {
+					throw new RouteError(415, "This file cannot be previewed.");
+				}
+				return previewFileResponse(
+					request,
+					file,
+					filePath,
+					size,
+					preview.mimeType,
+				);
+			}
+			return workspaceFileViewResponse(context, filePath);
 		},
 		PUT: async (request, context) => {
 			const value: unknown = await request.json();
@@ -206,9 +223,13 @@ export const workspaceRoutes = {
 				throw new RouteError(400, "Invalid workspace file update.");
 			}
 			const { path, contents, revision } = value;
-			return workspaceFileResponse(() =>
-				writeWorkspaceFile(context.store.workspacePath, path, contents, revision),
+			const file = await writeWorkspaceFile(
+				context.store.workspacePath,
+				path,
+				contents,
+				revision,
 			);
+			return workspaceFileViewResponse(context, path, file);
 		},
 	},
 	[endpoints.workspaceOpen]: {
@@ -231,6 +252,80 @@ async function workspaceFileResponse<Value>(
 	return Response.json(await operation(), {
 		headers: { "cache-control": "no-store" },
 	});
+}
+
+async function workspaceFileViewResponse(
+	context: RouteContext,
+	filePath: string,
+	file?: Awaited<ReturnType<typeof readWorkspaceFile>>,
+): Promise<Response> {
+	file ??= await readWorkspaceFile(context.store.workspacePath, filePath);
+	if (!("preview" in file) || !file.preview)
+		return workspaceFileResponse(() => Promise.resolve(file));
+	const url =
+		file.preview.kind === "html"
+			? filePreviewUrl(
+					(await resolveFile(context.store.workspacePath, filePath)).path,
+				)
+			: `${endpoints.workspaceFileContent}?path=${encodeURIComponent(file.path)}&preview=1`;
+	return workspaceFileResponse(() =>
+		Promise.resolve({ ...file, preview: { ...file.preview, url } }),
+	);
+}
+
+function previewFileResponse(
+	request: Request,
+	file: Blob,
+	filePath: string,
+	size: number,
+	mimeType: string,
+): Response {
+	const headers = new Headers({
+		"accept-ranges": "bytes",
+		"cache-control": "no-store",
+		"content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(basename(filePath))}`,
+		"content-type": mimeType,
+		"x-content-type-options": "nosniff",
+	});
+	if (mimeType === "image/svg+xml") {
+		headers.set(
+			"content-security-policy",
+			"sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'",
+		);
+	}
+	const requested = request.headers.get("range");
+	if (!requested) {
+		headers.set("content-length", String(size));
+		return new Response(file, { headers });
+	}
+	const range = parseByteRange(requested, size);
+	if (!range) {
+		headers.set("content-range", `bytes */${size}`);
+		return new Response(null, { status: 416, headers });
+	}
+	const [start, end] = range;
+	headers.set("content-length", String(end - start + 1));
+	headers.set("content-range", `bytes ${start}-${end}/${size}`);
+	return new Response(file.slice(start, end + 1), { status: 206, headers });
+}
+
+function parseByteRange(value: string, size: number): [number, number] | undefined {
+	const match = /^bytes=(\d*)-(\d*)$/.exec(value);
+	if (!match || (!match[1] && !match[2]) || size === 0) return undefined;
+	const first = match[1] ? Number(match[1]) : undefined;
+	const last = match[2] ? Number(match[2]) : undefined;
+	if (
+		(first !== undefined && !Number.isSafeInteger(first)) ||
+		(last !== undefined && (!Number.isSafeInteger(last) || last < 0))
+	)
+		return undefined;
+	if (first === undefined) {
+		if (!last) return undefined;
+		return [Math.max(0, size - last), size - 1];
+	}
+	if (first >= size) return undefined;
+	const end = last === undefined ? size - 1 : Math.min(last, size - 1);
+	return end < first ? undefined : [first, end];
 }
 
 function filterWorkspaces(workspaces: readonly string[], query: string): string[] {

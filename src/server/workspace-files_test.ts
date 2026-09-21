@@ -86,7 +86,7 @@ test("workspace files read and save with revision conflict protection", async ()
 	try {
 		await Bun.write(`${workspace}/value.ts`, "export const value = 1;\n");
 		const first = await readWorkspaceFile(workspace, "value.ts");
-		if ("message" in first) throw new Error(first.message);
+		if (!("contents" in first)) throw new Error("Could not read text file");
 		assertEquals(first.contents, "export const value = 1;\n");
 
 		const saved = await writeWorkspaceFile(
@@ -114,7 +114,7 @@ test("linked files outside the workspace read and save through absolute paths, r
 		for (const filePath of [outside, relative(workspace, outside), "linked"]) {
 			await Bun.write(outside, "original");
 			const file = await readWorkspaceFile(workspace, filePath);
-			if ("message" in file) throw new Error(file.message);
+			if (!("contents" in file)) throw new Error("Could not read text file");
 			assertEquals(file.contents, "original");
 			const saved = await writeWorkspaceFile(
 				workspace,
@@ -133,6 +133,29 @@ test("linked files outside the workspace read and save through absolute paths, r
 	} finally {
 		await rm(workspace, { recursive: true });
 		await rm(outside);
+	}
+});
+
+test("workspace files describe native previews and preserve editable source", async () => {
+	const workspace = await makeTempDir();
+	try {
+		await Bun.write(`${workspace}/image.png`, new Uint8Array([0x89, 0x50]));
+		await Bun.write(`${workspace}/vector.svg`, "<svg></svg>");
+		assertEquals(await readWorkspaceFile(workspace, "image.png"), {
+			path: "image.png",
+			preview: { kind: "image", mimeType: "image/png" },
+			revision: `${Bun.file(`${workspace}/image.png`).lastModified}:2`,
+			size: 2,
+		});
+		const vector = await readWorkspaceFile(workspace, "vector.svg");
+		if (!("contents" in vector)) throw new Error("Missing SVG source");
+		assertEquals(vector.contents, "<svg></svg>");
+		assertEquals(vector.preview, {
+			kind: "image",
+			mimeType: "image/svg+xml",
+		});
+	} finally {
+		await rm(workspace, { recursive: true });
 	}
 });
 
