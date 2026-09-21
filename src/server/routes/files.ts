@@ -2,6 +2,7 @@ import { isAbsolute, relative } from "node:path";
 
 import { detectSupportedImageMimeTypeFromFile } from "@earendil-works/pi-coding-agent";
 
+import { openBrowser } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/utils/open-browser.js";
 import { fileUriToPath, isHtmlFilePath } from "../../../static/file-uri.js";
 import { renderFilePickerResults } from "../../ui/pickers.tsx";
 import { readActionSignals, requiredString, stringField } from "../action-input.ts";
@@ -14,7 +15,7 @@ import {
 	validateTransferContentLength,
 	validateTransferredFiles,
 } from "../transferred-files.ts";
-import { resolveFile } from "../workspace-files.ts";
+import { resolveFile, resolvePath } from "../workspace-files.ts";
 import type { RouteContext } from "./context.ts";
 import { endpoints, filesPreviewBase, filePreviewUrl } from "./endpoints.ts";
 
@@ -67,9 +68,9 @@ async function openLinkedFile(
 		isAbsolute(relativePath)
 			? path
 			: relativePath;
-	await resolveFile(workspacePath, filePath);
+	const target = await resolvePath(workspacePath, filePath);
 	if (request.method === "GET") {
-		if (!isHtmlFilePath(path))
+		if (!target.info.isFile() || !isHtmlFilePath(path))
 			throw new RouteError(400, "Only HTML files can be previewed.");
 		const source = new URL(uri);
 		return new Response(null, {
@@ -80,6 +81,11 @@ async function openLinkedFile(
 			},
 		});
 	}
+	if (target.info.isDirectory()) {
+		openBrowser(target.path);
+		return Response.json({ opened: true });
+	}
+	if (!target.info.isFile()) throw new RouteError(400, "Path is not a file.");
 	return Response.json({ path: filePath, workspacePath });
 }
 

@@ -49,10 +49,11 @@ async function followFileLink(uri) {
 				await responseErrorMessage(response, "Could not open the file."),
 			);
 		}
-		const { path, workspacePath } = await response.json();
+		const result = await response.json();
+		if (result.opened) return;
 		const { openLinkedWorkspaceFile } =
 			await import("../../src/client/workspace-review.ts");
-		await openLinkedWorkspaceFile(path, workspacePath);
+		await openLinkedWorkspaceFile(result.path, result.workspacePath);
 	} catch (error) {
 		alert(Error.isError(error) ? error.message : "Could not open the file.");
 	}

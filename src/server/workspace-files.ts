@@ -250,19 +250,17 @@ async function resolveWorkspaceTarget(
 	};
 }
 
-export async function resolveFile(
+export async function resolvePath(
 	workspacePath: string,
 	filePath: string,
-): Promise<{ path: string; size: number }> {
+): Promise<{ path: string; info: Stats }> {
 	const normalized = normalizeRelativePath(filePath);
 	if (!normalized || normalized.includes("\0")) {
 		throw new WorkspaceFileError(400, "Invalid file path.");
 	}
 	try {
 		const resolved = await realpath(path.resolve(workspacePath, normalized));
-		const info = await stat(resolved);
-		if (!info.isFile()) throw new WorkspaceFileError(400, "Path is not a file.");
-		return { path: resolved, size: info.size };
+		return { path: resolved, info: await stat(resolved) };
 	} catch (error) {
 		if (isNotFound(error)) {
 			throw new WorkspaceFileError(404, "File not found.");
@@ -272,6 +270,15 @@ export async function resolveFile(
 		}
 		throw error;
 	}
+}
+
+export async function resolveFile(
+	workspacePath: string,
+	filePath: string,
+): Promise<{ path: string; size: number }> {
+	const { path, info } = await resolvePath(workspacePath, filePath);
+	if (!info.isFile()) throw new WorkspaceFileError(400, "Path is not a file.");
+	return { path, size: info.size };
 }
 
 function workspaceMutationError(error: ErrorOptions["cause"]): WorkspaceFileError {
