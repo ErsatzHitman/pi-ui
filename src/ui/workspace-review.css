@@ -515,6 +515,10 @@
 		background: var(--surface-canvas);
 		outline: 0;
 	}
+	.workspace-file-preview:has(> :is(img, audio, video)) {
+		box-sizing: border-box;
+		padding: 0.75rem;
+	}
 	.workspace-file-preview :where(img, video) {
 		display: block;
 		max-inline-size: 100%;
@@ -534,13 +538,12 @@
 		box-sizing: border-box;
 		inline-size: 100%;
 		min-block-size: 100%;
-		padding: clamp(1rem, 4vi, 3rem);
+		padding: 0.75rem;
 	}
 
 	#workspace-file-view > diffs-container {
 		display: block;
 		min-width: 100%;
-		min-height: 100%;
 		background: var(--surface-code);
 		--diffs-bg: var(--surface-code);
 		--diffs-bg-caret-override: var(--text);

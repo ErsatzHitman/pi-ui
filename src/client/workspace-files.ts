@@ -1,4 +1,9 @@
-import { File, type FileOptions } from "@pierre/diffs";
+import {
+	File,
+	type FileOptions,
+	getFiletypeFromFileName,
+	preloadHighlighter,
+} from "@pierre/diffs";
 import type { Editor as PierreEditor } from "@pierre/diffs/edit";
 import {
 	type ContextMenuItem,
@@ -544,14 +549,18 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		previewHost.hidden = true;
 		empty.hidden = true;
 		viewHost.hidden = false;
-		viewer.render({
-			file: {
-				cacheKey: `${workspacePath}:${current.path}:${current.revision}`,
-				contents: draft,
-				name: current.path,
-			},
-			containerWrapper: viewHost,
-		});
+		const file = {
+			cacheKey: `${workspacePath}:${current.path}:${current.revision}`,
+			contents: draft,
+			name: current.path,
+		};
+		const themes = getPierreThemes();
+		await preloadHighlighter({
+			langs: [getFiletypeFromFileName(file.name)],
+			themes: [themes.dark, themes.light],
+		}).catch(() => undefined);
+		if (generation !== fileGeneration) return;
+		viewer.render({ file, containerWrapper: viewHost });
 		await startEditing(generation);
 	}
 
