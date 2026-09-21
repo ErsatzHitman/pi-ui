@@ -3,17 +3,24 @@ import { Parse } from "typebox/value";
 
 import { responseErrorMessage } from "../utils/errors.ts";
 
-const workspaceFilePreviewSchema = Type.Object({
-	kind: Type.Union([
-		Type.Literal("audio"),
-		Type.Literal("html"),
-		Type.Literal("image"),
-		Type.Literal("pdf"),
-		Type.Literal("video"),
-	]),
-	mimeType: Type.String(),
-	url: Type.String(),
-});
+const workspaceFilePreviewSchema = Type.Union([
+	Type.Object({
+		kind: Type.Union([
+			Type.Literal("audio"),
+			Type.Literal("html"),
+			Type.Literal("image"),
+			Type.Literal("pdf"),
+			Type.Literal("video"),
+		]),
+		mimeType: Type.String(),
+		url: Type.String(),
+	}),
+	Type.Object({
+		html: Type.String(),
+		kind: Type.Literal("markdown"),
+		mimeType: Type.String(),
+	}),
+]);
 const workspaceFileSchema = Type.Object({
 	path: Type.String(),
 	contents: Type.String(),

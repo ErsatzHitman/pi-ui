@@ -906,6 +906,7 @@ test("editable previews include source and sandboxed preview URLs", async () => 
 	try {
 		await Bun.write(`${workspace}/vector.svg`, "<svg></svg>");
 		await Bun.write(`${workspace}/page.html`, "<h1>Preview</h1>");
+		await Bun.write(`${workspace}/README.md`, "# Markdown preview");
 		const svgUrl = `http://localhost${endpoints.workspaceFileContent}?path=vector.svg`;
 		const svg = await (await router.fetch(new Request(svgUrl))).json();
 		assertEquals(svg.contents, "<svg></svg>");
@@ -925,6 +926,16 @@ test("editable previews include source and sandboxed preview URLs", async () => 
 		assertEquals(html.contents, "<h1>Preview</h1>");
 		assertEquals(html.preview.kind, "html");
 		assertStringIncludes(html.preview.url, filesPreviewBase);
+		const markdown = await (
+			await router.fetch(
+				new Request(
+					`http://localhost${endpoints.workspaceFileContent}?path=README.md`,
+				),
+			)
+		).json();
+		assertEquals(markdown.contents, "# Markdown preview");
+		assertEquals(markdown.preview.kind, "markdown");
+		assertEquals(markdown.preview.html, "<h1>Markdown preview</h1>\n");
 	} finally {
 		await rm(workspace, { recursive: true });
 	}

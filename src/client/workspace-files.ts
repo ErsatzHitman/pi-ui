@@ -558,25 +558,31 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 	function renderPreview(): void {
 		if (!preview) return;
 		stopEditing();
+		const previewData = preview;
 		const label = selectedFilePath?.split("/").at(-1) ?? "file";
-		let element:
-			| HTMLAudioElement
-			| HTMLIFrameElement
-			| HTMLImageElement
-			| HTMLVideoElement;
-		if (preview.kind === "image") {
+		let element: HTMLElement;
+		if (previewData.kind === "markdown") {
+			const article = document.createElement("article");
+			article.className = "workspace-file-markdown markdown-content";
+			const parsedDocument = new DOMParser().parseFromString(
+				previewData.html,
+				"text/html",
+			);
+			article.append(...parsedDocument.body.childNodes);
+			element = article;
+		} else if (previewData.kind === "image") {
 			const image = new Image();
 			image.alt = `Preview of ${label}`;
 			image.decoding = "async";
-			if (preview.mimeType === "image/svg+xml") image.role = "img";
+			if (previewData.mimeType === "image/svg+xml") image.role = "img";
 			element = image;
-		} else if (preview.kind === "audio") {
+		} else if (previewData.kind === "audio") {
 			const audio = document.createElement("audio");
 			audio.controls = true;
 			audio.preload = "metadata";
 			audio.textContent = "This browser cannot preview this audio file.";
 			element = audio;
-		} else if (preview.kind === "video") {
+		} else if (previewData.kind === "video") {
 			const video = document.createElement("video");
 			video.controls = true;
 			video.playsInline = true;
@@ -589,12 +595,15 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 			frame.title = `Preview of ${label}`;
 			element = frame;
 		}
-		element.addEventListener("error", () => {
-			if (mode === "preview" && preview?.url === element.getAttribute("src")) {
-				showEmpty("This browser cannot preview this file.");
-			}
-		});
-		element.setAttribute("src", preview.url);
+		if ("url" in previewData) {
+			const url = previewData.url;
+			element.addEventListener("error", () => {
+				if (mode === "preview" && url === element.getAttribute("src")) {
+					showEmpty("This browser cannot preview this file.");
+				}
+			});
+			element.setAttribute("src", url);
+		}
 		previewHost.replaceChildren(element);
 		empty.hidden = true;
 		viewHost.hidden = true;

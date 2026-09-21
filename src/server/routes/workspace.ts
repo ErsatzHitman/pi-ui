@@ -1,5 +1,6 @@
 import { basename, extname, join } from "node:path";
 
+import { renderMarkdownFinal } from "../../ui/markdown.tsx";
 import {
 	renderWorkspaceBrowserContent,
 	renderWorkspaceBrowserError,
@@ -199,7 +200,7 @@ export const workspaceRoutes = {
 				);
 				const file = Bun.file(path);
 				const preview = workspaceFilePreview(file.type);
-				if (!preview || preview.kind === "html") {
+				if (!preview || preview.kind === "html" || preview.kind === "markdown") {
 					throw new RouteError(415, "This file cannot be previewed.");
 				}
 				return previewFileResponse(
@@ -262,6 +263,14 @@ async function workspaceFileViewResponse(
 	file ??= await readWorkspaceFile(context.store.workspacePath, filePath);
 	if (!("preview" in file) || !file.preview)
 		return workspaceFileResponse(() => Promise.resolve(file));
+	if (file.preview.kind === "markdown") {
+		if (!("contents" in file))
+			throw new RouteError(415, "This file cannot be previewed.");
+		const html = await renderMarkdownFinal(file.contents);
+		return workspaceFileResponse(() =>
+			Promise.resolve({ ...file, preview: { ...file.preview, html } }),
+		);
+	}
 	const url =
 		file.preview.kind === "html"
 			? filePreviewUrl(

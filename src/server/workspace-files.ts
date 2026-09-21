@@ -28,7 +28,7 @@ const ignoredDirectoryNames = new Set([
 export type WorkspaceEntryKind = "file" | "folder";
 
 export type WorkspaceFilePreview = {
-	kind: "audio" | "html" | "image" | "pdf" | "video";
+	kind: "audio" | "html" | "image" | "markdown" | "pdf" | "video";
 	mimeType: string;
 };
 
@@ -124,11 +124,14 @@ export async function readWorkspaceFile(
 	const path = normalizeRelativePath(filePath);
 	const file = Bun.file(resolved);
 	const preview = workspaceFilePreview(file.type);
-	const hasSource = preview?.kind === "html" || preview?.mimeType === "image/svg+xml";
+	const hasSource =
+		preview?.kind === "html" ||
+		preview?.kind === "markdown" ||
+		preview?.mimeType === "image/svg+xml";
 	const previewRevision = `${file.lastModified}:${size}`;
 	if (preview && !hasSource) return { path, preview, revision: previewRevision, size };
 	if (size > maximumWorkspaceFileBytes) {
-		return preview
+		return preview && preview.kind !== "markdown"
 			? { path, preview, revision: previewRevision, size }
 			: { message: "File is too large to view in pi-ui.", path, size };
 	}
@@ -137,7 +140,7 @@ export async function readWorkspaceFile(
 	try {
 		contents = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 	} catch {
-		return preview
+		return preview && preview.kind !== "markdown"
 			? { path, preview, revision: previewRevision, size }
 			: { message: "Only text files can be viewed.", path, size };
 	}
@@ -342,6 +345,8 @@ export function workspaceFilePreview(mimeType: string): WorkspaceFilePreview | u
 	if (normalized.startsWith("video/")) return { kind: "video", mimeType: normalized };
 	if (normalized === "application/pdf") return { kind: "pdf", mimeType: normalized };
 	if (normalized === "text/html") return { kind: "html", mimeType: normalized };
+	if (normalized === "text/markdown" || normalized === "text/x-markdown")
+		return { kind: "markdown", mimeType: normalized };
 	return undefined;
 }
 

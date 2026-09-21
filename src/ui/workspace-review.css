@@ -512,7 +512,6 @@
 		overflow: auto;
 		place-items: center;
 		overscroll-behavior: contain;
-		padding: 0.75rem;
 		background: var(--surface-canvas);
 		outline: 0;
 	}
@@ -528,9 +527,14 @@
 	.workspace-file-preview iframe {
 		inline-size: 100%;
 		block-size: 100%;
-		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
+		border: 0;
 		background: white;
+	}
+	.workspace-file-markdown {
+		box-sizing: border-box;
+		inline-size: 100%;
+		min-block-size: 100%;
+		padding: clamp(1rem, 4vi, 3rem);
 	}
 
 	#workspace-file-view > diffs-container {
