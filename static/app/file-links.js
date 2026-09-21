@@ -1,5 +1,5 @@
 import { responseErrorMessage } from "../../src/utils/errors.ts";
-import { fileUriToPath, isHtmlFilePath } from "../file-uri.js";
+import { fileUriToPath } from "../file-uri.js";
 
 export function bindFileLinks() {
 	document.addEventListener(
@@ -18,17 +18,7 @@ export function bindFileLinks() {
 			// File navigation is forbidden from the HTTP UI. Claim the click even if
 			// another client handler already prevented it, then delegate to the backend.
 			event.preventDefault();
-			if (isHtmlFilePath(path)) {
-				const endpoint = document.body.dataset.filesOpenEndpoint;
-				if (endpoint)
-					window.open(
-						`${endpoint}?uri=${encodeURIComponent(uri)}`,
-						"_blank",
-						"noopener,noreferrer",
-					);
-			} else {
-				void followFileLink(uri);
-			}
+			void followFileLink(uri);
 		},
 		{ capture: true },
 	);

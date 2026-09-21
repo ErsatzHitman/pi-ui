@@ -18,7 +18,7 @@ import { executeRoute } from "../route.ts";
 import { appRoutes } from "../routes.ts";
 import { SessionImageStore } from "../session-image-store.ts";
 import type { RouteContext, RuntimeResource } from "./context.ts";
-import { endpoints, filesPreviewBase } from "./endpoints.ts";
+import { endpoints, filesPreviewBase, filePreviewUrl } from "./endpoints.ts";
 import { fileRoutes } from "./files.ts";
 
 test("page opts into keyboard resizing without disabling zoom", async () => {
@@ -961,18 +961,14 @@ test("file routes report missing files and directories", async () => {
 	}
 });
 
-test("HTML links render outside the workspace with relative assets", async () => {
-	const workspace = await makeTempDir();
+test("HTML previews render outside the workspace with relative assets", async () => {
 	const outsideDirectory = await makeTempDir();
 	const outside = `${outsideDirectory}/My ü report.HTML`;
 	const context = fakeContext();
-	context.store.setWorkspacePath(workspace);
 	const server = Bun.serve({
 		hostname: "127.0.0.1",
 		port: 0,
 		routes: {
-			[endpoints.filesOpen]: (request) =>
-				executeRoute(request, context, fileRoutes[endpoints.filesOpen].GET),
 			[endpoints.filesPreview]: (request) =>
 				executeRoute(request, context, fileRoutes[endpoints.filesPreview].GET),
 		},
@@ -982,17 +978,7 @@ test("HTML links render outside the workspace with relative assets", async () =>
 			'<!doctype html><link rel="stylesheet" href="style.css"><h1>Report</h1>';
 		await Bun.write(outside, html);
 		await Bun.write(`${outsideDirectory}/style.css`, "h1 { color: blue; }");
-		const uri = pathToFileURL(outside).href + "?mode=dark#chart";
-		const redirect = await fetch(
-			new URL(`${endpoints.filesOpen}?uri=${encodeURIComponent(uri)}`, server.url),
-			{ redirect: "manual" },
-		);
-		assertEquals(redirect.status, 302);
-		const previewUrl = new URL(redirect.headers.get("location") ?? "", server.url);
-		assertEquals(previewUrl.search, "?mode=dark");
-		assertEquals(previewUrl.hash, "#chart");
-		// Preview URLs keep working after the user changes workspaces.
-		context.store.setWorkspacePath(outsideDirectory);
+		const previewUrl = new URL(filePreviewUrl(outside), server.url);
 		const preview = await fetch(previewUrl);
 		assertEquals(preview.status, 200);
 		assertStringIncludes(preview.headers.get("content-type") ?? "", "text/html");
@@ -1010,17 +996,8 @@ test("HTML links render outside the workspace with relative assets", async () =>
 		assertEquals(await css.text(), "h1 { color: blue; }");
 		const invalidPath = await fetch(new URL(`${filesPreviewBase}%ZZ`, server.url));
 		assertEquals(invalidPath.status, 400);
-		const cssUri = pathToFileURL(`${outsideDirectory}/style.css`).href;
-		const nonHtml = await fetch(
-			new URL(
-				`${endpoints.filesOpen}?uri=${encodeURIComponent(cssUri)}`,
-				server.url,
-			),
-		);
-		assertEquals(nonHtml.status, 400);
 	} finally {
 		await server.stop(true);
-		await rm(workspace, { recursive: true });
 		await rm(outsideDirectory, { recursive: true });
 	}
 });

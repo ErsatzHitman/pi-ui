@@ -1,8 +1,3 @@
-/** @param {string} path */
-export function isHtmlFilePath(path) {
-	return /\.html?$/i.test(path);
-}
-
 /** @param {string} uri */
 export function fileUriToPath(uri) {
 	try {

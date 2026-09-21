@@ -3,7 +3,7 @@ import { isAbsolute, relative } from "node:path";
 import { detectSupportedImageMimeTypeFromFile } from "@earendil-works/pi-coding-agent";
 
 import { openBrowser } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/utils/open-browser.js";
-import { fileUriToPath, isHtmlFilePath } from "../../../static/file-uri.js";
+import { fileUriToPath } from "../../../static/file-uri.js";
 import { renderFilePickerResults } from "../../ui/pickers.tsx";
 import { readActionSignals, requiredString, stringField } from "../action-input.ts";
 import { datastarResponse } from "../datastar.ts";
@@ -17,7 +17,7 @@ import {
 } from "../transferred-files.ts";
 import { resolveFile, resolvePath } from "../workspace-files.ts";
 import type { RouteContext } from "./context.ts";
-import { endpoints, filesPreviewBase, filePreviewUrl } from "./endpoints.ts";
+import { endpoints, filesPreviewBase } from "./endpoints.ts";
 
 export const fileRoutes = {
 	[endpoints.filesSearch]: {
@@ -40,7 +40,6 @@ export const fileRoutes = {
 		POST: importTransferredFiles,
 	},
 	[endpoints.filesOpen]: {
-		GET: openLinkedFile,
 		POST: openLinkedFile,
 	},
 	[endpoints.filesPreview]: {
@@ -51,12 +50,8 @@ export const fileRoutes = {
 async function openLinkedFile(
 	request: Request,
 	context: RouteContext,
-	url: URL,
 ): Promise<Response> {
-	const uri =
-		request.method === "GET"
-			? (url.searchParams.get("uri") ?? "")
-			: requiredString(await readActionSignals(request), "uri");
+	const uri = requiredString(await readActionSignals(request), "uri");
 	const path = fileUriToPath(uri);
 	if (!path) throw new RouteError(400, "Invalid file link.");
 
@@ -69,18 +64,6 @@ async function openLinkedFile(
 			? path
 			: relativePath;
 	const target = await resolvePath(workspacePath, filePath);
-	if (request.method === "GET") {
-		if (!target.info.isFile() || !isHtmlFilePath(path))
-			throw new RouteError(400, "Only HTML files can be previewed.");
-		const source = new URL(uri);
-		return new Response(null, {
-			status: 302,
-			headers: {
-				location: filePreviewUrl(path) + source.search + source.hash,
-				"cache-control": "no-store",
-			},
-		});
-	}
 	if (target.info.isDirectory()) {
 		openBrowser(target.path);
 		return Response.json({ opened: true });
