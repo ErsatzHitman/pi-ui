@@ -307,6 +307,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		return {
 			disableFileHeader: true,
 			overflow: wrap ? "wrap" : "scroll",
+			tokenizeMaxLineLength: 10_000,
 			theme: getPierreThemes(),
 			themeType: "system",
 			onEditChange({ file }) {
