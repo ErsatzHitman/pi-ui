@@ -58,6 +58,8 @@ test("user messages render attached images without placeholder text", () => {
 	);
 	assertStringIncludes(html, "notes.txt");
 	assertStringIncludes(html, "check this");
+	assertStringExcludes(html, 'loading="lazy"');
+	assertStringExcludes(html, 'decoding="async"');
 	assertStringExcludes(html, "[image:");
 });
 

@@ -492,8 +492,6 @@ function renderUserMessage(message: AppMessage): string {
 									`data:${attachment.image!.mimeType};base64,${attachment.image!.data}`
 								}
 								alt={attachment.name || `Attached image ${index + 1}`}
-								loading="lazy"
-								decoding="async"
 								style="overflow-clip-margin: unset;"
 							/>
 						</div>
