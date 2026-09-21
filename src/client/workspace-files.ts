@@ -3,6 +3,7 @@ import {
 	type FileOptions,
 	getFiletypeFromFileName,
 	preloadHighlighter,
+	type SupportedLanguages,
 } from "@pierre/diffs";
 import type { Editor as PierreEditor } from "@pierre/diffs/edit";
 import {
@@ -550,14 +551,18 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		previewHost.hidden = true;
 		empty.hidden = true;
 		viewHost.hidden = false;
+		const language: SupportedLanguages = current.path.toLowerCase().endsWith(".svg")
+			? "xml"
+			: getFiletypeFromFileName(current.path);
 		const file = {
 			cacheKey: `${workspacePath}:${current.path}:${current.revision}`,
 			contents: draft,
+			lang: language,
 			name: current.path,
 		};
 		const themes = getPierreThemes();
 		await preloadHighlighter({
-			langs: [getFiletypeFromFileName(file.name)],
+			langs: [language],
 			themes: [themes.dark, themes.light],
 		}).catch(() => undefined);
 		if (generation !== fileGeneration) return;
