@@ -142,6 +142,7 @@ test("workspace files describe native previews and preserve editable source", as
 		await Bun.write(`${workspace}/image.png`, new Uint8Array([0x89, 0x50]));
 		await Bun.write(`${workspace}/vector.svg`, "<svg></svg>");
 		await Bun.write(`${workspace}/README.md`, "# Preview");
+		await Bun.write(`${workspace}/font.woff2`, new Uint8Array([0x77, 0x4f]));
 		assertEquals(await readWorkspaceFile(workspace, "image.png"), {
 			path: "image.png",
 			preview: { kind: "image", mimeType: "image/png" },
@@ -161,6 +162,12 @@ test("workspace files describe native previews and preserve editable source", as
 		assertEquals(markdown.preview, {
 			kind: "markdown",
 			mimeType: "text/markdown",
+		});
+		assertEquals(await readWorkspaceFile(workspace, "font.woff2"), {
+			path: "font.woff2",
+			preview: { kind: "font", mimeType: "font/woff2" },
+			revision: `${Bun.file(`${workspace}/font.woff2`).lastModified}:2`,
+			size: 2,
 		});
 	} finally {
 		await rm(workspace, { recursive: true });

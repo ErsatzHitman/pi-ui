@@ -7,6 +7,7 @@ const workspaceFilePreviewSchema = Type.Union([
 	Type.Object({
 		kind: Type.Union([
 			Type.Literal("audio"),
+			Type.Literal("font"),
 			Type.Literal("html"),
 			Type.Literal("image"),
 			Type.Literal("pdf"),

@@ -83,6 +83,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 	let dirty = false;
 	let wrap = true;
 	let editor: PierreEditor<"file"> | undefined;
+	let previewFont: FontFace | undefined;
 	const viewer = new File(viewerOptions());
 	const tree = new FileTree({
 		composition: {
@@ -547,6 +548,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 
 	async function renderSource(generation: number): Promise<void> {
 		if (!current) return;
+		clearFontPreview();
 		previewHost.replaceChildren();
 		previewHost.hidden = true;
 		empty.hidden = true;
@@ -573,6 +575,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 	function renderPreview(): void {
 		if (!preview) return;
 		stopEditing();
+		clearFontPreview();
 		const previewData = preview;
 		const label = selectedFilePath?.split("/").at(-1) ?? "file";
 		let element: HTMLElement;
@@ -597,6 +600,8 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 			audio.preload = "metadata";
 			audio.textContent = "This browser cannot preview this audio file.";
 			element = audio;
+		} else if (previewData.kind === "font") {
+			element = createFontPreview(previewData.url, label);
 		} else if (previewData.kind === "video") {
 			const video = document.createElement("video");
 			video.controls = true;
@@ -610,7 +615,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 			frame.title = `Preview of ${label}`;
 			element = frame;
 		}
-		if ("url" in previewData) {
+		if ("url" in previewData && previewData.kind !== "font") {
 			const url = previewData.url;
 			element.addEventListener("error", () => {
 				if (mode === "preview" && url === element.getAttribute("src")) {
@@ -623,6 +628,64 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		empty.hidden = true;
 		viewHost.hidden = true;
 		previewHost.hidden = false;
+	}
+
+	function createFontPreview(url: string, label: string): HTMLElement {
+		const article = document.createElement("article");
+		article.className = "workspace-font-preview";
+		const heading = document.createElement("h2");
+		heading.className = "sr-only";
+		heading.textContent = `Font specimen for ${label}`;
+		const loading = document.createElement("p");
+		loading.className = "workspace-font-loading";
+		loading.textContent = "Loading font…";
+		const specimen = document.createElement("div");
+		specimen.className = "workspace-font-specimen";
+		specimen.hidden = true;
+		for (const [className, text] of [
+			["workspace-font-display", "Hamburgefontsiv"],
+			["workspace-font-sample", "The quick brown fox jumps over the lazy dog."],
+			["workspace-font-sample", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"],
+			["workspace-font-sample", "abcdefghijklmnopqrstuvwxyz"],
+			["workspace-font-sample", "0123456789 · !?&@#$%"],
+			["workspace-font-sample", "ÁÉÍÓÚ"],
+			["workspace-font-sample", "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"],
+			["workspace-font-sample", "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"],
+			[
+				"workspace-font-sample",
+				"Съешь же ещё этих мягких французских булок, да выпей чаю.",
+			],
+		] as const) {
+			const line = document.createElement("p");
+			line.className = className;
+			line.textContent = text;
+			specimen.append(line);
+		}
+		article.append(heading, loading, specimen);
+
+		const family = `pi-ui-font-preview-${fileGeneration}`;
+		const font = new FontFace(family, `url(${JSON.stringify(url)})`);
+		previewFont = font;
+		void font.load().then(
+			(loaded) => {
+				if (previewFont !== font) return;
+				document.fonts.add(loaded);
+				specimen.style.fontFamily = family;
+				specimen.hidden = false;
+				loading.remove();
+			},
+			() => {
+				if (previewFont === font)
+					showEmpty("This browser cannot preview this font.");
+			},
+		);
+		return article;
+	}
+
+	function clearFontPreview(): void {
+		if (!previewFont) return;
+		document.fonts.delete(previewFont);
+		previewFont = undefined;
 	}
 
 	async function startEditing(generation: number): Promise<void> {
@@ -687,6 +750,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 	}
 
 	function showEmpty(message: string): void {
+		clearFontPreview();
 		previewHost.replaceChildren();
 		empty.textContent = message;
 		empty.hidden = false;
@@ -793,6 +857,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 
 	function cleanUp(): void {
 		stopEditing();
+		clearFontPreview();
 		previewHost.replaceChildren();
 		viewer.cleanUp();
 		tree.cleanUp();

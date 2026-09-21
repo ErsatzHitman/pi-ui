@@ -511,6 +511,7 @@
 		display: grid;
 		overflow: auto;
 		place-items: center;
+		container-type: inline-size;
 		overscroll-behavior: contain;
 		background: var(--surface-canvas);
 		outline: 0;
@@ -540,6 +541,33 @@
 		min-block-size: 100%;
 		place-self: start stretch;
 		padding: 0.75rem;
+	}
+	.workspace-font-preview {
+		box-sizing: border-box;
+		inline-size: 100%;
+		min-block-size: 100%;
+		place-self: start stretch;
+		padding: 0.75rem;
+	}
+	.workspace-font-loading {
+		color: var(--text-muted);
+		font-size: var(--text-sm);
+	}
+	.workspace-font-specimen {
+		font-size-adjust: from-font;
+		overflow-wrap: anywhere;
+	}
+	.workspace-font-display {
+		margin-block: 0;
+		border-block-end: 1px solid var(--border);
+		padding-block: 0.5em;
+		font-size: clamp(3rem, 10cqi, 7rem);
+		line-height: 1;
+	}
+	.workspace-font-sample {
+		margin-block: 1.5rem;
+		font-size: clamp(1.25rem, 4cqi, 2.5rem);
+		line-height: 1.35;
 	}
 
 	#workspace-file-view > diffs-container {

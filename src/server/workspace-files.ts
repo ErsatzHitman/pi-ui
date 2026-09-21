@@ -28,7 +28,7 @@ const ignoredDirectoryNames = new Set([
 export type WorkspaceEntryKind = "file" | "folder";
 
 export type WorkspaceFilePreview = {
-	kind: "audio" | "html" | "image" | "markdown" | "pdf" | "video";
+	kind: "audio" | "font" | "html" | "image" | "markdown" | "pdf" | "video";
 	mimeType: string;
 };
 
@@ -343,6 +343,7 @@ export function workspaceFilePreview(mimeType: string): WorkspaceFilePreview | u
 	if (normalized.startsWith("image/")) return { kind: "image", mimeType: normalized };
 	if (normalized.startsWith("audio/")) return { kind: "audio", mimeType: normalized };
 	if (normalized.startsWith("video/")) return { kind: "video", mimeType: normalized };
+	if (normalized.startsWith("font/")) return { kind: "font", mimeType: normalized };
 	if (normalized === "application/pdf") return { kind: "pdf", mimeType: normalized };
 	if (normalized === "text/html") return { kind: "html", mimeType: normalized };
 	if (normalized === "text/markdown" || normalized === "text/x-markdown")

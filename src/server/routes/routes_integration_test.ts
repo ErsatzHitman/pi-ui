@@ -898,6 +898,29 @@ test("native media previews expose metadata and byte ranges", async () => {
 	}
 });
 
+test("font previews expose browser-loadable resources", async () => {
+	const workspace = await makeTempDir();
+	const context = fakeContext();
+	context.store.setWorkspacePath(workspace);
+	const router = createRouter(context);
+	const bytes = Uint8Array.from([0x77, 0x4f, 0x46, 0x32]);
+	try {
+		await Bun.write(`${workspace}/sample.woff2`, bytes);
+		const url = `http://localhost${endpoints.workspaceFileContent}?path=sample.woff2`;
+		const metadata = await (await router.fetch(new Request(url))).json();
+		assertEquals(metadata.preview, {
+			kind: "font",
+			mimeType: "font/woff2",
+			url: `${endpoints.workspaceFileContent}?path=sample.woff2&preview=1`,
+		});
+		const preview = await router.fetch(new Request(`${url}&preview=1`));
+		assertEquals(preview.headers.get("content-type"), "font/woff2");
+		assertEquals(await preview.bytes(), bytes);
+	} finally {
+		await rm(workspace, { recursive: true });
+	}
+});
+
 test("editable previews include source and sandboxed preview URLs", async () => {
 	const workspace = await makeTempDir();
 	const context = fakeContext();
