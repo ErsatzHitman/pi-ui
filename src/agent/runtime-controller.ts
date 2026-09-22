@@ -418,7 +418,8 @@ export class RuntimeController {
 	async abort(): Promise<void> {
 		this.tree.cancelNavigation();
 		await this.runtime.session.abort();
-		this.prompts.clear(this.runtime);
+		const queued = this.prompts.restore(this.runtime);
+		const draft = this.state.promptEditorText;
 		this.foregroundObservedRunning = false;
 		this.state.setActivityText(undefined);
 		this.state.setQueuedMessages([], []);
@@ -426,6 +427,11 @@ export class RuntimeController {
 		this.usage.sync();
 		const path = this.runtime.session.sessionManager.getSessionFile();
 		if (path) await this.catalog.refreshPath(path);
+		if (queued) {
+			this.state.setPromptEditorText(
+				[queued, draft].filter((text) => text.trim()).join("\n\n"),
+			);
+		}
 	}
 
 	async abortBackgroundSession(sessionPath: string): Promise<boolean> {

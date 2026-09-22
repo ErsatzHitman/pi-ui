@@ -307,6 +307,30 @@ test("RuntimeController abort preserves the live transcript and interrupted repl
 	}
 });
 
+test("RuntimeController restores queued messages to the editor after abort", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+	fake.setStreaming(true);
+	fake.emit(
+		agentSessionEventStub({
+			type: "queue_update",
+			steering: ["steer first"],
+			followUp: ["follow up"],
+		}),
+	);
+	assertEquals(state.queuedSteeringMessages, ["steer first"]);
+	state.setPromptEditorText("my draft");
+
+	await controller.abort();
+
+	assertEquals(state.queuedSteeringMessages, []);
+	assertEquals(state.queuedFollowUpMessages, []);
+	assertEquals(state.promptEditorText, "steer first\n\nfollow up\n\nmy draft");
+	assertEquals(fake.promptInputs, []);
+	await controller.dispose();
+});
+
 test("RuntimeController production path binds callbacks before activation", async () => {
 	const fake = fakeRuntime();
 	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
