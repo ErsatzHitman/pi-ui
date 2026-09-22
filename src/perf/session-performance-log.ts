@@ -1,7 +1,7 @@
 import { appendFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import { appCachePath } from "../utils/app-cache.ts";
+import { appCachePath } from "../utils/app-dirs.ts";
 import { isNotFound } from "../utils/fs-errors.ts";
 import type { JsonValue } from "../utils/json-types.ts";
 

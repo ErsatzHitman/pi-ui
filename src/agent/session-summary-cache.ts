@@ -5,7 +5,7 @@ import type { SessionInfo } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
 import { Compile } from "typebox/compile";
 
-import { appCachePath } from "../utils/app-cache.ts";
+import { appCachePath } from "../utils/app-dirs.ts";
 import {
 	attachmentDisplayName,
 	splitLeadingAttachmentReferences,
