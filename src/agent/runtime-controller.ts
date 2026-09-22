@@ -286,6 +286,11 @@ export class RuntimeController {
 						resourceLoaderOptions: { extensionFactories },
 					}),
 			);
+			// pi-ui resizes images with Bun.Image because pi's Photon resizer is not
+			// bundled in compiled builds. Force pi's image auto-resize off for this
+			// manager (an override on the method, not the setting, so it survives
+			// settings saves) to avoid dropping prompt images when Photon is absent.
+			services.settingsManager.getImageAutoResize = () => false;
 			configureAgentHttpProxy(
 				services.modelRuntime,
 				services.settingsManager.getGlobalSettings().httpProxy,

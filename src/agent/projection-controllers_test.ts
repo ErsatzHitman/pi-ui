@@ -292,6 +292,34 @@ test("tree projection shows tool call details and hides tool-only assistants", (
 	);
 });
 
+test("tree projection hides context edit bookkeeping", () => {
+	const message = sessionEntryStub({
+		id: "message",
+		parentId: null,
+		timestamp: "2026-01-01T00:00:00.000Z",
+		type: "message",
+		message: { role: "user", content: "hello" },
+	});
+	const edit = sessionEntryStub({
+		id: "edit",
+		parentId: "message",
+		timestamp: "2026-01-01T00:00:01.000Z",
+		type: "context_edit",
+		targetId: "message",
+		replacement: null,
+	});
+	const rows = flattenTree(
+		[{ entry: message, children: [{ entry: edit, children: [] }] }],
+		"message",
+		new Set(["message", "edit"]),
+	);
+
+	assertEquals(
+		rows.map((row) => row.id),
+		["message"],
+	);
+});
+
 test("tree navigation rejects overlap and can cancel summarization", async () => {
 	let navigateCount = 0;
 	let abortCount = 0;
