@@ -858,8 +858,16 @@ function renderExtensionsTab(extensions: LiveWorkspaceExtensions): string {
 	);
 }
 
-/** Sheet elements already own a `<dialog>` (see pi-ui-elements.tsx); this row reopens it. */
+/**
+ * Sheet elements already own a `<dialog>` (see pi-ui-elements.tsx); this row reopens it. A
+ * plain `commandfor`/`command="show-modal"` invoker triggers the browser's own (unguarded)
+ * open handling, which logs "A command attempted to open an already open Dialog as a modal"
+ * when the extension re-shows the same sheet (or the user re-opens it from here) while it's
+ * already open (F3) — guard it the same way every other programmatic `showModal()` call in
+ * this codebase does (see `ui-renderer.ts`'s reopen scripts).
+ */
 function renderSheetRow(element: PiUiElement): string {
+	const dialogId = piUiDialogId(element);
 	return syncHtml(
 		<li class="live-workspace-agent-row">
 			<span class="live-workspace-agent-label" safe>
@@ -873,8 +881,7 @@ function renderSheetRow(element: PiUiElement): string {
 				class="btn"
 				data-variant="outline"
 				data-size="xs"
-				commandfor={piUiDialogId(element)}
-				command="show-modal"
+				data-on:click={`{ const dialog = document.getElementById(${JSON.stringify(dialogId)}); if (dialog && !dialog.open) dialog.showModal(); }`}
 			>
 				Open
 			</button>

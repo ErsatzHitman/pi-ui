@@ -126,10 +126,13 @@ function installFakeDom(options: {
 	probeRect: { width: number; height: number };
 	grids: FakeGridElement[];
 	resizeObserver?: boolean;
+	/** `document.documentElement.clientWidth` — only read for a percentage-width overlay (F4). */
+	documentElementWidth?: number;
 }) {
 	const calls: Array<{ url: string; body: unknown }> = [];
 	let mutationCallback: ((mutations: unknown[]) => void) | undefined;
 	let resizeCallback: ((entries: Array<{ target: unknown }>) => void) | undefined;
+	let windowResizeCallback: (() => void) | undefined;
 
 	const restores = [
 		patchGlobal("Element", FakeGridElement),
@@ -168,9 +171,15 @@ function installFakeDom(options: {
 			getElementById: (id: string) =>
 				id === "terminal-surface-persistent" ? {} : undefined,
 			createElement: () => new FakeGridElement(options.probeRect),
+			documentElement: { clientWidth: options.documentElementWidth ?? 0 },
 			body: { appendChild: () => {} },
 			addEventListener: () => {},
 			querySelectorAll: () => options.grids,
+		}),
+		patchGlobal("window", {
+			addEventListener: (name: string, cb: () => void) => {
+				if (name === "resize") windowResizeCallback = cb;
+			},
 		}),
 	];
 
@@ -178,6 +187,7 @@ function installFakeDom(options: {
 		calls,
 		getMutationCallback: () => mutationCallback,
 		getResizeCallback: () => resizeCallback,
+		getWindowResizeCallback: () => windowResizeCallback,
 		restore: () => {
 			for (const restore of restores) restore();
 		},
@@ -224,6 +234,53 @@ test("a mounted surface re-fits through ResizeObserver when its grid is resized 
 			message: "expected a second resize POST after the grid's box changed",
 		});
 		assertEquals(dom.calls[1]?.body, { surfaceId: "s-resize", cols: 100, rows: 10 });
+	} finally {
+		dom.restore();
+	}
+});
+
+test("a window resize re-fits every mounted surface even when its own grid box didn't change (F4)", async () => {
+	// An overlay's box is sized in `ch`/`dvh` from its last resolved column/row count
+	// (`overlayStyleVars`), so widening or narrowing the browser window alone never changes the
+	// grid element's own size — the ResizeObserver the other test above exercises has nothing to
+	// fire on. Only a `window` "resize" listener catches this case.
+	const grid = new FakeGridElement({ width: 0, height: 480 });
+	grid.dataset.terminalSurfaceGrid = "s-window-resize";
+	const body = new FakeGridElement({ width: 0, height: 0 });
+	body.dataset.cols = "80";
+	body.dataset.rows = "24";
+	body.clientWidth = 700;
+	grid.setQueryResult(body);
+
+	const dom = installFakeDom({
+		probeRect: { width: 140, height: 20 },
+		grids: [grid],
+		resizeObserver: true,
+	});
+	try {
+		bindTerminalSurfaces();
+		await waitForCondition(() => dom.calls.length >= 1, {
+			timeoutMs: 1000,
+			message: "expected a resize POST when the surface first mounted",
+		});
+
+		const windowResizeCallback = dom.getWindowResizeCallback();
+		assertNotEquals(windowResizeCallback, undefined);
+		// The grid's own box (`getBoundingClientRect`) is left exactly as it was — only the
+		// window "resize" event fires, and a wider body box simulates the page's own layout
+		// (not the grid) reacting to the new window size.
+		body.clientWidth = 900;
+		windowResizeCallback?.();
+
+		await waitForCondition(() => dom.calls.length >= 2, {
+			timeoutMs: 1000,
+			message: "expected a second resize POST after a bare window resize",
+		});
+		assertEquals(dom.calls[1]?.body, {
+			surfaceId: "s-window-resize",
+			cols: 128,
+			rows: 24,
+		});
 	} finally {
 		dom.restore();
 	}
@@ -343,6 +400,84 @@ test("an overlay reports the rows its dialog can grow to, not the rows it curren
 		});
 		// 600px max-height minus 34px of dialog chrome, at 20px rows.
 		assertEquals(dom.calls[0]?.body, { surfaceId: "s-overlay", cols: 100, rows: 28 });
+	} finally {
+		dom.restore();
+	}
+});
+
+test("a percentage-width overlay measures against the viewport, not its own already-sized box (F4)", async () => {
+	// The dialog is now sized to exactly fit the already-resolved column count
+	// (`terminal-surface.tsx`'s `overlayStyleVars`), so measuring it directly and feeding it
+	// back as `cols` would resolve `OverlayOptions.width`'s percentage a second time — each
+	// pass narrowing further with no floor, instead of the ~8% gap the un-narrowed box used to
+	// leave. `data-terminal-surface-percent-width` (set only for a `N%` width) routes this
+	// measurement through the viewport instead, the same reference the percentage was already
+	// resolved against server-side.
+	const content = new FakeGridElement({ width: 700, height: 130 });
+	const grid = new FakeGridElement({ width: 0, height: 96 });
+	grid.dataset.terminalSurfaceGrid = "s-percent";
+	grid.dataset.terminalSurfaceKind = "overlay";
+	grid.dataset.terminalSurfacePercentWidth = "true";
+	grid.setClosest(content);
+	const body = new FakeGridElement({ width: 0, height: 0 });
+	body.dataset.cols = "80";
+	body.dataset.rows = "24";
+	// The box's own (already 92%-resolved) content width — the old bug's reference.
+	body.clientWidth = 644;
+	grid.setQueryResult(body);
+	body.setClosest(grid);
+
+	const dom = installFakeDom({
+		probeRect: { width: 140, height: 20 },
+		grids: [],
+		documentElementWidth: 1400,
+	});
+	try {
+		bindTerminalSurfaces();
+		dom.getMutationCallback()?.([
+			{ type: "attributes", target: body, addedNodes: [], removedNodes: [] },
+		]);
+		await waitForCondition(() => dom.calls.length > 0, {
+			timeoutMs: 1000,
+			message: "expected a resize POST for the percentage overlay",
+		});
+		// (1400 viewport - 56 chrome) / 7px cells = 192 cols — not ~92 (644 / 7), which is what
+		// re-measuring the already-narrowed box would have produced.
+		assertEquals(dom.calls[0]?.body, { surfaceId: "s-percent", cols: 192, rows: 4 });
+	} finally {
+		dom.restore();
+	}
+});
+
+test("a numeric-width overlay still measures its own box (only a percentage needs the viewport)", async () => {
+	const content = new FakeGridElement({ width: 700, height: 130 });
+	const grid = new FakeGridElement({ width: 0, height: 96 });
+	grid.dataset.terminalSurfaceGrid = "s-numeric";
+	grid.dataset.terminalSurfaceKind = "overlay";
+	grid.setClosest(content);
+	const body = new FakeGridElement({ width: 0, height: 0 });
+	body.dataset.cols = "80";
+	body.dataset.rows = "24";
+	body.clientWidth = 560;
+	grid.setQueryResult(body);
+	body.setClosest(grid);
+
+	const dom = installFakeDom({
+		probeRect: { width: 140, height: 20 },
+		grids: [],
+		documentElementWidth: 1400,
+	});
+	try {
+		bindTerminalSurfaces();
+		dom.getMutationCallback()?.([
+			{ type: "attributes", target: body, addedNodes: [], removedNodes: [] },
+		]);
+		await waitForCondition(() => dom.calls.length > 0, {
+			timeoutMs: 1000,
+			message: "expected a resize POST for the numeric-width overlay",
+		});
+		// 560 / 7px cells = 80 cols, ignoring the (irrelevant, much larger) viewport reference.
+		assertEquals(dom.calls[0]?.body, { surfaceId: "s-numeric", cols: 80, rows: 4 });
 	} finally {
 		dom.restore();
 	}

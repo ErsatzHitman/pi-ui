@@ -72,6 +72,9 @@ test("overlay anchor and offset project onto the dialog's data attribute and sty
 					width: 40,
 					margin: 1,
 				},
+				// A numeric `width` is resolved to itself (unclamped) — see `tui-shim.ts`'s
+				// `#resolveOverlayWidth`.
+				width: 40,
 			}),
 		],
 	});
@@ -79,16 +82,31 @@ test("overlay anchor and offset project onto the dialog's data attribute and sty
 	assertStringIncludes(html, "--terminal-overlay-offset-x:2ch");
 	assertStringIncludes(html, "--terminal-overlay-offset-y:-1lh");
 	assertStringIncludes(html, "--terminal-overlay-width:40ch");
+	// Only a percentage width needs the viewport-based resize measurement (F4).
+	assertStringExcludes(html, "data-terminal-surface-percent-width");
 });
 
-test("percentage overlay sizes resolve against the viewport, like pi-tui's terminal", () => {
+test("a percentage overlay width sizes the dialog to the already-resolved column count (F4)", () => {
+	// `surface.width` is what `TerminalSurfaceController` already resolved "92%" against the
+	// client-reported terminal size to (mirroring pi-tui's own overlay layout in `tui-shim.ts`).
+	// Re-deriving `92vw` from the raw option here instead applied that percentage a *second*
+	// time — once to size the box, once again (via `terminal-keys.js` measuring that box) to
+	// size the content within it — leaving an ~8% gap on the right that never closed.
 	const html = renderTerminalSurfaceOverlays({
 		terminalSurfaces: [
-			surface({ overlayOptions: { width: "92%", maxHeight: "85%" } }),
+			surface({
+				overlayOptions: { width: "92%", maxHeight: "85%" },
+				cols: 80,
+				width: 73,
+			}),
 		],
 	});
-	assertStringIncludes(html, "--terminal-overlay-width:92vw");
+	assertStringIncludes(html, "--terminal-overlay-width:73ch");
+	assertStringExcludes(html, "vw");
 	assertStringIncludes(html, "--terminal-overlay-max-height:85dvh");
+	// The client measures the viewport (not this now-exact-fit box) to re-resolve the
+	// percentage on resize — see `terminal-keys.js`'s `percentOverlayAvailableWidth`.
+	assertStringIncludes(html, 'data-terminal-surface-percent-width="true"');
 });
 
 test("an unrecognized anchor falls back to center rather than breaking the CSS selector", () => {

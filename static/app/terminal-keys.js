@@ -158,9 +158,16 @@ function ensureProbe() {
 	probe = document.createElement("pre");
 	probe.className = "terminal-surface-body terminal-surface-probe";
 	probe.setAttribute("aria-hidden", "true");
+	// `width: 20ch` (not 20 rendered 'M' glyphs) so this probe's own box is defined in the
+	// exact unit `terminal-surface.tsx` sizes every surface in (`Nch` widths — `overlayStyleVars`,
+	// `--terminal-overlay-min-width`). A glyph-width probe can read a systematically different
+	// value than what `ch` itself resolves to for the same font (border-box sizing makes this
+	// element's own border-box width authoritative, not a footnote to subtract padding from) —
+	// on an overlay now sized to exactly fit its resolved column count (F4), that gap showed up
+	// as a small residual horizontal scrollbar instead of the un-narrowed box absorbing it.
 	probe.style.cssText =
-		"position:absolute;visibility:hidden;left:-9999px;top:-9999px;pointer-events:none;height:auto;flex:none;";
-	probe.textContent = "M".repeat(20);
+		"position:absolute;visibility:hidden;left:-9999px;top:-9999px;pointer-events:none;height:auto;flex:none;width:20ch;";
+	probe.textContent = "M";
 	document.body.appendChild(probe);
 	return probe;
 }
@@ -176,9 +183,7 @@ function inlinePadding(element) {
 function measureCell() {
 	const element = ensureProbe();
 	const rect = element.getBoundingClientRect();
-	// The probe shares `.terminal-surface-body`'s padding; measure its content box only,
-	// or every cell reads ~padding/20 px too wide and grids fit ~10% short of the pane.
-	const width = (rect.width - inlinePadding(element)) / 20;
+	const width = rect.width / 20;
 	const height =
 		rect.height || Number.parseFloat(getComputedStyle(element).lineHeight) || 0;
 	if (!width || !height) return undefined;
@@ -256,6 +261,25 @@ function availableHeight(grid, rect) {
 	return Math.max(rect.height, maxHeight - chrome);
 }
 
+/**
+ * The reference width `cols` is measured against for a `N%`-width overlay (`data-terminal-
+ * surface-percent-width`, set by `terminal-surface.tsx` when `OverlayOptions.width` is a
+ * percentage). The dialog's own box is now sized to exactly fit the *already-resolved* column
+ * count (`overlayStyleVars`), so measuring that box directly and reporting it back as `cols`
+ * would resolve the percentage against its own last answer — each pass narrowing further with
+ * no floor (F4: the box would keep shrinking instead of settling ~8% short). Measure the
+ * viewport instead, adjusted for the box's own fixed chrome (padding/border, which stays the
+ * same whatever the box's current width): a stable reference the percentage can converge
+ * against without feeding on itself, mirroring `availableHeight`'s reasoning for the same
+ * problem in the other dimension.
+ */
+function percentOverlayAvailableWidth(grid, bodyAvailable) {
+	const content = grid.closest(".terminal-surface-dialog-content");
+	if (!content) return bodyAvailable;
+	const chrome = content.getBoundingClientRect().width - bodyAvailable;
+	return Math.max(bodyAvailable, document.documentElement.clientWidth - chrome);
+}
+
 function sendResize(surfaceId, grid) {
 	const cell = measureCell();
 	if (!cell) return;
@@ -263,7 +287,11 @@ function sendResize(surfaceId, grid) {
 	const body = grid.querySelector(bodySelector);
 	// The body's client box (inside its border and any scrollbar, minus padding) is
 	// what lines actually get; the grid's border box over-fits by a column on phones.
-	const available = body ? body.clientWidth - inlinePadding(body) : rect.width;
+	const bodyAvailable = body ? body.clientWidth - inlinePadding(body) : rect.width;
+	const available =
+		grid.dataset.terminalSurfacePercentWidth === "true"
+			? percentOverlayAvailableWidth(grid, bodyAvailable)
+			: bodyAvailable;
 	const cols = Math.max(20, Math.floor(available / cell.width));
 	const rows = Math.max(3, Math.floor(availableHeight(grid, rect) / cell.height));
 	const previousCols = Number(body?.dataset.cols);
@@ -490,6 +518,20 @@ export function bindTerminalSurfaces() {
 	document.addEventListener("paste", handlePaste, true);
 	document.addEventListener("wheel", handleWheel, { passive: false });
 	document.addEventListener("click", handleClick);
+	// A mounted overlay's own box is sized in `ch`/`dvh` from the *last* resolved column/row
+	// count (`overlayStyleVars`), so it doesn't itself change size when only the browser window
+	// does — the ResizeObserver above, which watches each grid's own box, never fires for a bare
+	// window resize (F4: a percentage-width overlay stayed at its open-time fit and drifted out
+	// of sync with the new window size instead of re-filling it). Re-measure every currently
+	// mounted surface directly off the resize event instead of waiting on a box that won't move
+	// on its own; `scheduleResize` already debounces per surface, so this is cheap even while a
+	// window drag fires it repeatedly.
+	if (typeof window !== "undefined") {
+		window.addEventListener("resize", () => {
+			for (const grid of document.querySelectorAll(gridSelector))
+				scheduleResize(grid);
+		});
+	}
 	document.addEventListener(
 		"close",
 		(event) => {
