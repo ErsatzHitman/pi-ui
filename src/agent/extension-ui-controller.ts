@@ -3,6 +3,7 @@ import type {
 	AutocompleteProviderFactory,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
+	ReadonlyFooterDataProvider,
 	TerminalInputHandler,
 	Theme,
 	WorkingIndicatorOptions,
@@ -10,8 +11,7 @@ import type {
 
 /** Not re-exported from the package root; derived from the context methods. */
 type EditorFactory = Parameters<ExtensionUIContext["setEditorComponent"]>[0];
-type FooterFactory = Parameters<ExtensionUIContext["setFooter"]>[0];
-type HeaderFactory = Parameters<ExtensionUIContext["setHeader"]>[0];
+type CustomOptions = Parameters<ExtensionUIContext["custom"]>[1];
 
 import type {
 	AppExtensionDialog,
@@ -22,22 +22,13 @@ import type {
 import type { JsonValue } from "../utils/json-types.ts";
 import { isString } from "../utils/type-guards.ts";
 import { PiUiBridgeDecoder, PiUiElementStore } from "./pi-ui-bridge.ts";
+import {
+	TerminalSurfaceController,
+	type CustomComponentFactory,
+} from "./terminal-surface/terminal-surface-controller.ts";
+import type { TerminalSurfaceColorScheme } from "./terminal-surface/theme.ts";
 
 const defaultWorkingVisible = true;
-
-/**
- * The visible/accessible label `notify()` gives "info"/"warning" (A#24).
- * "error" gets its own distinct rendering entirely — see `notify()` below —
- * so every level ends up visually and textually distinct: previously "info"
- * got no label at all and `renderSystemMessage` added a hardcoded
- * "Warning: " on top of everything regardless of level, reading as
- * "Warning: info…" for an info notice and "Warning: warning: …" for a
- * warning one.
- */
-const notifyLevelLabels: Record<"info" | "warning", string> = {
-	info: "Info",
-	warning: "Warning",
-};
 
 /**
  * A `Theme` stand-in for the web UI, where there is no terminal to paint
@@ -89,6 +80,14 @@ export type ExtensionUiControllerHooks = {
 	 * write `AppStore.extensionChannels` itself.
 	 */
 	onChannel?: (channel: string, payload: JsonValue) => void;
+	/**
+	 * The browser client's light/dark preference, for the real `Theme` a
+	 * terminal surface's `Component` tree is mounted with. pi-ui has no
+	 * server-side signal for this today (it's a pure `prefers-color-scheme`
+	 * CSS media query client-side) — defaults to `"dark"`, matching
+	 * `pi-coding-agent`'s own default theme.
+	 */
+	colorScheme?: () => TerminalSurfaceColorScheme;
 };
 
 /** Bridges pi extension UI requests to backend-owned web state. */
@@ -98,11 +97,10 @@ export class ExtensionUiController {
 	readonly #widgets = new Map<string, AppExtensionWidget>();
 	/**
 	 * Widget keys an extension mounted a `(tui, theme) => Component` factory
-	 * onto instead of a `string[]`. pi-ui cannot render a live `pi-tui`
-	 * `Component` tree (see `custom()`), so these are recorded for
-	 * diagnostics/future Live Workspace surfacing only — never rendered, and
-	 * any earlier string-line widget under the same key is cleared, matching
-	 * "this key is now a component-only widget" semantics.
+	 * onto instead of a `string[]`. These now mount a real terminal surface
+	 * (see `#terminalSurfaces`, keyed by `widgetSurfaceId(key)`); this set
+	 * only tracks which keys are component-owned so `setWidget(key, [...])`
+	 * later can tell a stale surface needs disposing.
 	 */
 	readonly #componentWidgetKeys = new Set<string>();
 	readonly #terminalInputHandlers = new Set<TerminalInputHandler>();
@@ -119,20 +117,25 @@ export class ExtensionUiController {
 	 * foreground one (A#23).
 	 */
 	readonly #piUiStores = new WeakMap<AgentSessionRuntime, PiUiRuntimeStore>();
+	readonly #terminalSurfaces: TerminalSurfaceController;
 	#active: PendingDialog | undefined;
 	#workingIndicator: AppExtensionWorkingIndicator | undefined;
 	#workingMessage: string | undefined;
 	#workingVisible = defaultWorkingVisible;
 	#hiddenThinkingLabel: string | undefined;
 	#toolsExpanded = false;
-	#footerFactory: FooterFactory | undefined;
-	#headerFactory: HeaderFactory | undefined;
+	#footerMounted = false;
+	#headerMounted = false;
 	#editorComponentFactory: EditorFactory | undefined;
 
 	constructor(
 		private readonly store: AppStore,
 		private readonly hooks: ExtensionUiControllerHooks = {},
-	) {}
+	) {
+		this.#terminalSurfaces = new TerminalSurfaceController({
+			onUpdate: (surfaces) => this.store.setTerminalSurfaces([...surfaces]),
+		});
+	}
 
 	/**
 	 * `runtimeKey` identifies which runtime this context belongs to — used
@@ -193,42 +196,71 @@ export class ExtensionUiController {
 				if (!isActive()) return;
 				if (content === undefined) {
 					this.#widgets.delete(key);
-					this.#componentWidgetKeys.delete(key);
+					if (this.#componentWidgetKeys.delete(key)) {
+						this.#terminalSurfaces.dispose(widgetSurfaceId(key));
+					}
 				} else if (Array.isArray(content)) {
-					this.#componentWidgetKeys.delete(key);
+					if (this.#componentWidgetKeys.delete(key)) {
+						this.#terminalSurfaces.dispose(widgetSurfaceId(key));
+					}
 					this.#widgets.set(key, {
 						key,
 						lines: [...content],
 						placement: options?.placement ?? "aboveEditor",
 					});
 				} else {
-					// A `(tui, theme) => Component` factory: pi-ui has no terminal to
-					// mount it into. Record that the key is now component-owned and
-					// drop any prior string-line rendering for it, without throwing.
+					// A `(tui, theme) => Component` factory: mount it as a persistent
+					// terminal surface, and drop any prior string-line rendering under
+					// the same key, matching "this key is now a component-only widget".
 					this.#widgets.delete(key);
 					this.#componentWidgetKeys.add(key);
+					this.#terminalSurfaces.mountPersistent({
+						id: widgetSurfaceId(key),
+						kind: "widget",
+						factory: content,
+						colorScheme: this.colorScheme(),
+					});
 				}
 				this.store.setExtensionWidgets(this.#widgets.values().toArray());
 			},
 			setFooter: (factory) => {
-				if (isActive()) this.#footerFactory = factory;
+				if (!isActive()) return;
+				if (!factory) {
+					if (this.#footerMounted)
+						this.#terminalSurfaces.dispose(footerSurfaceId);
+					this.#footerMounted = false;
+					return;
+				}
+				this.#footerMounted = true;
+				this.#terminalSurfaces.mountPersistent({
+					id: footerSurfaceId,
+					kind: "footer",
+					factory,
+					footerData: this.#footerData(),
+					colorScheme: this.colorScheme(),
+				});
 			},
 			setHeader: (factory) => {
-				if (isActive()) this.#headerFactory = factory;
+				if (!isActive()) return;
+				if (!factory) {
+					if (this.#headerMounted)
+						this.#terminalSurfaces.dispose(headerSurfaceId);
+					this.#headerMounted = false;
+					return;
+				}
+				this.#headerMounted = true;
+				this.#terminalSurfaces.mountPersistent({
+					id: headerSurfaceId,
+					kind: "header",
+					factory,
+					colorScheme: this.colorScheme(),
+				});
 			},
 			setTitle: (title) => {
 				if (isActive()) this.store.setDocumentTitle(title);
 			},
-			custom: async <T>() => {
-				// Matches the SDK's own real RPC-mode contract (a headless client
-				// has no terminal to mount a `Component` into): resolve `undefined`
-				// instead of throwing, so a command handler that awaits `custom()`
-				// degrades gracefully rather than crashing. A future terminal-surface
-				// host can replace this with a real headless render.
-				// SAFETY: `undefined` is the documented RPC-mode resolution for
-				// every caller of `custom()`, regardless of `T`.
-				return undefined as T;
-			},
+			custom: <T>(factory: CustomComponentFactory<T>, options: CustomOptions) =>
+				this.custom<T>(isActive, factory, options),
 			pasteToEditor: (text) => {
 				if (!isActive()) return;
 				this.setEditorText(`${this.store.promptEditorText}${text}`);
@@ -267,14 +299,14 @@ export class ExtensionUiController {
 		return this.#hiddenThinkingLabel;
 	}
 
-	/** The most recently registered footer `Component` factory, if any. */
-	getFooterFactory(): FooterFactory | undefined {
-		return this.#footerFactory;
+	/** Routes a raw terminal byte sequence to a mounted surface. `false` if `id` is unknown. */
+	handleTerminalSurfaceInput(id: string, data: string): boolean {
+		return this.#terminalSurfaces.handleInput(id, data);
 	}
 
-	/** The most recently registered header `Component` factory, if any. */
-	getHeaderFactory(): HeaderFactory | undefined {
-		return this.#headerFactory;
+	/** Applies a client-measured grid resize to a mounted surface. `false` if `id` is unknown. */
+	resizeTerminalSurface(id: string, cols: number, rows: number): boolean {
+		return this.#terminalSurfaces.resize(id, { columns: cols, rows });
 	}
 
 	/**
@@ -369,9 +401,13 @@ export class ExtensionUiController {
 		this.#workingVisible = defaultWorkingVisible;
 		this.#hiddenThinkingLabel = undefined;
 		this.#toolsExpanded = false;
-		this.#footerFactory = undefined;
-		this.#headerFactory = undefined;
+		this.#footerMounted = false;
+		this.#headerMounted = false;
 		this.#editorComponentFactory = undefined;
+		// Disposes every mounted `custom()`/widget/footer/header surface, resolving
+		// any outstanding `custom()` promise with `undefined` rather than leaving it
+		// pending forever (background isolation: a surface never outlives its session).
+		this.#terminalSurfaces.disposeAll();
 		this.store.setExtensionDialog(undefined);
 		this.store.setExtensionStatuses([]);
 		this.store.setExtensionWidgets([]);
@@ -420,14 +456,10 @@ export class ExtensionUiController {
 			return;
 		}
 		if (!isActive()) return;
-		if (type === "error") {
-			// Gets its own expandable, distinctly-styled treatment (see
-			// `renderErrorMessage`) instead of sharing the plain notice row
-			// "info"/"warning" get — a real variant per level, not just a prefix.
-			this.store.appendMessage("notice", message, { state: "error" });
-			return;
-		}
-		this.store.appendMessage("notice", `${notifyLevelLabels[type]}: ${message}`);
+		// Each level gets its own status-dot color and screen-reader prefix in the
+		// transcript (renderSystemMessage) instead of every notice reading
+		// "Warning: …" regardless of severity — see r1-audit #24.
+		this.store.appendMessage("notice", message, { noticeTone: type });
 	}
 
 	private select(
@@ -492,6 +524,63 @@ export class ExtensionUiController {
 			},
 			dialogOptions,
 		);
+	}
+
+	/**
+	 * Mounts a `custom()` overlay/inline component as a terminal surface (see
+	 * `TerminalSurfaceController.mountCustom`). Never throws or rejects —
+	 * resolves `undefined` for an inactive session (matching every other
+	 * `isActive()`-gated method here) and for any internal failure, so a
+	 * command handler that `await`s `custom()` always completes.
+	 */
+	private custom<T>(
+		isActive: () => boolean,
+		factory: CustomComponentFactory<T>,
+		options: CustomOptions,
+	): Promise<T> {
+		if (!isActive()) {
+			// SAFETY: every other `isActive()`-gated method here resolves/
+			// returns its "inactive session" default without a real `T` to
+			// offer (see the class-level comment on `identityTheme`'s traps);
+			// `custom()`'s caller already treats `undefined` as a valid
+			// resolution regardless of `T`.
+			return Promise.resolve(undefined as T);
+		}
+		return this.#terminalSurfaces
+			.mountCustom<T>({
+				id: crypto.randomUUID(),
+				factory,
+				overlay: options?.overlay ?? false,
+				overlayOptions: options?.overlayOptions,
+				onHandle: options?.onHandle,
+				colorScheme: this.colorScheme(),
+			})
+			.catch((error) => {
+				// `mountCustom` itself never rejects (it catches the factory's
+				// own failures); this only guards synchronous throws before its
+				// first `await` (e.g. a malformed `Theme`), so `custom()` keeps
+				// the same "never throw into the extension" contract as every
+				// other method here.
+				console.error("Terminal surface custom() failed", error);
+				// SAFETY: matches the "inactive session" branch above — no real
+				// `T` exists for a failed mount, so `undefined` is the
+				// intentional resolution.
+				return undefined as T;
+			});
+	}
+
+	private colorScheme(): TerminalSurfaceColorScheme {
+		return this.hooks.colorScheme?.() ?? "dark";
+	}
+
+	/** A minimal `ReadonlyFooterDataProvider` backed by this controller's own status map. */
+	#footerData(): ReadonlyFooterDataProvider {
+		return {
+			getGitBranch: () => null,
+			getExtensionStatuses: () => new Map(this.#statuses),
+			getAvailableProviderCount: () => 0,
+			onBranchChange: () => () => {},
+		};
 	}
 
 	private editor(
@@ -597,3 +686,11 @@ function normalizeWorkingIndicator(
 	if (!options?.frames) return undefined;
 	return { frames: [...options.frames], intervalMs: options.intervalMs };
 }
+
+/** Stable terminal-surface id for a `setWidget(key, (tui, theme) => Component)` mount. */
+function widgetSurfaceId(key: string): string {
+	return `widget:${key}`;
+}
+
+const footerSurfaceId = "footer";
+const headerSurfaceId = "header";

@@ -34,10 +34,42 @@ export function stringField(signals: ActionSignals, field: string): string {
 	return value;
 }
 
-export function requiredString(signals: ActionSignals, field: string): string {
+export function requiredString(
+	signals: ActionSignals,
+	field: string,
+	options: { maxLength?: number } = {},
+): string {
 	const value = stringField(signals, field);
 	if (value.trim() === "") {
 		throw new ActionInputError(`Missing or invalid ${field}.`);
+	}
+	if (options.maxLength !== undefined && value.length > options.maxLength) {
+		throw new ActionInputError(`${field} is too long.`);
+	}
+	return value;
+}
+
+/**
+ * Reads an arbitrary JSON-compatible signal (already parsed by Datastar),
+ * rejecting it once its serialized size exceeds {@link options.maxBytes}.
+ * Used for untrusted, extension-shaped payloads (a PIUI action's `value`)
+ * with no fixed field shape to validate structurally.
+ */
+export function jsonSizeField(
+	signals: ActionSignals,
+	field: string,
+	options: { maxBytes: number },
+): Jsonifiable | undefined {
+	const value = signals[field];
+	if (value === undefined) return undefined;
+	let bytes: number;
+	try {
+		bytes = Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
+	} catch {
+		throw new ActionInputError(`Invalid ${field}.`);
+	}
+	if (bytes > options.maxBytes) {
+		throw new ActionInputError(`${field} is too large.`);
 	}
 	return value;
 }
@@ -50,26 +82,6 @@ export function optionalString(
 	if (value === undefined || value === null || value === "") return undefined;
 	if (!isString(value)) {
 		throw new ActionInputError(`Invalid ${field}.`);
-	}
-	return value;
-}
-
-/**
- * A required, non-empty string capped at `maxLength`. Routes that forward a
- * client-supplied value into an id, a lookup key, or a message relayed to an
- * extension process (e.g. a PIUI action's `elementId`/`actionId`) must bound
- * it here, at the edge, rather than trusting the caller — an unbounded value
- * could otherwise grow a server-side map unboundedly or be relayed as an
- * outsized argument to a child process.
- */
-export function boundedString(
-	signals: ActionSignals,
-	field: string,
-	maxLength: number,
-): string {
-	const value = requiredString(signals, field);
-	if (value.length > maxLength) {
-		throw new ActionInputError(`${field} exceeds ${maxLength} characters.`);
 	}
 	return value;
 }

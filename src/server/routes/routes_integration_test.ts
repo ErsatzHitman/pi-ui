@@ -800,6 +800,146 @@ test("extension UI actions reject a missing elementId without dispatching", asyn
 	assertEquals(dispatched, false);
 });
 
+test("extension UI actions reject an oversized elementId without dispatching", async () => {
+	let dispatched = false;
+	const host = fakeHost({
+		dispatchExtensionUiAction: async () => {
+			dispatched = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest("/extensions/ui/action", {
+			elementId: "x".repeat(600),
+			actionId: "submit",
+		}),
+	);
+
+	assertEquals(response.status, 400);
+	assertEquals(dispatched, false);
+});
+
+test("extension UI actions reject an oversized value without dispatching", async () => {
+	let dispatched = false;
+	const host = fakeHost({
+		dispatchExtensionUiAction: async () => {
+			dispatched = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest("/extensions/ui/action", {
+			elementId: "panel",
+			actionId: "submit",
+			value: { note: "x".repeat(70_000) },
+		}),
+	);
+
+	assertEquals(response.status, 400);
+	assertEquals(dispatched, false);
+});
+
+test("terminal surface input routes a raw byte sequence to the active runtime", async () => {
+	let received: { surfaceId: string; data: string } | undefined;
+	const host = fakeHost({
+		handleTerminalSurfaceInput: (surfaceId, data) => {
+			received = { surfaceId, data };
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest(endpoints.terminalSurfaceInput, {
+			surfaceId: "overlay-1",
+			data: "\r",
+		}),
+	);
+
+	assertEquals(response.status, 204);
+	assertEquals(received, { surfaceId: "overlay-1", data: "\r" });
+});
+
+test("terminal surface input rejects a missing surfaceId without reaching the runtime", async () => {
+	let called = false;
+	const host = fakeHost({
+		handleTerminalSurfaceInput: () => {
+			called = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest(endpoints.terminalSurfaceInput, { data: "x" }),
+	);
+
+	assertEquals(response.status, 400);
+	assertEquals(called, false);
+});
+
+test("terminal surface input rejects an oversized payload without reaching the runtime", async () => {
+	let called = false;
+	const host = fakeHost({
+		handleTerminalSurfaceInput: () => {
+			called = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest(endpoints.terminalSurfaceInput, {
+			surfaceId: "overlay-1",
+			data: "x".repeat(70_000),
+		}),
+	);
+
+	assertEquals(response.status, 400);
+	assertEquals(called, false);
+});
+
+test("terminal surface resize forwards the client-measured grid to the active runtime", async () => {
+	let received: { surfaceId: string; cols: number; rows: number } | undefined;
+	const host = fakeHost({
+		resizeTerminalSurface: (surfaceId, cols, rows) => {
+			received = { surfaceId, cols, rows };
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest(endpoints.terminalSurfaceResize, {
+			surfaceId: "overlay-1",
+			cols: 80,
+			rows: 24,
+		}),
+	);
+
+	assertEquals(response.status, 204);
+	assertEquals(received, { surfaceId: "overlay-1", cols: 80, rows: 24 });
+});
+
+test("terminal surface resize rejects a negative grid size without reaching the runtime", async () => {
+	let called = false;
+	const host = fakeHost({
+		resizeTerminalSurface: () => {
+			called = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest(endpoints.terminalSurfaceResize, {
+			surfaceId: "overlay-1",
+			cols: -1,
+			rows: 24,
+		}),
+	);
+
+	assertEquals(response.status, 400);
+	assertEquals(called, false);
+});
+
 test("main stream binds a validated display client identity", async () => {
 	const clientId = "123e4567-e89b-42d3-a456-426614174000";
 	let connectedClientId: string | undefined;
@@ -1292,6 +1432,7 @@ function fakeHost(overrides: Partial<RuntimeResource> = {}): RuntimeResource {
 		forkSessionToWorkspace: async () => ({ status: "success" }),
 		getArgumentCompletions: async () => [],
 		getWorkspacePath: () => process.cwd(),
+		handleTerminalSurfaceInput: () => true,
 		listSessions: async () => {},
 		logout: () => true,
 		navigateTree: async () => ({ status: "success", editorText: "" }),
@@ -1306,6 +1447,7 @@ function fakeHost(overrides: Partial<RuntimeResource> = {}): RuntimeResource {
 		refreshModels: async () => {},
 		removeQueuedMessage: async () => true,
 		renameSession: async () => true,
+		resizeTerminalSurface: () => true,
 		respondExtensionUi: () => true,
 		restoreQueuedMessages: () => "",
 		resumeSession: async () => ({ status: "success" }),

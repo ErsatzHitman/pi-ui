@@ -610,8 +610,11 @@ function actionPost(
 ): string {
 	// `elementId`/`actionId` match the `PiUiActionRequest` contract exactly —
 	// this is what `lib/bridge.ts`'s `pi_ui_event` handler expects to decode.
+	// It derives the namespace as `elementId.split(":")[0]`, so `elementId`
+	// must carry `ns` itself (a bare `element.id` left the namespace-scoped
+	// `piui:<ns>` event and its handlers unreachable — see r1-audit #22).
 	return `@post('${endpoints.extensionUiAction}', { payload: {
-		elementId: ${JSON.stringify(element.id)},
+		elementId: ${JSON.stringify(`${element.ns}:${element.id}`)},
 		actionId: ${JSON.stringify(actionId)},
 		value: ${valueExpression},
 	} })`;

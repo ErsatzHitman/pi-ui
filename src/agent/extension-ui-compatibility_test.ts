@@ -129,9 +129,7 @@ test("a discovered pi extension uses the web UI bridge end to end", async () => 
 		assertEquals(store.documentTitle, "pi-ui");
 		assertEquals(
 			store.messages.at(-1)?.text,
-			// "info"-level notify() now carries its own level label (A#24)
-			// rather than reaching the transcript unlabeled.
-			"Info: two|true|typed|edited|browser draft + extension",
+			"two|true|typed|edited|browser draft + extension",
 		);
 	} finally {
 		await controller?.dispose();
@@ -258,8 +256,13 @@ export default function (pi) {
       ctx.ui.setHeader(undefined);
       results.setHeader = true;
 
-      const customResult = await ctx.ui.custom(() => ({ render: () => [] }));
-      results.custom = customResult === undefined;
+      // custom() mounts a real terminal surface now; the component resolves it
+      // through done(), exactly like a TUI overlay would.
+      const customResult = await ctx.ui.custom((tui, theme, keybindings, done) => {
+        done("custom-done");
+        return { render: () => ["custom"], invalidate: () => {} };
+      });
+      results.custom = customResult === "custom-done";
 
       results.theme =
         ctx.ui.theme.fg("accent", "text") === "text" &&
@@ -302,9 +305,9 @@ test("a discovered pi extension can drive every remaining ExtensionUIContext mem
 		assertEquals(await controller.prompt("/ui-full-fixture"), true);
 
 		const resultsText = store.messages.at(-1)?.text ?? "";
-		assertEquals(resultsText.startsWith("Info: RESULTS "), true);
+		assertEquals(resultsText.startsWith("RESULTS "), true);
 		const results: Record<string, boolean> = JSON.parse(
-			resultsText.slice("Info: RESULTS ".length),
+			resultsText.slice("RESULTS ".length),
 		);
 		// Every member ran to completion and self-checked true — including the
 		// members `extension-ui-controller_test.ts` only exercises directly
@@ -370,7 +373,7 @@ test("a command that throws is surfaced as an error and the dialog queue recover
 		await waitForDialog(store, "confirm");
 		respond(controller, store, "confirm");
 		assertEquals(await afterThrow, true);
-		assertEquals(store.messages.at(-1)?.text, "Info: after-throw:true");
+		assertEquals(store.messages.at(-1)?.text, "after-throw:true");
 	} finally {
 		await controller?.dispose();
 		await rm(root, { recursive: true });

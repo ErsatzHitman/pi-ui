@@ -71,12 +71,11 @@ export type PiUiActionRequest = {
  * appears) and the renderer that gives a `<dialog>` that same id — keeping a
  * single source of truth prevents the two from drifting apart.
  *
- * The replacement alone is lossy — `"a.b"` and `"a_b"` both slug to `"a_b"` —
- * so whenever replacing characters actually changed the string, a short
- * deterministic hash of the original value is appended to keep otherwise-
- * colliding raw values apart. A value that was already slug-safe is left
- * untouched (no hash suffix), so the common case stays exactly as readable
- * as before.
+ * Substituting disallowed characters can collide two different inputs onto
+ * the same slug (`"a.b"` and `"a_b"` both become `"a_b"`). Whenever the
+ * substitution actually changed the value, a short deterministic hash of the
+ * original is appended so the two remain distinct; a value that was already
+ * a clean slug (the common case) passes through unchanged.
  */
 export function piUiSlug(value: string): string {
 	const slug = value.replaceAll(/[^a-zA-Z0-9_-]/g, "_");
@@ -84,23 +83,16 @@ export function piUiSlug(value: string): string {
 }
 
 /**
- * A short, deterministic, non-cryptographic hash (cyrb53), used only to
- * disambiguate two different raw strings that `piUiSlug` would otherwise
- * collapse onto the same slug — not for anything security-sensitive.
+ * A short, deterministic, non-cryptographic (FNV-1a) hash, used only to
+ * disambiguate slugs — never as an identifier or security boundary.
  */
 function shortHash(value: string): string {
-	let h1 = 0xdeadbeef ^ value.length;
-	let h2 = 0x41c6ce57 ^ value.length;
+	let hash = 0x811c9dc5;
 	for (let index = 0; index < value.length; index += 1) {
-		const code = value.charCodeAt(index);
-		h1 = Math.imul(h1 ^ code, 2654435761);
-		h2 = Math.imul(h2 ^ code, 1597334677);
+		hash ^= value.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193);
 	}
-	h1 =
-		Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-	h2 =
-		Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-	return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+	return (hash >>> 0).toString(36);
 }
 
 /** Whether an element renders as a native `<dialog>` sheet rather than inline. */

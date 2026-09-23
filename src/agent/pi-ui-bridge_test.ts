@@ -267,3 +267,21 @@ test("PiUiElementStore clear() empties both elements and channels", () => {
 	assertEquals(store.elements(), []);
 	assertEquals(store.channels(), []);
 });
+
+test("PiUiElementStore caps channels and evicts the oldest one", () => {
+	const store = new PiUiElementStore();
+	for (let index = 0; index < 70; index += 1) {
+		store.apply({ op: "channel", channel: `c-${index}`, payload: index });
+	}
+	const channels = store.channels();
+	assertEquals(channels.length <= 64, true);
+	// The oldest channels (c-0, c-1, ...) were evicted; the newest survive.
+	assertEquals(
+		channels.some((channel) => channel.channel === "c-69"),
+		true,
+	);
+	assertEquals(
+		channels.some((channel) => channel.channel === "c-0"),
+		false,
+	);
+});

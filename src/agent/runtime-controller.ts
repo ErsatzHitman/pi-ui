@@ -1372,6 +1372,16 @@ export class RuntimeController {
 		return this.extensionUi.respond(requestId, response, cancelled);
 	}
 
+	/** Routes a raw terminal byte sequence to a mounted terminal surface. */
+	handleTerminalSurfaceInput(surfaceId: string, data: string): boolean {
+		return this.extensionUi.handleTerminalSurfaceInput(surfaceId, data);
+	}
+
+	/** Applies a client-measured grid resize to a mounted terminal surface. */
+	resizeTerminalSurface(surfaceId: string, cols: number, rows: number): boolean {
+		return this.extensionUi.resizeTerminalSurface(surfaceId, cols, rows);
+	}
+
 	/**
 	 * Routes a user action on a rendered PIUI element (a button click, a form
 	 * submit) back to the extension that owns it, by invoking its
@@ -1397,8 +1407,15 @@ export class RuntimeController {
 			.filter((command) => command.name === piUiEventCommandName);
 		if (commands.length === 0) return false;
 		// `lib/bridge.ts` derives the namespace a reply routes to from
-		// `elementId.split(":")[0]`; the browser only knows the element's bare
-		// id, so resolve and send the `${ns}:${id}` form here — see A#22.
+		// `elementId.split(":")[0]`. The browser already posts `${ns}:${id}`
+		// (pi-ui-elements.tsx); a bare id (an older page, or a hand-written
+		// request) is resolved against this runtime's element store — see A#22.
+		// Trade-off: bridge.ts then matches the namespace-wide `${ns}:${action}`
+		// handler key, so two elements sharing one `ns` that both listen for the
+		// same action id both fire. A bare id would instead fire the element's
+		// own handler twice (its `${id}:${action}` key is tried for both the id
+		// and the derived namespace) and collide across extensions that reuse
+		// default ids such as `panel`, which is worse.
 		const resolved = {
 			...request,
 			elementId: this.extensionUi.resolveElementId(request.elementId, this.runtime),

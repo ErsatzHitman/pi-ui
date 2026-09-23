@@ -98,9 +98,16 @@ test("extension UI degrades TUI-only capabilities instead of throwing", async ()
 		fakeRuntimeKey(),
 	);
 
-	// custom() matches the SDK's real RPC-mode contract: resolves undefined,
-	// it must never throw into the extension's command handler.
-	assertEquals(await ui.custom(() => ({ render: () => [] }) as never), undefined);
+	// custom() mounts a real terminal surface and never throws into the
+	// extension's command handler; it resolves once the component calls
+	// `done()` (here, synchronously from the factory itself).
+	assertEquals(
+		await ui.custom((_tui, _theme, _keybindings, done) => {
+			done(undefined as never);
+			return { render: () => [] } as never;
+		}),
+		undefined,
+	);
 
 	// onTerminalInput registers and returns a working unsubscribe function.
 	let seen: string | undefined;
@@ -178,7 +185,11 @@ test("extension UI projects status, widgets, working state, and editor text", ()
 		intervalMs: 150,
 	});
 	assertEquals(ui.getEditorText(), "draft text");
-	assertEquals(state.messages.at(-1)?.text, "Warning: Careful");
+	// The message text itself is exactly what the extension sent (no manual
+	// "warning: " prefix) — severity is conveyed by `noticeTone` instead, so
+	// each level gets its own status-dot color and prefix (r1-audit #24).
+	assertEquals(state.messages.at(-1)?.text, "Careful");
+	assertEquals(state.messages.at(-1)?.noticeTone, "warning");
 
 	controller.cancelAll();
 	assertEquals(store.extensionStatuses, []);
@@ -230,11 +241,12 @@ test("extension UI intercepts PIUI bridge payloads instead of showing them as no
 	assertEquals(state.extensionChannels.length, 1);
 	assertEquals(state.extensionChannels[0]?.channel, "subagents:fleet");
 
-	// A normal (non-PIUI) notify still reaches the transcript, now labeled
-	// with its own level (A#24) rather than silently unlabeled.
+	// A normal (non-PIUI) notify still reaches the transcript, tagged with its
+	// own level (A#24) rather than silently unlabeled.
 	ui.notify("Plain message", "info");
 	state = store.snapshot();
-	assertEquals(state.messages.at(-1)?.text, "Info: Plain message");
+	assertEquals(state.messages.at(-1)?.text, "Plain message");
+	assertEquals(state.messages.at(-1)?.noticeTone, "info");
 
 	controller.cancelAll();
 	state = store.snapshot();
@@ -253,16 +265,16 @@ test("extension UI notify levels are visually and textually distinct (A#24)", ()
 
 	const messages = store.snapshot().messages;
 	const [info, warning, error] = messages.slice(-3);
-	assertEquals(info?.text, "Info: all good");
-	assertEquals(warning?.text, "Warning: careful now");
-	// Distinct labels — never "Warning: info…"/"Warning: warning: …" (the
-	// generic sr-only prefix `renderSystemMessage` used to add unconditionally).
-	assertEquals(info?.text === warning?.text, false);
-	// error gets its own rendering path entirely, not just its own prefix.
+	// The text is exactly what the extension sent; the level travels as
+	// `noticeTone`, which renderSystemMessage turns into a distinct status-dot
+	// color and screen-reader prefix — never "Warning: info…".
+	assertEquals(info?.text, "all good");
+	assertEquals(warning?.text, "careful now");
 	assertEquals(error?.text, "it broke");
-	assertEquals(error?.state, "error");
-	assertEquals(info?.state, undefined);
-	assertEquals(warning?.state, undefined);
+	assertEquals(
+		[info?.noticeTone, warning?.noticeTone, error?.noticeTone],
+		["info", "warning", "error"],
+	);
 });
 
 test("extension UI hands PIUI channel ops to the channel owner when one is configured", () => {
@@ -287,4 +299,128 @@ test("extension UI hands PIUI channel ops to the channel owner when one is confi
 	// The owner publishes channels; the controller must not write a second copy.
 	assertEquals(store.snapshot().extensionChannels, []);
 	assertEquals(store.snapshot().messages, []);
+});
+
+test("notify's info/warning/error levels are distinguished by noticeTone, not text", () => {
+	const store = new AppStore();
+	const ui = new ExtensionUiController(store).context(() => true, fakeRuntimeKey());
+
+	ui.notify("An info message", "info");
+	ui.notify("A warning message", "warning");
+	ui.notify("An error message", "error");
+
+	const [info, warning, error] = store.messages;
+	assertEquals(info?.text, "An info message");
+	assertEquals(info?.noticeTone, "info");
+	assertEquals(warning?.text, "A warning message");
+	assertEquals(warning?.noticeTone, "warning");
+	assertEquals(error?.text, "An error message");
+	assertEquals(error?.noticeTone, "error");
+});
+
+test("a background session's PIUI elements survive a round trip to the foreground", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const runtimeKey = fakeRuntimeKey();
+	const ui = controller.context(() => true, runtimeKey);
+
+	ui.notify(
+		`${piUiMarker}${JSON.stringify({
+			v: 1,
+			op: "set",
+			el: {
+				id: "panel",
+				ns: "advisor",
+				kind: "panel",
+				placement: "sheet",
+				title: "Advisor",
+			},
+		})}`,
+		"info",
+	);
+	assertEquals(store.extensionElements.length, 1);
+
+	// Backgrounding the session calls cancelAll() (see #23: this used to lose
+	// the element for good).
+	controller.cancelAll();
+	assertEquals(store.extensionElements, []);
+
+	// ...and the runtime's own store brings it back when the session returns to
+	// the foreground, with no re-send from the extension.
+	controller.restoreElements(runtimeKey);
+	assertEquals(store.extensionElements.length, 1);
+	assertEquals(store.extensionElements[0]?.title, "Advisor");
+
+	// A runtime that never published anything restores to an empty set.
+	controller.restoreElements(fakeRuntimeKey());
+	assertEquals(store.extensionElements, []);
+});
+
+function staticComponent(lines: string[]) {
+	return { render: () => lines, invalidate: () => {} };
+}
+
+test("custom() overlay wiring mounts a terminal surface, routes input, and resolves via done()", async () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	let seenInput: string | undefined;
+	const resultPromise = ui.custom(
+		(_tui, _theme, _keybindings, done) =>
+			({
+				render: () => ["picker"],
+				handleInput: (data: string) => {
+					seenInput = data;
+					done("chosen" as never);
+				},
+				invalidate: () => {},
+			}) as never,
+		{ overlay: true },
+	);
+	// Let the internal await settle before the surface shows up in the store.
+	await Promise.resolve();
+	await Promise.resolve();
+
+	const [surface] = store.snapshot().terminalSurfaces;
+	assertExists(surface);
+	assertEquals(surface.kind, "overlay");
+
+	assertEquals(controller.handleTerminalSurfaceInput(surface.id, "\r"), true);
+	assertEquals(seenInput, "\r");
+	assertEquals(await resultPromise, "chosen");
+	// done() disposes the surface: it disappears from the store.
+	assertEquals(store.snapshot().terminalSurfaces, []);
+
+	// An id nobody mounted routes to nothing, rather than throwing.
+	assertEquals(controller.handleTerminalSurfaceInput("no-such-surface", "x"), false);
+	assertEquals(controller.resizeTerminalSurface("no-such-surface", 80, 24), false);
+});
+
+test("setWidget/setFooter/setHeader component factories mount persistent terminal surfaces", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	ui.setWidget("panel", () => staticComponent(["widget line"]) as never);
+	let kinds = store.snapshot().terminalSurfaces.map((s) => s.kind);
+	assertEquals(kinds, ["widget"]);
+
+	ui.setFooter(() => staticComponent(["footer line"]) as never);
+	ui.setHeader(() => staticComponent(["header line"]) as never);
+	kinds = store
+		.snapshot()
+		.terminalSurfaces.map((s) => s.kind)
+		.sort();
+	assertEquals(kinds, ["footer", "header", "widget"]);
+
+	// Clearing the footer/header (undefined factory) disposes their surfaces.
+	ui.setFooter(undefined);
+	ui.setHeader(undefined);
+	kinds = store.snapshot().terminalSurfaces.map((s) => s.kind);
+	assertEquals(kinds, ["widget"]);
+
+	// cancelAll() (session switch/background) tears every terminal surface down.
+	controller.cancelAll();
+	assertEquals(store.snapshot().terminalSurfaces, []);
 });

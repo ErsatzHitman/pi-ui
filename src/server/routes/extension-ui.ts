@@ -1,8 +1,9 @@
 import type { JsonValue } from "../../utils/json-types.ts";
 import {
 	ActionInputError,
-	boundedString,
 	booleanField,
+	jsonSizeField,
+	nonnegativeIntegerField,
 	readActionSignals,
 	requiredString,
 	stringField,
@@ -12,13 +13,23 @@ import type { RouteMap } from "../route.ts";
 import { requireHost, type RouteContext } from "./context.ts";
 import { endpoints } from "./endpoints.ts";
 
-// `elementId`/`actionId` are DOM- and slug-derived identifiers, never free
-// text — real ones are well under this. `value` is an arbitrary
-// extension-defined JSON payload forwarded to the extension's `pi_ui_event`
-// command as a base64url-encoded argument; capping its serialized size keeps
-// a misbehaving or malicious client from relaying an outsized argument to
-// that child process.
-const maxActionIdLength = 512;
+/**
+ * A raw terminal byte sequence (a keystroke, an escape sequence, pasted
+ * text) forwarded to a mounted `pi-tui` component. Generous enough for a
+ * bracketed paste of a large clipboard value, small enough that a
+ * misbehaving client can't use this route to buffer unbounded memory.
+ */
+const maxTerminalInputBytes = 64 * 1024;
+
+/**
+ * Defensive caps on an untrusted PIUI action request (a click from an
+ * extension-rendered button, form submit, or roster row action). These bound
+ * worst-case memory for a misbehaving or malicious extension the same way
+ * `pi-ui-bridge.ts`'s decoder caps element/channel state; a well-behaved
+ * bridge payload never approaches them.
+ */
+const maxElementIdLength = 512;
+const maxActionIdLength = 256;
 const maxActionValueBytes = 64 * 1024;
 
 export const extensionUiRoutes = {
@@ -47,23 +58,47 @@ export const extensionUiRoutes = {
 			const signals = await readActionSignals(request);
 			// SAFETY: `value` is an arbitrary extension-defined JSON payload (a
 			// form's collected field values, a roster row id, or nothing).
-			// Datastar has already parsed the request body into JSON values, so
-			// this narrows the wire type (`Jsonifiable`, which also permits a
-			// nested `undefined`) to the domain type this route forwards.
-			const value = signals.value as JsonValue | undefined;
-			if (
-				value !== undefined &&
-				JSON.stringify(value).length > maxActionValueBytes
-			) {
-				throw new ActionInputError(
-					"value exceeds the maximum action payload size.",
-				);
-			}
+			// Datastar has already parsed the request body into JSON values, and
+			// `jsonSizeField` has bounded its serialized size, so this narrows the
+			// wire type (`Jsonifiable`, which also permits a nested `undefined`)
+			// to the domain type this route forwards.
+			const value = jsonSizeField(signals, "value", {
+				maxBytes: maxActionValueBytes,
+			}) as JsonValue | undefined;
 			await requireHost(context).dispatchExtensionUiAction({
-				elementId: boundedString(signals, "elementId", maxActionIdLength),
-				actionId: boundedString(signals, "actionId", maxActionIdLength),
+				elementId: requiredString(signals, "elementId", {
+					maxLength: maxElementIdLength,
+				}),
+				actionId: requiredString(signals, "actionId", {
+					maxLength: maxActionIdLength,
+				}),
 				value,
 			});
+			return datastarResponse();
+		},
+	},
+	[endpoints.terminalSurfaceInput]: {
+		POST: async (request, context) => {
+			const signals = await readActionSignals(request);
+			const data = stringField(signals, "data");
+			if (Buffer.byteLength(data, "utf8") > maxTerminalInputBytes) {
+				throw new ActionInputError("data is too large.");
+			}
+			requireHost(context).handleTerminalSurfaceInput(
+				requiredString(signals, "surfaceId", { maxLength: maxElementIdLength }),
+				data,
+			);
+			return datastarResponse();
+		},
+	},
+	[endpoints.terminalSurfaceResize]: {
+		POST: async (request, context) => {
+			const signals = await readActionSignals(request);
+			requireHost(context).resizeTerminalSurface(
+				requiredString(signals, "surfaceId", { maxLength: maxElementIdLength }),
+				nonnegativeIntegerField(signals, "cols"),
+				nonnegativeIntegerField(signals, "rows"),
+			);
 			return datastarResponse();
 		},
 	},

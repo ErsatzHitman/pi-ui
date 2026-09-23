@@ -330,7 +330,8 @@ export class PiUiElementStore {
 	#channel(channel: string, payload: JsonValue): boolean {
 		if (!this.#channels.has(channel) && this.#channels.size >= maxChannels) {
 			// A misbehaving/spammy sender must not grow this map unboundedly;
-			// evict the oldest channel (by first publish) to make room, mirroring
+			// evict the oldest channel (by first publish — `Map` keeps insertion
+			// order and updating a key does not move it) to make room, mirroring
 			// the chunk-buffer eviction above.
 			const oldest = this.#channels.keys().next().value;
 			if (oldest !== undefined) this.#channels.delete(oldest);
