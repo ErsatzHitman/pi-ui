@@ -1190,7 +1190,7 @@ test("re-set()-ing an existing, dismissed sheet id gets a fresh open effect (M4a
 	// presence, so a stray leftover from an earlier update in the same accumulated read can't
 	// pass the assertion by coincidence.
 	const openScript =
-		"document.getElementById('piui-sheet-ask-user-panel'); if (dialog && !dialog.open) dialog.showModal();";
+		"document.getElementById('piui-sheet-ask-user-panel'); let dismissedGeneration;";
 	const controller = new AbortController();
 	try {
 		// Start from an empty connection so the whole sequence below is observed as
@@ -1266,6 +1266,33 @@ test("re-set()-ing an existing, dismissed sheet id gets a fresh open effect (M4a
 		);
 		await readMore("again", 2);
 		assertEqual(count(acc, openScript), 2);
+		assertIncludes(acc, 'dismissedGeneration !== "2"');
+
+		// `/new`, `/reload` and session switches unbind (clearing the list) and then restore
+		// the same elements: the resulting open effect must stay dismissal-aware, so a sheet
+		// the user already closed at this generation doesn't pop back over the prompt.
+		state.update(() => state.setExtensionElements([]), { flush: true });
+		state.update(
+			() =>
+				state.setExtensionElements([
+					{
+						...baseSheet,
+						revision: 3,
+						openGeneration: 2,
+						data: { sections: [{ kind: "status", text: "restored" }] },
+					},
+				]),
+			{ flush: true },
+		);
+		await readMore("restored", 3);
+		assertEqual(count(acc, openScript), 3);
+		assertEqual(
+			count(
+				acc,
+				"document.getElementById('piui-sheet-ask-user-panel'); if (dialog && !dialog.open) dialog.showModal();",
+			),
+			0,
+		);
 	} finally {
 		controller.abort();
 	}

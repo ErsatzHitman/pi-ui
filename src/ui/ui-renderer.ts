@@ -258,7 +258,7 @@ export class UiRenderer implements AppStorePresentation {
 			this.hub.patchView(
 				this.renderPickerElements(snapshot),
 				"{}",
-				this.pickerEffectScripts(effects),
+				this.pickerEffectScripts(effects, snapshot.extensionElements),
 			);
 		}
 		if (dirty.sessions) {
@@ -563,8 +563,17 @@ export class UiRenderer implements AppStorePresentation {
 		}
 		return scripts;
 	}
-	private pickerEffectScripts(effects: readonly UiCommitEffect[]): string[] {
+	private pickerEffectScripts(
+		effects: readonly UiCommitEffect[],
+		extensionElements: readonly PiUiElement[],
+	): string[] {
 		const scripts = new Set<string>();
+		const sheetsByDialogId = new Map(
+			extensionElements
+				.values()
+				.filter(isPiUiSheetElement)
+				.map((element) => [piUiDialogId(element), element] as const),
+		);
 		for (const effect of effects) {
 			if (effect.type === "restore-model-picker")
 				scripts.add(
@@ -584,9 +593,12 @@ export class UiRenderer implements AppStorePresentation {
 						: // Only terminal-surface overlay effects carry `modal` (see
 							// `AppStore.setTerminalSurfaces`); every other dialog keeps the plain
 							// `showModal()` open and its own focus handling.
-							effect.modal === undefined
-							? `{ const dialog = document.getElementById('${effect.id}'); if (dialog && !dialog.open) dialog.showModal(); }`
-							: terminalSurfaceOverlayOpenScript(effect.id, effect.modal),
+							effect.modal !== undefined
+							? terminalSurfaceOverlayOpenScript(effect.id, effect.modal)
+							: this.dialogOpenScript(
+									effect.id,
+									sheetsByDialogId.get(effect.id),
+								),
 				);
 			}
 		}
@@ -619,6 +631,18 @@ export class UiRenderer implements AppStorePresentation {
 		return scripts;
 	}
 	/**
+	 * A PIUI sheet's open effect goes through the same dismissal-aware script as a fresh
+	 * connection: its element list is cleared and restored whenever the session is unbound
+	 * and rebound (`/new`, `/reload`, a session switch), which makes every sheet look newly
+	 * added, and a plain `showModal()` would re-pop sheets the user already dismissed (and
+	 * swallow whatever they were typing into the prompt).
+	 */
+	private dialogOpenScript(id: string, sheet: PiUiElement | undefined): string {
+		return sheet
+			? this.piUiSheetReopenScript(sheet)
+			: `{ const dialog = document.getElementById('${id}'); if (dialog && !dialog.open) dialog.showModal(); }`;
+	}
+	/**
 	 * Auto-opens a `sheet`/`screen` PIUI element on a fresh connection (reload, reconnect,
 	 * new tab) — unless this same browser previously dismissed this exact open generation of
 	 * it (see `dismissAction` in pi-ui-elements.tsx and `piUiDismissedStorageKey`); a
@@ -630,12 +654,8 @@ export class UiRenderer implements AppStorePresentation {
 		const id = piUiDialogId(element);
 		const key = piUiDismissedStorageKey(element);
 		const openGeneration = JSON.stringify(String(element.openGeneration));
-		return `{
-			const dialog = document.getElementById('${id}');
-			let dismissedGeneration;
-			try { dismissedGeneration = localStorage.getItem(${JSON.stringify(key)}); } catch {}
-			if (dialog && !dialog.open && dismissedGeneration !== ${openGeneration}) dialog.showModal();
-		}`;
+		// One line, like the other effect scripts, so SSE framing never splits it.
+		return `{ const dialog = document.getElementById('${id}'); let dismissedGeneration; try { dismissedGeneration = localStorage.getItem(${JSON.stringify(key)}); } catch {} if (dialog && !dialog.open && dismissedGeneration !== ${openGeneration}) dialog.showModal(); }`;
 	}
 }
 
