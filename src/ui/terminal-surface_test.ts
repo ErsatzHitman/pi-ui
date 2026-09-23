@@ -22,6 +22,7 @@ function surface(overrides: Partial<TerminalSurface>): TerminalSurface {
 		lines: ['<span style="color:var(--status-error)">red</span>'],
 		cursor: undefined,
 		cols: 80,
+		width: 80,
 		rows: 24,
 		revision: 1,
 		...overrides,
@@ -57,4 +58,45 @@ test("inline custom() surfaces and component widgets render in the persistent ho
 	assertStringIncludes(html, 'data-terminal-surface="inline-1"');
 	assertStringIncludes(html, 'data-terminal-surface="widget:w"');
 	assertStringExcludes(html, 'data-terminal-surface="o"');
+});
+
+test("surfaces fit their grid to the client and size overlays by the rendered width", () => {
+	const overlay = renderTerminalSurfaceOverlays({
+		terminalSurfaces: [surface({ cols: 159, width: 50 })],
+	});
+	// The dialog's single child is the shared panel; the grid width comes from `width`.
+	assertStringIncludes(overlay, 'class="terminal-surface-panel"');
+	assertStringIncludes(overlay, "--terminal-cols: 50");
+	assertStringIncludes(overlay, "window.piUi.terminal.fitColumns(el)");
+	assertStringIncludes(overlay, "cols !== 159");
+	assertStringIncludes(overlay, "/extensions/terminal/resize");
+	assertStringExcludes(overlay, "el.focus(");
+
+	const inline = renderTerminalSurfacePersistent({
+		terminalSurfaces: [surface({ id: "inline-1", kind: "inline" })],
+	});
+	assertStringIncludes(inline, "el.focus({ preventScroll: true })");
+});
+
+test("persistent surfaces drop blank edge rows and skip surfaces with nothing visible", () => {
+	const html = renderTerminalSurfacePersistent({
+		terminalSurfaces: [
+			surface({
+				id: "header",
+				kind: "header",
+				lines: ["", "   ", "<span> </span>"],
+			}),
+			surface({
+				id: "widget:w",
+				kind: "widget",
+				lines: ["", "  ", "<span>body</span>", "  "],
+				cursor: { row: 2, column: 1 },
+			}),
+		],
+	});
+	assertStringExcludes(html, 'data-terminal-surface="header"');
+	assertStringIncludes(html, 'data-terminal-surface="widget:w"');
+	// Only the visible row survives: no blank rows before or after it inside the <pre>.
+	assertStringIncludes(html, "><span>body</span></pre>");
+	assertStringIncludes(html, 'data-cursor-row="0"');
 });

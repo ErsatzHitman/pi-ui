@@ -277,6 +277,7 @@ export class TerminalSurfaceController {
 	resize(id: string, size: { columns: number; rows: number }): boolean {
 		const mount = this.#mounts.get(id);
 		if (!mount || mount.disposed) return false;
+		// The size is client-measured and untrusted; `setSize` clamps it (`clampTerminalSize`).
 		mount.terminal.setSize(size);
 		return true;
 	}
@@ -368,6 +369,11 @@ export class TerminalSurfaceController {
 			? toTerminalSurfaceOverlayOptions(rawOverlayOptions)
 			: undefined;
 		const rawLines = mount.tui.render(cols).slice(0, maxTerminalSurfaceLines);
+		// An overlay renders at its resolved `OverlayOptions.width`, not the full grid.
+		const width =
+			mount.overlay && mount.tui.lastOverlayWidth > 0
+				? mount.tui.lastOverlayWidth
+				: cols;
 		const lines: string[] = [];
 		let cursor: TerminalSurface["cursor"];
 		for (const [index, rawLine] of rawLines.entries()) {
@@ -391,6 +397,7 @@ export class TerminalSurfaceController {
 			cursor,
 			cols,
 			rows,
+			width,
 			revision: mount.revision,
 		});
 		this.#publish();

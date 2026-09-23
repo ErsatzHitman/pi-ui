@@ -135,6 +135,13 @@ test("handleInput routes to the mounted component and resize applies the client 
 	assertEquals(after.cols, 80);
 	assertEquals(after.rows, 24);
 
+	// The grid is client-measured, so an absurd size is clamped rather than applied.
+	controller.resize("surface-1", { columns: 100_000, rows: 100_000 });
+	controller.handleInput("surface-1", "z");
+	const clamped = controller.snapshot()[0];
+	assertExists(clamped);
+	assertEquals(clamped.cols < 100_000 && clamped.rows < 100_000, true);
+
 	controller.dispose("surface-1");
 });
 
@@ -229,4 +236,30 @@ test("a factory that throws resolves undefined and never leaves a mounted surfac
 	});
 	assertEquals(result, undefined);
 	assertEquals(controller.snapshot(), []);
+});
+
+test("an overlay renders its component at the resolved overlay width, not the full grid", async () => {
+	const { controller } = makeController();
+	const widths: number[] = [];
+	void controller.mountCustom({
+		id: "sized",
+		overlay: true,
+		colorScheme: "dark",
+		cols: 159,
+		overlayOptions: { width: 50 },
+		factory: () => ({
+			render: (width: number) => {
+				widths.push(width);
+				return ["x"];
+			},
+			invalidate: () => {},
+		}),
+	});
+	await flush();
+	const [surface] = controller.snapshot();
+	assertExists(surface);
+	assertEquals(surface.cols, 159);
+	assertEquals(surface.width, 50);
+	assertEquals(widths.at(-1), 50);
+	controller.disposeAll();
 });

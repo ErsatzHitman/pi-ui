@@ -30,8 +30,14 @@ export type TerminalSurface = {
 	/** Pre-escaped HTML for each rendered line (see `ansiLineToHtml`); never raw ANSI. */
 	readonly lines: readonly string[];
 	readonly cursor: TerminalSurfaceCursor | undefined;
+	/** The host grid (client-measured, see `resize`). */
 	readonly cols: number;
 	readonly rows: number;
+	/**
+	 * Columns the component was actually rendered at: an overlay's resolved
+	 * `OverlayOptions.width` (as pi-tui's own overlay layout computes it), else `cols`.
+	 */
+	readonly width: number;
 	/** Bumped on every committed frame; lets the client ignore an out-of-order patch. */
 	readonly revision: number;
 };

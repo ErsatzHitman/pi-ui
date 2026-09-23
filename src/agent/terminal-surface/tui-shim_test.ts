@@ -170,3 +170,27 @@ test("tui shim requestRender/renderNow forward force through to the callback", (
 	shim.renderNow();
 	assertEquals(renders, [false, true]);
 });
+
+test("tui shim renders after dispatching input, like pi-tui's TUI", () => {
+	const { shim, renders } = makeShim();
+	const target = fixture("target");
+	target.handleInput = () => {};
+	shim.addChild(target);
+	shim.setFocus(target);
+	const before = renders.length;
+	shim.handleInput("\u001b[B");
+	assertEquals(renders.slice(before), [true]);
+});
+
+test("tui shim defaults an overlay without a width to min(80, available) after margins", () => {
+	const { shim } = makeShim();
+	shim.showOverlay(fixture("wide"));
+	shim.render(159);
+	assertEquals(shim.lastOverlayWidth, 80);
+	shim.render(60);
+	assertEquals(shim.lastOverlayWidth, 60);
+	shim.hideOverlay();
+	shim.showOverlay(fixture("margined"), { width: 200, margin: 2 });
+	shim.render(100);
+	assertEquals(shim.lastOverlayWidth, 96);
+});

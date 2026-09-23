@@ -17,6 +17,13 @@
 		background: var(--surface-muted);
 		padding: 0.5rem 0.625rem;
 	}
+
+	/* A persistent surface sits above the prompt: cap it so a tall component can't push
+	   the editor off screen; the body scrolls instead. */
+	.terminal-surface:not(.terminal-surface-inline) .terminal-surface-body {
+		max-height: min(30vh, 12lh);
+		overflow-y: auto;
+	}
 	.terminal-surface-title {
 		margin-block-end: 0.25rem;
 		color: var(--text-muted);
@@ -24,6 +31,7 @@
 		font-weight: 500;
 	}
 	.terminal-surface-body {
+		display: block;
 		margin: 0;
 		overflow-x: auto;
 		color: var(--text);
@@ -32,8 +40,15 @@
 		line-height: 1.35;
 		white-space: pre;
 	}
-	.terminal-surface-dialog .terminal-surface-body {
-		padding: 0.75rem 1rem;
+
+	/* Overlay panel: as wide as the surface's column grid, never wider than the viewport. */
+	.terminal-surface-dialog > .terminal-surface-panel {
+		width: fit-content;
+		max-width: calc(100vw - 2rem);
+	}
+	.terminal-surface-panel > .terminal-surface-body {
+		width: calc(var(--terminal-cols) * 1ch);
+		max-width: 100%;
 	}
 	.terminal-surface-body:focus-visible {
 		outline: 2px solid var(--focus-ring);

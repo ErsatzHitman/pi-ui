@@ -227,14 +227,24 @@ export class TuiShim implements TUI {
 		if (!target?.handleInput) return;
 		if (isKeyRelease(current) && !target.wantsKeyRelease) return;
 		target.handleInput(current);
+		// Like pi-tui's `TUI.handleInput`: components mutate state on input without asking
+		// for a render themselves, so the host renders after every dispatched key.
+		this.callbacks.requestRender(true);
 	}
 
 	#resolveOverlayWidth(
 		options: OverlayOptions | undefined,
 		surfaceWidth: number,
 	): number {
+		// Mirrors pi-tui's `TUI.resolveOverlayLayout`: `width` in columns or a percentage of
+		// the terminal, else `min(80, available)`; then `minWidth`; then clamped to the space
+		// left after horizontal margins.
+		const margin = options?.margin;
+		const marginLeft = Math.max(0, (isNumber(margin) ? margin : margin?.left) ?? 0);
+		const marginRight = Math.max(0, (isNumber(margin) ? margin : margin?.right) ?? 0);
+		const available = Math.max(1, surfaceWidth - marginLeft - marginRight);
 		const value = options?.width;
-		let width = surfaceWidth;
+		let width = Math.min(80, available);
 		if (isNumber(value)) width = value;
 		else if (isString(value)) {
 			const match = /^(\d+(?:\.\d+)?)%$/.exec(value);
@@ -242,7 +252,7 @@ export class TuiShim implements TUI {
 				width = Math.floor((surfaceWidth * Number.parseFloat(match[1])) / 100);
 		}
 		if (options?.minWidth !== undefined) width = Math.max(width, options.minWidth);
-		return Math.max(1, Math.min(width, surfaceWidth));
+		return Math.max(1, Math.min(width, available));
 	}
 
 	#topmostEntry(): OverlayEntry | undefined {

@@ -81,3 +81,32 @@ export function encodeTerminalWheel(event) {
 	const steps = Math.min(5, Math.max(1, Math.round(Math.abs(event.deltaY) / 40)));
 	return (event.deltaY < 0 ? `${csi}A` : `${csi}B`).repeat(steps);
 }
+
+/**
+ * How many monospace cells fit the space a terminal surface can occupy: the viewport
+ * (minus dialog chrome) for an overlay inside a `<dialog>`, otherwise the element's own
+ * content box. Returns `undefined` while the element has no layout (e.g. a closed dialog
+ * or a detached node), so callers skip the resize instead of shrinking to nothing.
+ * @param {HTMLElement} element
+ * @returns {number | undefined}
+ */
+export function fitTerminalColumns(element) {
+	const probe = document.createElement("span");
+	probe.textContent = "0".repeat(10);
+	probe.style.position = "absolute";
+	probe.style.visibility = "hidden";
+	element.append(probe);
+	const cellWidth = probe.getBoundingClientRect().width / 10;
+	probe.remove();
+	if (!(cellWidth > 0)) return undefined;
+	const style = getComputedStyle(element);
+	const padding =
+		Number.parseFloat(style.paddingInlineStart) +
+		Number.parseFloat(style.paddingInlineEnd);
+	const available = element.closest("dialog")
+		? // Dialog panel: 1rem margin each side, 1rem padding each side, 1px border each side.
+			document.documentElement.clientWidth - 4 * 16 - 2 - padding
+		: element.clientWidth - padding;
+	const columns = Math.floor(available / cellWidth);
+	return columns >= 20 ? columns : undefined;
+}

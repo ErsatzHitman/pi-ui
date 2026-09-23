@@ -50,9 +50,38 @@ export function renderTerminalSurfacePersistent(
 		<div id="terminal-surface-persistent" aria-live="polite">
 			{state.terminalSurfaces
 				.filter((surface) => persistentKinds.has(surface.kind))
+				.map((surface) =>
+					surface.kind === "inline" ? surface : trimBlankEdges(surface),
+				)
+				.filter((surface) => surface.lines.length > 0)
 				.map((surface) => renderTerminalSurfaceBlock(surface))}
 		</div>,
 	);
+}
+
+/** True when a rendered line (already-escaped HTML from `ansiLineToHtml`) shows only blanks. */
+function isBlankLine(html: string): boolean {
+	return html.replace(/<[^>]*>/g, "").trim() === "";
+}
+
+/**
+ * Widget/header/footer components are laid out for a full terminal, where blank padding
+ * rows (a splash header sized to `terminal.rows`, a spacer line) cost nothing. Above the
+ * prompt they would push the editor off screen, so leading/trailing blank rows are dropped
+ * and a surface with nothing visible is not rendered at all.
+ */
+function trimBlankEdges(surface: TerminalSurface): TerminalSurface {
+	const { lines } = surface;
+	let start = 0;
+	let end = lines.length;
+	while (start < end && isBlankLine(lines[start] ?? "")) start += 1;
+	while (end > start && isBlankLine(lines[end - 1] ?? "")) end -= 1;
+	if (start === 0 && end === lines.length) return surface;
+	const cursor =
+		surface.cursor && surface.cursor.row >= start && surface.cursor.row < end
+			? { ...surface.cursor, row: surface.cursor.row - start }
+			: undefined;
+	return { ...surface, lines: lines.slice(start, end), cursor };
 }
 
 /** Ids of currently-mounted `overlay`-kind surfaces — used to auto-open newly created ones. */
@@ -75,14 +104,18 @@ function renderTerminalSurfaceDialog(surface: TerminalSurface): string {
 			data-preserve-attr="open"
 			data-on:close={`@post('${endpoints.terminalSurfaceInput}', { payload: { surfaceId: ${JSON.stringify(surface.id)}, data: '\\u001b' } })`}
 		>
-			{surface.title && (
-				<header>
-					<h2 id={`${id}-title`} safe>
-						{surface.title}
-					</h2>
-				</header>
-			)}
-			{renderTerminalSurfaceBody(surface)}
+			{/* The dialog's single child is its panel (shared `.dialog > *` chrome); the panel is
+			    sized to the surface's column grid, capped to the viewport. */}
+			<div class="terminal-surface-panel">
+				{surface.title && (
+					<header>
+						<h2 id={`${id}-title`} safe>
+							{surface.title}
+						</h2>
+					</header>
+				)}
+				{renderTerminalSurfaceBody(surface)}
+			</div>
 		</dialog>,
 	);
 }
@@ -114,12 +147,21 @@ function renderTerminalSurfaceBody(surface: TerminalSurface): string {
 	// to the focused component through the input route.
 	const onKeydown = `const data = window.piUi.terminal.encodeKey(evt); if (data !== undefined) { evt.preventDefault(); evt.stopPropagation(); ${postTerminalInput(surface.id, "data")} }`;
 	const onPaste = `evt.preventDefault(); ${postTerminalInput(surface.id, "window.piUi.terminal.encodePaste(evt.clipboardData?.getData('text') ?? '')")}`;
+	// Fit the component's column grid to the space the surface actually has (the viewport for
+	// an overlay, the prompt column otherwise). The expression embeds the current cols, so it
+	// re-runs after each resize re-render and settles once the measured fit matches.
+	// An inline `custom()` takes the editor's place (and its focus) in the TUI, so it takes
+	// keyboard focus here too; overlays get it from `autofocus` when their dialog opens.
+	const focusInline =
+		surface.kind === "inline" ? "el.focus({ preventScroll: true }); " : "";
+	const onInit = `${focusInline}const cols = window.piUi.terminal.fitColumns(el); if (cols !== undefined && cols !== ${surface.cols}) { @post('${endpoints.terminalSurfaceResize}', { payload: { surfaceId: ${JSON.stringify(surface.id)}, cols, rows: ${surface.rows} } }) }`;
 	const onWheel = `const data = window.piUi.terminal.encodeWheel(evt); if (data !== undefined) { evt.preventDefault(); ${postTerminalInput(surface.id, "data")} }`;
 	return syncHtml(
 		<pre
 			class="terminal-surface-body"
 			data-terminal-surface-body={surface.id}
 			autofocus={surface.kind === "overlay"}
+			data-init={onInit}
 			data-on:keydown={onKeydown}
 			data-on:paste={onPaste}
 			{...{ "data-on:wheel__throttle.100ms": onWheel }}
@@ -128,6 +170,7 @@ function renderTerminalSurfaceBody(surface: TerminalSurface): string {
 			data-revision={surface.revision}
 			data-cursor-row={surface.cursor?.row}
 			data-cursor-column={surface.cursor?.column}
+			style={`--terminal-cols: ${surface.width}`}
 			tabindex="0"
 		>
 			{surface.lines.join("\n")}
