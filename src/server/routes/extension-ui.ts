@@ -1,5 +1,7 @@
 import type { JsonValue } from "../../utils/json-types.ts";
 import {
+	ActionInputError,
+	boundedString,
 	booleanField,
 	readActionSignals,
 	requiredString,
@@ -9,6 +11,15 @@ import { datastarResponse } from "../datastar.ts";
 import type { RouteMap } from "../route.ts";
 import { requireHost, type RouteContext } from "./context.ts";
 import { endpoints } from "./endpoints.ts";
+
+// `elementId`/`actionId` are DOM- and slug-derived identifiers, never free
+// text — real ones are well under this. `value` is an arbitrary
+// extension-defined JSON payload forwarded to the extension's `pi_ui_event`
+// command as a base64url-encoded argument; capping its serialized size keeps
+// a misbehaving or malicious client from relaying an outsized argument to
+// that child process.
+const maxActionIdLength = 512;
+const maxActionValueBytes = 64 * 1024;
 
 export const extensionUiRoutes = {
 	[endpoints.extensionUiEditor]: {
@@ -40,9 +51,17 @@ export const extensionUiRoutes = {
 			// this narrows the wire type (`Jsonifiable`, which also permits a
 			// nested `undefined`) to the domain type this route forwards.
 			const value = signals.value as JsonValue | undefined;
+			if (
+				value !== undefined &&
+				JSON.stringify(value).length > maxActionValueBytes
+			) {
+				throw new ActionInputError(
+					"value exceeds the maximum action payload size.",
+				);
+			}
 			await requireHost(context).dispatchExtensionUiAction({
-				elementId: requiredString(signals, "elementId"),
-				actionId: requiredString(signals, "actionId"),
+				elementId: boundedString(signals, "elementId", maxActionIdLength),
+				actionId: boundedString(signals, "actionId", maxActionIdLength),
 				value,
 			});
 			return datastarResponse();

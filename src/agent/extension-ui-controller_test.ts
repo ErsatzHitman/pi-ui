@@ -121,7 +121,7 @@ test("extension UI projects status, widgets, working state, and editor text", ()
 		intervalMs: 150,
 	});
 	assertEquals(ui.getEditorText(), "draft text");
-	assertEquals(state.messages.at(-1)?.text, "warning: Careful");
+	assertEquals(state.messages.at(-1)?.text, "Warning: Careful");
 
 	controller.cancelAll();
 	assertEquals(store.extensionStatuses, []);
@@ -173,15 +173,39 @@ test("extension UI intercepts PIUI bridge payloads instead of showing them as no
 	assertEquals(state.extensionChannels.length, 1);
 	assertEquals(state.extensionChannels[0]?.channel, "subagents:fleet");
 
-	// A normal (non-PIUI) notify still reaches the transcript as before.
+	// A normal (non-PIUI) notify still reaches the transcript, now labeled
+	// with its own level (A#24) rather than silently unlabeled.
 	ui.notify("Plain message", "info");
 	state = store.snapshot();
-	assertEquals(state.messages.at(-1)?.text, "Plain message");
+	assertEquals(state.messages.at(-1)?.text, "Info: Plain message");
 
 	controller.cancelAll();
 	state = store.snapshot();
 	assertEquals(state.extensionElements, []);
 	assertEquals(state.extensionChannels, []);
+});
+
+test("extension UI notify levels are visually and textually distinct (A#24)", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true);
+
+	ui.notify("all good", "info");
+	ui.notify("careful now", "warning");
+	ui.notify("it broke", "error");
+
+	const messages = store.snapshot().messages;
+	const [info, warning, error] = messages.slice(-3);
+	assertEquals(info?.text, "Info: all good");
+	assertEquals(warning?.text, "Warning: careful now");
+	// Distinct labels — never "Warning: info…"/"Warning: warning: …" (the
+	// generic sr-only prefix `renderSystemMessage` used to add unconditionally).
+	assertEquals(info?.text === warning?.text, false);
+	// error gets its own rendering path entirely, not just its own prefix.
+	assertEquals(error?.text, "it broke");
+	assertEquals(error?.state, "error");
+	assertEquals(info?.state, undefined);
+	assertEquals(warning?.state, undefined);
 });
 
 test("extension UI hands PIUI channel ops to the channel owner when one is configured", () => {

@@ -54,6 +54,26 @@ export function optionalString(
 	return value;
 }
 
+/**
+ * A required, non-empty string capped at `maxLength`. Routes that forward a
+ * client-supplied value into an id, a lookup key, or a message relayed to an
+ * extension process (e.g. a PIUI action's `elementId`/`actionId`) must bound
+ * it here, at the edge, rather than trusting the caller — an unbounded value
+ * could otherwise grow a server-side map unboundedly or be relayed as an
+ * outsized argument to a child process.
+ */
+export function boundedString(
+	signals: ActionSignals,
+	field: string,
+	maxLength: number,
+): string {
+	const value = requiredString(signals, field);
+	if (value.length > maxLength) {
+		throw new ActionInputError(`${field} exceeds ${maxLength} characters.`);
+	}
+	return value;
+}
+
 export function booleanField(
 	signals: ActionSignals,
 	field: string,

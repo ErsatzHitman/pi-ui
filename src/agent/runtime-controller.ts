@@ -872,7 +872,9 @@ export class RuntimeController {
 			if (current.sessionManager.getSessionFile() === target) {
 				current.setSessionName(nextName);
 			} else {
-				const background = this.backgroundSessions.get(this.backgroundKey(target));
+				const background = this.backgroundSessions.get(
+					this.backgroundKey(target),
+				);
 				if (background) background.runtime.session.setSessionName(nextName);
 				else manager.appendSessionInfo(nextName);
 			}
@@ -904,8 +906,8 @@ export class RuntimeController {
 			return false;
 		}
 		if (
-			this.backgroundSessions.get(this.backgroundKey(targetSessionFile))
-				?.status === "running"
+			this.backgroundSessions.get(this.backgroundKey(targetSessionFile))?.status ===
+			"running"
 		) {
 			this.state.appendMessage(
 				"system",
@@ -1383,7 +1385,14 @@ export class RuntimeController {
 			.getRegisteredCommands()
 			.filter((command) => command.name === piUiEventCommandName);
 		if (commands.length === 0) return false;
-		const args = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
+		// `lib/bridge.ts` derives the namespace a reply routes to from
+		// `elementId.split(":")[0]`; the browser only knows the element's bare
+		// id, so resolve and send the `${ns}:${id}` form here — see A#22.
+		const resolved = {
+			...request,
+			elementId: this.extensionUi.resolveElementId(request.elementId),
+		};
+		const args = Buffer.from(JSON.stringify(resolved), "utf8").toString("base64url");
 		for (const command of commands) {
 			try {
 				await command.handler(

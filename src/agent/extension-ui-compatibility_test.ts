@@ -129,7 +129,9 @@ test("a discovered pi extension uses the web UI bridge end to end", async () => 
 		assertEquals(store.documentTitle, "pi-ui");
 		assertEquals(
 			store.messages.at(-1)?.text,
-			"two|true|typed|edited|browser draft + extension",
+			// "info"-level notify() now carries its own level label (A#24)
+			// rather than reaching the transcript unlabeled.
+			"Info: two|true|typed|edited|browser draft + extension",
 		);
 	} finally {
 		await controller?.dispose();
@@ -171,8 +173,10 @@ test("a bridge-aware extension's PIUI elements render natively and route actions
 		]);
 
 		// A user action on the rendered element routes to the extension's own
-		// `pi_ui_event` command handler — not through `session.prompt()` — and
-		// the extension observes exactly the decoded {elementId, actionId, value}.
+		// `pi_ui_event` command handler — not through `session.prompt()`. The
+		// browser only knows the element's bare id; the host resolves it to
+		// the `${ns}:${id}` form `lib/bridge.ts` needs to route the reply to
+		// the right namespace handler (A#22) before forwarding it.
 		assertEquals(
 			await controller.dispatchExtensionUiAction({
 				elementId: "panel",
@@ -189,7 +193,7 @@ test("a bridge-aware extension's PIUI elements render natively and route actions
 				store.extensionStatuses.find((status) => status.key === "piui-action")!
 					.text,
 			),
-			{ elementId: "panel", actionId: "go", value: { confirmed: true } },
+			{ elementId: "fixture:panel", actionId: "go", value: { confirmed: true } },
 		);
 	} finally {
 		await controller?.dispose();

@@ -25,6 +25,20 @@ import { PiUiBridgeDecoder, PiUiElementStore } from "./pi-ui-bridge.ts";
 const defaultWorkingVisible = true;
 
 /**
+ * The visible/accessible label `notify()` gives "info"/"warning" (A#24).
+ * "error" gets its own distinct rendering entirely — see `notify()` below —
+ * so every level ends up visually and textually distinct: previously "info"
+ * got no label at all and `renderSystemMessage` added a hardcoded
+ * "Warning: " on top of everything regardless of level, reading as
+ * "Warning: info…" for an info notice and "Warning: warning: …" for a
+ * warning one.
+ */
+const notifyLevelLabels: Record<"info" | "warning", string> = {
+	info: "Info",
+	warning: "Warning",
+};
+
+/**
  * A `Theme` stand-in for the web UI, where there is no terminal to paint
  * ANSI escapes into. Every styling method degrades to identity (returns its
  * text argument unstyled) instead of throwing, so an extension that always
@@ -238,6 +252,19 @@ export class ExtensionUiController {
 		return this.#headerFactory;
 	}
 
+	/**
+	 * Reconstructs the `${ns}:${id}` form a bridge-aware extension's
+	 * `lib/bridge.ts` derives its namespace from (`elementId.split(":")[0]`)
+	 * — see `pi_ui_event`'s `dispatchExtensionUiAction` caller. A bare id the
+	 * browser already sent prefixed (contains `:`), or one this store cannot
+	 * uniquely resolve to a single namespace, is returned unprefixed.
+	 */
+	resolveElementId(id: string): string {
+		if (id.includes(":")) return id;
+		const ns = this.#piUiElements.findNamespace(id);
+		return ns === undefined ? id : `${ns}:${id}`;
+	}
+
 	respond(id: string, value: string | undefined, cancelled: boolean): boolean {
 		if (this.#active?.dialog.id !== id) return false;
 		const active = this.#active;
@@ -309,10 +336,14 @@ export class ExtensionUiController {
 			}
 			return;
 		}
-		this.store.appendMessage(
-			"notice",
-			type === "info" ? message : `${type}: ${message}`,
-		);
+		if (type === "error") {
+			// Gets its own expandable, distinctly-styled treatment (see
+			// `renderErrorMessage`) instead of sharing the plain notice row
+			// "info"/"warning" get — a real variant per level, not just a prefix.
+			this.store.appendMessage("notice", message, { state: "error" });
+			return;
+		}
+		this.store.appendMessage("notice", `${notifyLevelLabels[type]}: ${message}`);
 	}
 
 	private select(

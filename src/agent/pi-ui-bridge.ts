@@ -36,6 +36,7 @@ const maxChunksPerMessage = 128;
 const maxPendingChunkBuffers = 16;
 const maxElements = 200;
 const maxAppendedEntries = 500;
+const maxChannels = 64;
 
 export type PiUiOp =
 	| { op: "set" | "upsert"; el: JsonObject }
@@ -226,6 +227,24 @@ export class PiUiElementStore {
 		return [...this.#channels.values()];
 	}
 
+	/**
+	 * The `ns` a currently-known, unprefixed `id` belongs to — used to
+	 * reconstruct the `${ns}:${id}` form `lib/bridge.ts` expects on an action
+	 * reply (see `PiUiActionRequest`/`dispatchExtensionUiAction`). Returns
+	 * `undefined` when no element with that bare id is known, or when more
+	 * than one namespace currently owns that id (an ambiguous bare id is left
+	 * unprefixed rather than guessing wrong).
+	 */
+	findNamespace(id: string): string | undefined {
+		let found: string | undefined;
+		for (const element of this.#elements.values()) {
+			if (element.id !== id) continue;
+			if (found !== undefined && found !== element.ns) return undefined;
+			found = element.ns;
+		}
+		return found;
+	}
+
 	clear(): void {
 		this.#elements.clear();
 		this.#channels.clear();
@@ -309,6 +328,13 @@ export class PiUiElementStore {
 	}
 
 	#channel(channel: string, payload: JsonValue): boolean {
+		if (!this.#channels.has(channel) && this.#channels.size >= maxChannels) {
+			// A misbehaving/spammy sender must not grow this map unboundedly;
+			// evict the oldest channel (by first publish) to make room, mirroring
+			// the chunk-buffer eviction above.
+			const oldest = this.#channels.keys().next().value;
+			if (oldest !== undefined) this.#channels.delete(oldest);
+		}
 		this.#channels.set(channel, { channel, payload, updatedAt: Date.now() });
 		return true;
 	}
