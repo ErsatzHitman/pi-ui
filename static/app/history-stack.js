@@ -7,41 +7,44 @@
  * to pop on the first press. Every `<dialog>` in this app already fires the
  * native `toggle` event with `evt.newState` (relied on directly by several
  * `data-on:toggle` handlers in page.tsx), so a single capturing listener here
- * covers all of them — including ones added later — with no per-dialog markup.
+ * covers every modal one — including ones added later — with no per-dialog markup.
  */
 export function createDismissibleHistoryGuard(options = {}) {
 	const pushState = options.pushState ?? ((state) => history.pushState(state, ""));
 	const back = options.back ?? (() => history.back());
-	let pendingPop = false;
+	// History entries this guard pushed that are still on the stack. A close only ever pops
+	// one of these, never an entry that belongs to the page before pi-ui.
+	let depth = 0;
+	// `popstate` events caused by this guard's own `back()` calls. They must not be mistaken
+	// for a back-button press, which would close a second surface (and pop a second entry).
+	let ownPops = 0;
 
 	/** Call when a dismissible surface has just opened. */
 	function notifyOpen() {
-		if (pendingPop) return;
+		depth += 1;
 		pushState({ piUiDismissible: true });
 	}
 
-	/** Call when a dismissible surface has just closed, for any reason. */
+	/** Call when a dismissible surface closed for any reason other than a back press. */
 	function notifyClose() {
-		if (pendingPop) return;
+		if (depth === 0) return;
+		depth -= 1;
+		ownPops += 1;
 		back();
 	}
 
 	/**
-	 * Call on a `popstate` navigation. If a dismissible surface is still open,
-	 * the back button reached it before the underlying page: close the
-	 * top-most one and suppress the matching `notifyClose()` history pop that
-	 * its own `toggle` event will fire next, since the entry is already gone.
+	 * Call on a `popstate` navigation. A back press already removed the top-most surface's
+	 * history entry, so close that surface without popping another entry: the caller must not
+	 * report that close through `notifyClose()`.
 	 */
 	function handlePopstate(hasOpenSurface, closeTopmost) {
-		if (!hasOpenSurface()) return;
-		pendingPop = true;
-		try {
-			closeTopmost();
-		} finally {
-			queueMicrotask(() => {
-				pendingPop = false;
-			});
+		if (ownPops > 0) {
+			ownPops -= 1;
+			return;
 		}
+		if (depth > 0) depth -= 1;
+		if (hasOpenSurface()) closeTopmost();
 	}
 
 	return { notifyOpen, notifyClose, handlePopstate };
@@ -84,15 +87,26 @@ function openExternalSurface() {
 	return undefined;
 }
 
+/**
+ * Modal dialogs whose opening pushed a history entry, in opening order. Non-modal dialogs
+ * (the docked session sidebar is a `<dialog>` opened with `show()`) are part of the layout,
+ * not something a back press should close, so they are never tracked.
+ */
+const trackedDialogs = new Set();
+
+function topmostTrackedDialog() {
+	let topmost;
+	for (const dialog of trackedDialogs) if (dialog.open) topmost = dialog;
+	return topmost;
+}
+
 function closeTopmostDismissible() {
-	const modal = document.querySelector(":modal");
-	if (modal instanceof HTMLDialogElement) {
-		modal.close();
-		return true;
-	}
-	const openDialog = document.querySelector("dialog[open]");
-	if (openDialog instanceof HTMLDialogElement) {
-		openDialog.close();
+	const dialog = topmostTrackedDialog();
+	if (dialog) {
+		// The back press already consumed this dialog's entry: untrack it first so its
+		// `toggle` event (dispatched asynchronously, after this returns) pops nothing.
+		trackedDialogs.delete(dialog);
+		dialog.close();
 		return true;
 	}
 	const surface = openExternalSurface();
@@ -104,17 +118,7 @@ function closeTopmostDismissible() {
 }
 
 function hasOpenDismissible() {
-	return (
-		document.querySelector("dialog[open]") !== null ||
-		openExternalSurface() !== undefined
-	);
-}
-
-/** True for an `<dialog open>` node, or one that contains one, so a removed subtree counts too. */
-function containsOpenDialog(node) {
-	if (!(node instanceof Element)) return false;
-	if (node instanceof HTMLDialogElement) return node.open;
-	return node.querySelector("dialog[open]") !== null;
+	return topmostTrackedDialog() !== undefined || openExternalSurface() !== undefined;
 }
 
 export function bindDismissibleHistory(
@@ -126,9 +130,15 @@ export function bindDismissibleHistory(
 	documentTarget.addEventListener(
 		"toggle",
 		(event) => {
-			if (!(event.target instanceof HTMLDialogElement)) return;
-			if (event.newState === "open") guard.notifyOpen();
-			else if (event.newState === "closed") guard.notifyClose();
+			const dialog = event.target;
+			if (!(dialog instanceof HTMLDialogElement)) return;
+			if (event.newState === "open") {
+				if (trackedDialogs.has(dialog) || !dialog.matches(":modal")) return;
+				trackedDialogs.add(dialog);
+				guard.notifyOpen();
+			} else if (event.newState === "closed" && trackedDialogs.delete(dialog)) {
+				guard.notifyClose();
+			}
 		},
 		true,
 	);
@@ -141,14 +151,11 @@ export function bindDismissibleHistory(
 	// normal close would, generically, for every dialog rather than one-off per caller.
 	const body = documentTarget.body ?? documentTarget.documentElement ?? documentTarget;
 	if (typeof MutationObserver !== "undefined" && body) {
-		new MutationObserver((mutations) => {
-			for (const mutation of mutations) {
-				for (const node of mutation.removedNodes) {
-					if (containsOpenDialog(node)) {
-						guard.notifyClose();
-						return;
-					}
-				}
+		new MutationObserver(() => {
+			for (const dialog of trackedDialogs) {
+				if (dialog.isConnected) continue;
+				trackedDialogs.delete(dialog);
+				guard.notifyClose();
 			}
 		}).observe(body, { childList: true, subtree: true });
 	}

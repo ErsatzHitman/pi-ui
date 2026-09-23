@@ -51,8 +51,37 @@ test("a real back-button press closes the top-most surface without a double pop"
 	assertEquals(closed, 1);
 	assertEquals(backCalls, 0);
 
-	// The `toggle` "closed" event that `dialog.close()` fires synchronously
-	// during that same handlePopstate call must be suppressed too.
+	// A close reported after that (e.g. the dialog's asynchronous `toggle` event) has no
+	// pushed entry left to pop, so it must not navigate back past pi-ui's own history.
+	guard.notifyClose();
+	assertEquals(backCalls, 0);
+});
+
+test("the popstate caused by the guard's own back() does not close another surface", () => {
+	let closed = 0;
+	const guard = createDismissibleHistoryGuard({ pushState: () => {}, back: () => {} });
+	guard.notifyOpen();
+	guard.notifyOpen();
+	guard.notifyClose();
+	guard.handlePopstate(
+		() => true,
+		() => (closed += 1),
+	);
+	assertEquals(closed, 0);
+	// A genuine back press afterwards still closes the remaining surface.
+	guard.handlePopstate(
+		() => true,
+		() => (closed += 1),
+	);
+	assertEquals(closed, 1);
+});
+
+test("a close with no pushed entry never navigates back", () => {
+	let backCalls = 0;
+	const guard = createDismissibleHistoryGuard({
+		pushState: () => {},
+		back: () => (backCalls += 1),
+	});
 	guard.notifyClose();
 	assertEquals(backCalls, 0);
 });
@@ -77,7 +106,7 @@ test("registering and unregistering a non-dialog dismissible surface never throw
 	unregister();
 });
 
-test("a later independent close is handled normally again after the popstate settles", async () => {
+test("a later independent close is handled normally again after a back press", () => {
 	let backCalls = 0;
 	const guard = createDismissibleHistoryGuard({
 		pushState: () => {},
@@ -88,12 +117,8 @@ test("a later independent close is handled normally again after the popstate set
 		() => true,
 		() => {},
 	);
-	guard.notifyClose();
 	assertEquals(backCalls, 0);
 
-	// pendingPop is released on the next microtask, matching the synchronous
-	// `toggle` event a real `dialog.close()` call fires within handlePopstate.
-	await Promise.resolve();
 	guard.notifyOpen();
 	guard.notifyClose();
 	assertEquals(backCalls, 1);
