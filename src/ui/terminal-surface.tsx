@@ -158,7 +158,12 @@ function renderTerminalSurfaceBody(surface: TerminalSurface): string {
 	// keyboard focus here too; overlays get it from `autofocus` when their dialog opens.
 	const focusInline =
 		surface.kind === "inline" ? "el.focus({ preventScroll: true }); " : "";
-	const onInit = `${focusInline}const cols = window.piUi.terminal.fitColumns(el); if (cols !== undefined && cols !== ${surface.cols}) { @post('${endpoints.terminalSurfaceResize}', { payload: { surfaceId: ${JSON.stringify(surface.id)}, cols, rows: ${surface.rows} } }) }`;
+	// Every surface posts to the same resize URL, and Datastar's default ("auto") cancellation
+	// aborts an in-flight request to the same URL — two surfaces mounting together (a widget and
+	// an overlay) would cancel each other's fit and leave one at its default width.
+	// A new overlay's body is inserted while its dialog is still closed (not rendered, so nothing
+	// can be measured) and only opened afterwards; fit it once the dialog opens instead.
+	const onInit = `${focusInline}const fit = () => { const cols = window.piUi.terminal.fitColumns(el); if (cols !== undefined && cols !== ${surface.cols}) { @post('${endpoints.terminalSurfaceResize}', { payload: { surfaceId: ${JSON.stringify(surface.id)}, cols, rows: ${surface.rows} }, requestCancellation: 'disabled' }) } }; const dialog = el.closest('dialog'); if (dialog && !dialog.open) { dialog.addEventListener('toggle', fit, { once: true }) } else { fit() }`;
 	const onWheel = `const data = window.piUi.terminal.encodeWheel(evt); if (data !== undefined) { evt.preventDefault(); ${postTerminalInput(surface.id, "data")} }`;
 	return syncHtml(
 		<pre
