@@ -23,6 +23,23 @@
 	#piui-widgets:empty {
 		display: none;
 	}
+	.piui-widgets-list {
+		display: grid;
+		gap: 0.375rem;
+	}
+
+	/*
+	 * `.piui-widgets-summary`/`.piui-widgets-list` are both always rendered; only one shows at
+	 * a time, picked by viewport width (round-2 audit m12: the full strip ran 320–384px tall,
+	 * about 40% of the screen, at 390 and 768). Desktop (> 64rem, the Live Workspace's own
+	 * dock breakpoint) shows the full strip; the drawer/sheet range (<= 64rem) collapses it to
+	 * one line, matching how `renderPiUiPinnedSummary`'s roster/progress rows already summarize.
+	 */
+	.piui-widgets-summary {
+		display: none;
+		width: 100%;
+		justify-content: space-between;
+	}
 	.piui-element {
 		border-radius: var(--radius-md);
 		background: var(--surface-muted);
@@ -226,9 +243,37 @@
 		margin: 0;
 		overflow-wrap: anywhere;
 	}
+	.piui-sheet-empty {
+		margin: 0;
+		padding-block: 0.5rem;
+	}
 
 	.piui-sheet > .piui-sheet-panel {
 		width: min(32rem, calc(100vw - 2rem));
+	}
+
+	.piui-widgets-summary-label {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.piui-widgets-summary-count {
+		flex-shrink: 0;
+	}
+}
+
+/* The Live Workspace's own drawer/sheet range (<= 64rem, see live-workspace.css) — the strip
+ * collapses to `.piui-widgets-summary`'s one line there instead of the full stack. */
+@media (width <= 64rem) {
+	@layer components {
+		.piui-widgets-summary {
+			display: flex;
+			align-items: center;
+		}
+		.piui-widgets-list {
+			display: none;
+		}
 	}
 }
 

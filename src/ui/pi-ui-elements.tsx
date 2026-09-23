@@ -57,20 +57,52 @@ export function renderPiUiStatusChips(
 export function renderPiUiWidgets(
 	state: Pick<AppStateSnapshot, "extensionElements">,
 ): string {
+	const elements = state.extensionElements.filter(
+		(element) =>
+			widgetPlacements.has(element.placement) && element.kind !== "composer",
+	);
 	return syncHtml(
 		<div id="piui-widgets" class="piui-widgets" aria-live="polite">
-			{state.extensionElements
-				.filter(
-					(element) =>
-						widgetPlacements.has(element.placement) &&
-						element.kind !== "composer",
-				)
-				.map((element) =>
-					isPinnedSummaryKind(element)
-						? renderPiUiPinnedSummary(element)
-						: renderPiUiElement(element),
-				)}
+			{elements.length > 0 && (
+				<>
+					{/* Narrow screens (<= 64rem: the Live Workspace drawer/sheet range) hide
+					 * `.piui-widgets-list` and show this one-line summary instead — the full
+					 * strip ran 320–384px tall on a phone, about 40% of the screen (round-2
+					 * audit m12). Tapping it opens the same content in the Live Workspace
+					 * Extensions tab. */}
+					{renderPiUiWidgetsSummary(elements)}
+					<div class="piui-widgets-list">
+						{elements.map((element) =>
+							isPinnedSummaryKind(element)
+								? renderPiUiPinnedSummary(element)
+								: renderPiUiElement(element),
+						)}
+					</div>
+				</>
+			)}
 		</div>,
+	);
+}
+
+function renderPiUiWidgetsSummary(elements: readonly PiUiElement[]): string {
+	const count = elements.length;
+	const onlyTitle = count === 1 ? elements[0]?.title : undefined;
+	const label = onlyTitle ?? `${count} extension update${count === 1 ? "" : "s"}`;
+	return syncHtml(
+		<button
+			type="button"
+			class="btn piui-widgets-summary"
+			data-variant="ghost"
+			data-size="sm"
+			data-on:click={openLiveWorkspaceExtensionsAction()}
+		>
+			<span class="piui-widgets-summary-label" safe>
+				{label}
+			</span>
+			<span class="badge piui-widgets-summary-count" data-variant="secondary" safe>
+				{count}
+			</span>
+		</button>,
 	);
 }
 
@@ -147,12 +179,28 @@ export function renderPiUiSheets(
 	state: Pick<AppStateSnapshot, "extensionElements">,
 ): string {
 	return syncHtml(
-		<div id="piui-sheets">
+		<div id="piui-sheets" data-init={colorSchemeReportScript()}>
 			{state.extensionElements
 				.filter(isPiUiSheetElement)
 				.map((element) => renderPiUiSheetDialog(element))}
 		</div>,
 	);
+}
+
+/**
+ * Reports the browser's real `prefers-color-scheme` to the server once per connection, and on
+ * change, so `ExtensionUiController`'s `colorScheme()` — used for a terminal surface's real
+ * `Theme` and `ctx.ui.theme` — reflects it instead of always defaulting to `"dark"` (round-2
+ * audit m9). `data-init` only runs once per element, and `#piui-sheets` is mounted once per
+ * page connection and never recreated by a later PIUI patch (same node, same id), so this
+ * piggybacks on it rather than adding a dedicated always-empty host element.
+ */
+function colorSchemeReportScript(): string {
+	const post = (expression: string) =>
+		`@post('${endpoints.extensionUiColorScheme}', { payload: { colorScheme: ${expression} }, requestCancellation: 'disabled' })`;
+	return `const mql = window.matchMedia('(prefers-color-scheme: dark)');
+		${post("mql.matches ? 'dark' : 'light'")};
+		mql.addEventListener('change', (evt) => { ${post("evt.matches ? 'dark' : 'light'")} });`;
 }
 
 /** Ids of `sheet`/`screen` elements currently present — used to auto-open new ones. */
@@ -182,6 +230,7 @@ export function renderPiUiElement(element: PiUiElement): string {
 }
 
 function renderPiUiSheetDialog(element: PiUiElement): string {
+	const body = renderPiUiBody(element);
 	return syncHtml(
 		<dialog
 			id={dialogId(element)}
@@ -190,6 +239,7 @@ function renderPiUiSheetDialog(element: PiUiElement): string {
 			closedby="any"
 			data-preserve-attr="open"
 			data-on:close={dismissAction(element)}
+			data-init={sheetOpenFocusScript()}
 		>
 			{/* A `.dialog`'s single child is its panel (shared `.dialog > *` chrome). */}
 			<div class="piui-sheet-panel">
@@ -198,7 +248,7 @@ function renderPiUiSheetDialog(element: PiUiElement): string {
 						{element.title ?? element.ns}
 					</h2>
 				</header>
-				{renderPiUiBody(element)}
+				{body || renderPiUiSheetEmptyState()}
 				<footer>
 					{!element.actions?.some((action) => action.id === closeActionId) && (
 						<button
@@ -667,16 +717,42 @@ function signalPart(value: string): string {
 /**
  * Closing the sheet (Esc, backdrop, the Close button) replies with the `close` action id,
  * which `lib/bridge.ts` consumers (ask-user.ts, btw.ts) listen on to cancel or tear down.
- * It also remembers, in this browser only, that the element's current revision was
+ * It also remembers, in this browser only, that the element's current open generation was
  * dismissed — see `piUiDismissedStorageKey` (its reader is `UiRenderer.piUiSheetReopenScript`
  * in ui-renderer.ts) — so a `durable` sheet the extension never removes stays closed across a
- * reload/reconnect instead of popping back open (round-2 audit A#16).
+ * reload/reconnect instead of popping back open (round-2 audit A#16). Keying on
+ * `openGeneration` rather than `revision` means a streaming sheet's own `patch`/`append`
+ * updates (which bump `revision` but not `openGeneration`) don't undo the dismissal (M4b).
  */
 function dismissAction(element: PiUiElement): string {
 	return `try {
-		localStorage.setItem(${JSON.stringify(piUiDismissedStorageKey(element))}, ${JSON.stringify(String(element.revision))});
+		localStorage.setItem(${JSON.stringify(piUiDismissedStorageKey(element))}, ${JSON.stringify(String(element.openGeneration))});
 	} catch {}
 	${actionPost(element, closeActionId, "undefined")}`;
+}
+
+/** Shown in place of an empty body — a `panel`/`form` sheet with no fields or sections yet
+ * (still loading, or the extension genuinely sent nothing) — so the sheet never opens onto
+ * silent blank space (round-2 audit's "empty/loading … states for sheets"). */
+function renderPiUiSheetEmptyState(): string {
+	return syncHtml(<p class="fine-print piui-sheet-empty">Waiting for content…</p>);
+}
+
+/**
+ * Native `<dialog>.showModal()` only autofocuses a descendant carrying the `autofocus`
+ * attribute, which none of this module's field/action renderers set (they're shared with the
+ * non-modal widget area, where autofocus would be wrong). Focus the first field, or else the
+ * first action button, once per mount so a keyboard/screen-reader user lands somewhere useful
+ * instead of on the dialog's own chrome (round-2 audit's "focus states for sheets").
+ */
+function sheetOpenFocusScript(): string {
+	return `el.addEventListener('toggle', (evt) => {
+		if (evt.newState !== 'open') return;
+		requestAnimationFrame(() => {
+			const target = el.querySelector('input:not([type=checkbox]), textarea, select, .piui-actions .btn');
+			target?.focus();
+		});
+	});`;
 }
 
 function fieldValuesExpression(
