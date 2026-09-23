@@ -10,8 +10,10 @@ import {
 import type { AppUsage } from "../state/app-store.ts";
 import {
 	renderLiveWorkspace,
+	renderLiveWorkspaceAgentsSection,
 	renderLiveWorkspaceData,
 	renderLiveWorkspaceToggle,
+	renderLiveWorkspaceUsageSection,
 } from "./live-workspace.tsx";
 import { appRenderSnapshot } from "./test-fixtures.ts";
 
@@ -235,6 +237,35 @@ test("the extensions tab reuses the shared PIUI renderer and links sheets to the
 	assertStringIncludes(html, "Review plan");
 	// The sheet's own <dialog> lives in #piui-sheets; the tab must not duplicate it.
 	assertFalse(html.includes("<dialog"));
+});
+
+test("each tab section renders standalone, for independent patching (A#13)", () => {
+	const usage: AppUsage = { text: "$3.000 • 3,000 tokens", costText: "$3.000" };
+	const agentsOnly = renderLiveWorkspaceAgentsSection(
+		snapshot({
+			agents: [
+				{
+					id: "a1",
+					kind: "channel-entry",
+					source: "subagents:fleet",
+					label: "scout",
+					status: "running",
+					depth: 0,
+				},
+			],
+		}),
+		"agents",
+	);
+	assertStringIncludes(agentsOnly, 'id="live-workspace-agents"');
+	assertStringIncludes(agentsOnly, "scout");
+	assertFalse(agentsOnly.includes('id="live-workspace-usage"'));
+	assertFalse(agentsOnly.includes("display: none"));
+
+	const usageOnly = renderLiveWorkspaceUsageSection(usage, "now");
+	assertStringIncludes(usageOnly, 'id="live-workspace-usage"');
+	assertStringIncludes(usageOnly, "$3.000");
+	assertStringIncludes(usageOnly, "display: none");
+	assertFalse(usageOnly.includes('id="live-workspace-agents"'));
 });
 
 test("the extensions tab reports no activity when nothing has been observed", () => {
