@@ -146,7 +146,13 @@ export type UiCommitEffect =
 	| { type: "restore-model-picker" }
 	| {
 			type: "dialog";
-			id: "auth-dialog" | "extension-dialog" | "llama-dialog" | "tree-dialog";
+			id:
+				| "auth-dialog"
+				| "command-dialog"
+				| "extension-dialog"
+				| "llama-dialog"
+				| "session-dialog"
+				| "tree-dialog";
 			open: boolean;
 	  }
 	| { type: "document-title"; title: string }
@@ -703,6 +709,16 @@ export class AppStore {
 	openTreeDialog(): void {
 		this.presentation?.pickersChanged();
 		this.commit({ type: "dialog", id: "tree-dialog", open: true });
+	}
+	// Native `/settings` and `/hotkeys` handling: pi-ui has no separate settings or
+	// hotkeys screen, so both open the existing command palette, which already lists
+	// every command alongside its shortcut (see src/ui/command-menu.tsx).
+	openCommandDialog(): void {
+		this.commit({ type: "dialog", id: "command-dialog", open: true });
+	}
+	// Native `/resume` handling: opens the same session picker the toolbar/keybind use.
+	openSessionDialog(): void {
+		this.commit({ type: "dialog", id: "session-dialog", open: true });
 	}
 	setUsage(value: AppUsage): void {
 		this.usage = value;

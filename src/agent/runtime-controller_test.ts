@@ -114,8 +114,10 @@ function fakeRuntime(
 	const modelRuntime = {
 		getModels: () => [],
 		getModel: () => undefined,
+		getProvider: () => undefined,
 		getProviders: () => [],
 		hasConfiguredAuth: () => false,
+		listCredentials: () => Promise.resolve([]),
 		refresh: (options?: { force?: boolean }) => {
 			fake.modelRefreshForces.push(options?.force);
 			return Promise.resolve({ aborted: false, errors: new Map() });
@@ -1221,4 +1223,283 @@ test("RuntimeController disposes a prepared runtime when extension binding fails
 	);
 	assertEquals(fake.disposeCount, 1);
 	assertEquals(fake.events.length, 0);
+});
+
+test("RuntimeController opens the command palette for /settings and /hotkeys without prompting the model", async () => {
+	for (const name of ["/settings", "/hotkeys"]) {
+		const fake = fakeRuntime();
+		const controller = await activate(new AppStore(), [fake], "/workspace");
+		assertEquals(await controller.prompt(name), true);
+		assertEquals(fake.promptInputs, []);
+		await controller.dispose();
+	}
+});
+
+test("RuntimeController opens the session picker for /resume without prompting the model", async () => {
+	const fake = fakeRuntime();
+	const controller = await activate(new AppStore(), [fake], "/workspace");
+	assertEquals(await controller.prompt("/resume"), true);
+	assertEquals(fake.promptInputs, []);
+	await controller.dispose();
+});
+
+test("RuntimeController shows session stats for /session without prompting the model", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime("/sessions/a.jsonl");
+	fake.runtime.session.getSessionStats = () => ({
+		sessionFile: "/sessions/a.jsonl",
+		sessionId: "session-id",
+		userMessages: 2,
+		assistantMessages: 3,
+		toolCalls: 4,
+		toolResults: 4,
+		totalMessages: 9,
+		tokens: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, total: 30 },
+		cost: 0.125,
+	});
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/session"), true);
+	assertEquals(fake.promptInputs, []);
+	const text = state.messages.at(-1)?.text ?? "";
+	assertEquals(text.includes("2 user, 3 assistant, 4 tool calls"), true);
+	assertEquals(text.includes("$0.1250"), true);
+	await controller.dispose();
+});
+
+test("RuntimeController reports the current thinking level for a bare /thinking", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/thinking"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(fake.promptInputs, []);
+	assertEquals(
+		state.messages.at(-1)?.text.includes("Current thinking level: off"),
+		true,
+	);
+	await controller.dispose();
+});
+
+test("RuntimeController rejects an invalid /thinking level without prompting the model", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/thinking turbo"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(fake.promptInputs, []);
+	assertEquals(
+		state.messages.at(-1)?.text.includes("Invalid thinking level: turbo"),
+		true,
+	);
+	await controller.dispose();
+});
+
+test("RuntimeController reports the current model for a bare /model", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+	state.setModels(
+		[
+			{
+				id: "opus",
+				provider: "anthropic",
+				name: "Claude Opus",
+				configured: true,
+				scoped: false,
+			},
+		],
+		"anthropic/opus",
+	);
+
+	assertEquals(await controller.prompt("/model"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(fake.promptInputs, []);
+	const text = state.messages.at(-1)?.text ?? "";
+	assertEquals(text.includes("Current model: anthropic/opus"), true);
+	assertEquals(text.includes("anthropic/opus"), true);
+	await controller.dispose();
+});
+
+test("RuntimeController summarizes scoped models for /scoped-models", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+	state.setModels(
+		[
+			{
+				id: "opus",
+				provider: "anthropic",
+				name: "Claude Opus",
+				configured: true,
+				scoped: true,
+			},
+			{
+				id: "gpt-5",
+				provider: "openai",
+				name: "GPT-5",
+				configured: true,
+				scoped: false,
+			},
+		],
+		"anthropic/opus",
+	);
+
+	assertEquals(await controller.prompt("/scoped-models"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(fake.promptInputs, []);
+	assertEquals(state.messages.at(-1)?.text.includes("anthropic/opus"), true);
+	await controller.dispose();
+});
+
+test("RuntimeController requires a title for /name and reports temporary sessions cannot be renamed", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/name"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assertEquals(fake.promptInputs, []);
+	assertEquals(state.messages.at(-1)?.text, "Usage: /name <title>");
+
+	fake.runtime.session.sessionManager.getSessionFile = () => undefined;
+	assertEquals(await controller.prompt("/name new title"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assertEquals(fake.promptInputs, []);
+	assertEquals(state.messages.at(-1)?.text, "Temporary sessions cannot be renamed.");
+	await controller.dispose();
+});
+
+test("RuntimeController renames the session for /name <title> without prompting the model", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime("/sessions/current.jsonl");
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/name  My Session  "), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(fake.promptInputs, []);
+	assertEquals(fake.setSessionNames, ["My Session"]);
+	await controller.dispose();
+});
+
+test("RuntimeController reports /bug and /quit as unsupported without prompting the model", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/bug"), true);
+	assertEquals(await controller.prompt("/quit"), true);
+	assertEquals(fake.promptInputs, []);
+	assertEquals(state.messages.length, 2);
+	await controller.dispose();
+});
+
+test("RuntimeController reports temporary sessions cannot be cloned without prompting the model", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	fake.runtime.session.sessionManager.getSessionFile = () => undefined;
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/clone"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(fake.promptInputs, []);
+	assertEquals(state.messages.at(-1)?.text, "Temporary sessions cannot be cloned.");
+	await controller.dispose();
+});
+
+test("RuntimeController opens the login dialog for /login without prompting the model", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/login"), true);
+	assertEquals(fake.promptInputs, []);
+	assertEquals(state.authDialog?.mode, "login");
+	await controller.dispose();
+});
+
+test("RuntimeController opens the logout dialog for /logout without prompting the model", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/logout"), true);
+	assertEquals(fake.promptInputs, []);
+	assertEquals(state.authDialog?.mode, "logout");
+	await controller.dispose();
+});
+
+test("RuntimeController requires a path for /import without prompting the model", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/import"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(fake.promptInputs, []);
+	assertEquals(state.messages.at(-1)?.text, "Usage: /import <path to .jsonl file>");
+	await controller.dispose();
+});
+
+test("RuntimeController starts a new session for /new without prompting the model", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime("/sessions/current.jsonl");
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/new"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(fake.promptInputs, []);
+	await controller.dispose();
+});
+
+test("RuntimeController reports an unrecognized slash command without sending it to the model", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/not-a-real-command with args"), true);
+
+	assertEquals(fake.promptInputs, []);
+	assertEquals(
+		state.messages.at(-1)?.text,
+		"Unknown command: /not-a-real-command. Type / to see available commands.",
+	);
+	await controller.dispose();
+});
+
+test("RuntimeController forwards a registered extension slash command to the model", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	fake.runtime.session.extensionRunner.getRegisteredCommands = () => [
+		{
+			name: "custom",
+			invocationName: "custom",
+			description: "Custom command",
+			sourceInfo: {
+				path: "/extensions/custom.ts",
+				source: "custom",
+				scope: "project",
+				origin: "top-level",
+			},
+			handler: async () => {},
+		},
+	];
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/custom do the thing"), true);
+
+	assertEquals(fake.promptInputs, [
+		{ text: "/custom do the thing", streamingBehavior: undefined },
+	]);
+	await controller.dispose();
 });

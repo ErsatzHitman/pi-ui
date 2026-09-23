@@ -1,3 +1,5 @@
+import { basename, extname, isAbsolute, resolve as resolvePath } from "node:path";
+
 import {
 	type AgentSessionEvent,
 	type AgentSessionRuntime,
@@ -6,11 +8,16 @@ import {
 	type CreateAgentSessionRuntimeFactory,
 	createAgentSessionServices,
 	getAgentDir,
+	ProjectTrustStore,
 	SessionManager,
 	type SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 
+import { exportSessionToHtml } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/export-html/index.js";
 import { resolveModelScopeFromModels } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/model-resolver.js";
+import { exportSessionToJsonl } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-export.js";
+import agentPackageJson from "../../node_modules/@earendil-works/pi-coding-agent/package.json" with { type: "json" };
 import { sessionPerformance } from "../perf/session-performance.ts";
 import {
 	type AppSlashCommand,
@@ -26,6 +33,8 @@ import { errorMessage } from "../utils/errors.ts";
 import { configureAgentHttpProxy, withAgentHttpProxy } from "../utils/http-proxy.ts";
 import { moveToTrash } from "../utils/trash.ts";
 import { defaultWorkspacePath, formatHomePath } from "../utils/workspace.ts";
+import { version as piUiVersion } from "../version.ts";
+import { resolveArgumentCompletions } from "./argument-completions.ts";
 import { AuthController } from "./auth-controller.ts";
 import { type AutoTitleConfig, generateAutoTitle } from "./auto-title.ts";
 import {
@@ -33,6 +42,12 @@ import {
 	ownsForegroundGeneration,
 	RuntimeOwnershipInvariantError,
 } from "./background-runtime-ownership.ts";
+import {
+	type BuiltinCommandName,
+	builtinSlashCommandCatalog,
+	isBuiltinCommandName,
+	parseSlashCommand,
+} from "./builtin-commands.ts";
 import { detectCacheMiss, formatCacheMissNotice } from "./cache-miss.ts";
 import { ExtensionUiController } from "./extension-ui-controller.ts";
 import { LlamaController } from "./llama-controller.ts";
@@ -80,48 +95,26 @@ import { UsageController } from "./usage-controller.ts";
 
 const extensionFactories = [llamaProviderExtension];
 const modelCatalogForceIntervalMs = 30 * 60 * 1000;
-const systemSlashCommands = [
-	{
-		name: "login",
-		description: "Log in with a subscription or API key",
-		source: "system",
-		argumentHint: "[provider]",
-	},
-	{
-		name: "logout",
-		description: "Remove stored provider credentials",
-		source: "system",
-	},
-	{
-		name: "tree",
-		description: "Navigate and branch within the current session",
-		source: "system",
-	},
+// pi-ui's own commands that aren't part of pi's SDK `BUILTIN_SLASH_COMMANDS` catalog
+// (see builtin-commands.ts) — kept separate so the SDK's 24 built-ins stay a faithful,
+// undiverged mirror of the SDK.
+const piUiOnlySlashCommands = [
 	{
 		name: "llama",
 		description: "Load or unload llama.cpp models",
 		source: "system",
 	},
-	{
-		name: "compact",
-		description: "Manually compact the session context",
-		source: "system",
-		argumentHint: "[instructions]",
-	},
-	{
-		name: "share",
-		description: "Share session as a secret GitHub gist",
-		source: "system",
-	},
-	{
-		name: "reload",
-		description: "Reload extensions, skills, prompts, and context files",
-		source: "system",
-	},
+] satisfies readonly AppSlashCommand[];
+const systemSlashCommands = [
+	...builtinSlashCommandCatalog,
+	...piUiOnlySlashCommands,
 ] satisfies readonly AppSlashCommand[];
 const systemSlashCommandNames = new Set(
 	systemSlashCommands.map((command) => command.name),
 );
+const changelogUrl = "https://github.com/hyperpuncher/pi-ui/releases";
+const agentChangelogUrl =
+	"https://github.com/earendil-works/pi-coding-agent/blob/main/CHANGELOG.md";
 
 type BackgroundSession = {
 	runtime: AgentSessionRuntime;
@@ -362,43 +355,35 @@ export class RuntimeController {
 		if (!trimmed) {
 			return false;
 		}
-		if (trimmed === "/tree") {
-			this.openTree();
-			return true;
-		}
-		if (trimmed === "/login" || trimmed.startsWith("/login ")) {
-			this.openLogin(
-				trimmed.startsWith("/login ") ? trimmed.slice(7).trim() : undefined,
-			);
-			return true;
-		}
-
-		if (trimmed === "/logout") {
-			this.openLogout();
-			return true;
-		}
-
+		// pi-ui-only command, not part of the SDK's built-in catalog (builtin-commands.ts).
 		if (trimmed === "/llama") {
 			this.openLlama();
 			return true;
 		}
 
-		if (trimmed === "/compact" || trimmed.startsWith("/compact ")) {
-			const customInstructions = trimmed.startsWith("/compact ")
-				? trimmed.slice(9).trim()
-				: undefined;
-			void this.compact(customInstructions);
-			return true;
-		}
-
-		if (trimmed === "/share") {
-			void this.share();
-			return true;
-		}
-
-		if (trimmed === "/reload") {
-			void this.reload();
-			return true;
+		// Every pi built-in (/settings, /model, /tree, ...) is TUI-only at the SDK level —
+		// session.prompt() never recognizes them (docs/rpc.md), so left unhandled they'd be
+		// sent to the model as plain chat text instead of running or reporting "unsupported".
+		// Give all of them a native web-UI handling here instead.
+		const parsed = parseSlashCommand(trimmed);
+		if (parsed) {
+			if (isBuiltinCommandName(parsed.name)) {
+				this.dispatchBuiltinCommand(parsed.name, parsed.args);
+				return true;
+			}
+			// Anything starting with "/" that isn't a built-in, a prompt template, a
+			// registered extension command, or a skill (state.slashCommands, kept in sync by
+			// syncSlashCommands()) is a typo or a command from an extension that isn't
+			// loaded — report it instead of sending it to the model as plain chat text.
+			if (
+				!this.state.slashCommands.some((command) => command.name === parsed.name)
+			) {
+				this.state.appendMessage(
+					"notice",
+					`Unknown command: /${parsed.name}. Type / to see available commands.`,
+				);
+				return true;
+			}
 		}
 
 		const runtime = this.runtime;
@@ -413,6 +398,280 @@ export class RuntimeController {
 		}
 
 		return await this.prompts.submit(runtime, trimmed, options);
+	}
+
+	/** Dispatch table for every pi built-in slash command. Never forwards to the model. */
+	private dispatchBuiltinCommand(name: BuiltinCommandName, args: string): void {
+		switch (name) {
+			case "settings":
+			case "hotkeys":
+				// No separate settings/hotkeys screen exists; both open the command palette,
+				// which already lists every command with its shortcut.
+				this.state.openCommandDialog();
+				return;
+			case "model":
+				void this.dispatchModelCommand(args);
+				return;
+			case "tree":
+			case "fork":
+				// TUI's /fork opens a picker of previous user messages to branch from; the
+				// web equivalent is the same session-tree dialog /tree opens.
+				this.openTree();
+				return;
+			case "thinking":
+				void this.dispatchThinkingCommand(args);
+				return;
+			case "scoped-models":
+				this.dispatchScopedModelsCommand();
+				return;
+			case "export":
+				void this.exportSession(args || undefined);
+				return;
+			case "import":
+				void this.importSession(args);
+				return;
+			case "share":
+				void this.share();
+				return;
+			case "bug":
+				this.state.appendMessage(
+					"notice",
+					"Bug reporting isn't available in the web UI yet. Please file an issue on the pi-coding-agent GitHub repository instead.",
+				);
+				return;
+			case "copy":
+				// Handled client-side (copies the last assistant message to the clipboard)
+				// before the prompt ever reaches the server — see static/app/pickers.js.
+				// A no-op here is the correct fallback for any caller that posts it anyway.
+				return;
+			case "name":
+				void this.dispatchNameCommand(args);
+				return;
+			case "session":
+				this.showSessionInfo();
+				return;
+			case "changelog":
+				this.showChangelog();
+				return;
+			case "clone":
+				void this.cloneSession();
+				return;
+			case "trust":
+				void this.trustProject();
+				return;
+			case "login":
+				this.openLogin(args || undefined);
+				return;
+			case "logout":
+				this.openLogout();
+				return;
+			case "new":
+				void this.newSession();
+				return;
+			case "compact":
+				void this.compact(args || undefined);
+				return;
+			case "resume":
+				this.state.openSessionDialog();
+				return;
+			case "reload":
+				void this.reload();
+				return;
+			case "quit":
+				this.state.appendMessage(
+					"notice",
+					"Quit isn't available in the web UI — close this browser tab instead.",
+				);
+				return;
+		}
+	}
+
+	private async dispatchModelCommand(args: string): Promise<void> {
+		const ref = args.trim();
+		if (!ref) {
+			const current = this.state.currentModel ?? "(none)";
+			const available =
+				this.state.models
+					.map((model) => `${model.provider}/${model.id}`)
+					.join(", ") || "(none configured)";
+			this.state.appendMessage(
+				"notice",
+				`Current model: ${current}\nUse /model <provider/model> to switch. Available: ${available}`,
+			);
+			return;
+		}
+		if (await this.setModel(ref)) {
+			this.state.appendMessage("system", `Model set to ${ref}.`);
+		}
+	}
+
+	private async dispatchThinkingCommand(args: string): Promise<void> {
+		const level = args.trim().toLowerCase();
+		const available = this.state.thinkingLevels.join(", ");
+		if (!level) {
+			this.state.appendMessage(
+				"notice",
+				`Current thinking level: ${this.state.thinkingLevel}\nAvailable: ${available}`,
+			);
+			return;
+		}
+		if (await this.setThinkingLevel(level)) {
+			this.state.appendMessage("system", `Thinking level set to ${level}.`);
+		} else {
+			this.state.appendMessage(
+				"notice",
+				`Invalid thinking level: ${level}. Available: ${available}`,
+			);
+		}
+	}
+
+	private dispatchScopedModelsCommand(): void {
+		const scoped = this.state.models.filter((model) => model.scoped);
+		const summary =
+			scoped.length > 0
+				? scoped.map((model) => `${model.provider}/${model.id}`).join(", ")
+				: "(cycling through all configured models)";
+		this.state.appendMessage(
+			"notice",
+			`Models enabled for Ctrl+P cycling: ${summary}\nToggle scoping from the model picker.`,
+		);
+	}
+
+	private async dispatchNameCommand(args: string): Promise<void> {
+		const title = args.trim();
+		if (!title) {
+			this.state.appendMessage("notice", "Usage: /name <title>");
+			return;
+		}
+		const path = this.runtime.session.sessionManager.getSessionFile();
+		if (!path) {
+			this.state.appendMessage("notice", "Temporary sessions cannot be renamed.");
+			return;
+		}
+		await this.renameSession(path, title);
+	}
+
+	private showSessionInfo(): void {
+		const stats = this.runtime.session.getSessionStats();
+		const lines = [
+			`Session: ${stats.sessionFile ? formatHomePath(stats.sessionFile) : "(unsaved)"}`,
+			`Messages: ${stats.userMessages} user, ${stats.assistantMessages} assistant, ${stats.toolCalls} tool calls`,
+			`Tokens: ${stats.tokens.input} in, ${stats.tokens.output} out, ${stats.tokens.cacheRead} cache read, ${stats.tokens.cacheWrite} cache write`,
+			`Cost: $${stats.cost.toFixed(4)}`,
+		];
+		this.state.appendMessage("notice", lines.join("\n"), { format: "pre" });
+	}
+
+	private showChangelog(): void {
+		this.state.appendMessage(
+			"system",
+			`pi-ui v${piUiVersion} · pi-coding-agent v${agentPackageJson.version}\n\n` +
+				`pi-ui release notes: ${changelogUrl}\n` +
+				`pi-coding-agent changelog: ${agentChangelogUrl}`,
+		);
+	}
+
+	private async cloneSession(): Promise<SessionTransitionResult> {
+		const sourcePath = this.runtime.session.sessionManager.getSessionFile();
+		if (!sourcePath) {
+			this.state.appendMessage("notice", "Temporary sessions cannot be cloned.");
+			return { status: "cancelled" };
+		}
+		const cwd = this.runtime.session.sessionManager.getCwd();
+		return await this.transitionController.run(
+			"Clone session",
+			async () => {
+				const targetPath = this.dependencies
+					.forkSessionManager(sourcePath, cwd, this.sessionDir)
+					.getSessionFile();
+				return targetPath
+					? await this.resumeSessionTransition(targetPath)
+					: false;
+			},
+			{ overlay: false },
+		);
+	}
+
+	private async trustProject(): Promise<void> {
+		try {
+			const cwd = this.runtime.session.sessionManager.getCwd();
+			new ProjectTrustStore(this.dependencies.getAgentDir()).set(cwd, true);
+			this.state.appendMessage(
+				"system",
+				`Trusted ${formatHomePath(cwd)} for future sessions.`,
+			);
+		} catch (error) {
+			this.state.appendMessage(
+				"notice",
+				`Failed to save project trust: ${errorMessage(error)}`,
+			);
+		}
+	}
+
+	private exportDefaultBasename(): string {
+		const file = this.runtime.session.sessionManager.getSessionFile();
+		if (!file)
+			return `pi-ui-session-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+		return `pi-ui-session-${basename(file, extname(file))}`;
+	}
+
+	private async exportSession(argPath?: string): Promise<void> {
+		const sessionManager = this.runtime.session.sessionManager;
+		const cwd = sessionManager.getCwd();
+		const trimmed = argPath?.trim();
+		const jsonl = trimmed ? extname(trimmed).toLowerCase() === ".jsonl" : false;
+		const target = trimmed
+			? isAbsolute(trimmed)
+				? trimmed
+				: resolvePath(cwd, trimmed)
+			: resolvePath(cwd, `${this.exportDefaultBasename()}.html`);
+		try {
+			const outputPath = jsonl
+				? exportSessionToJsonl(sessionManager, target)
+				: await exportSessionToHtml(sessionManager, undefined, target);
+			this.state.appendMessage(
+				"system",
+				`Exported session to ${formatHomePath(outputPath)}`,
+			);
+		} catch (error) {
+			this.state.appendMessage(
+				"notice",
+				`Failed to export session: ${errorMessage(error)}`,
+			);
+		}
+	}
+
+	private async importSession(argPath: string): Promise<void> {
+		const trimmed = argPath.trim();
+		if (!trimmed) {
+			this.state.appendMessage("notice", "Usage: /import <path to .jsonl file>");
+			return;
+		}
+		const cwd = this.runtime.session.sessionManager.getCwd();
+		const path = isAbsolute(trimmed) ? trimmed : resolvePath(cwd, trimmed);
+		try {
+			const manager = this.dependencies.openSessionManager(path, this.sessionDir);
+			const target = manager.getSessionFile();
+			if (!target) {
+				this.state.appendMessage(
+					"notice",
+					`Could not read session file: ${formatHomePath(path)}`,
+				);
+				return;
+			}
+			const result = await this.resumeSession(target);
+			if (result.status === "error") {
+				this.state.appendMessage(
+					"notice",
+					`Failed to import session: ${formatHomePath(path)}`,
+				);
+			}
+		} catch (error) {
+			this.state.appendMessage(
+				"notice",
+				`Failed to import session: ${errorMessage(error)}`,
+			);
+		}
 	}
 
 	async abort(): Promise<void> {
@@ -868,6 +1127,20 @@ export class RuntimeController {
 
 	async setThinkingLevel(level: string): Promise<boolean> {
 		return this.models.setThinking(level);
+	}
+
+	/** Argument completions for `/<commandName> <argumentPrefix>` (see argument-completions.ts). */
+	async getArgumentCompletions(
+		commandName: string,
+		argumentPrefix: string,
+	): Promise<readonly AutocompleteItem[]> {
+		return await resolveArgumentCompletions(
+			this.runtime,
+			this.state.models,
+			this.state.thinkingLevels,
+			commandName,
+			argumentPrefix,
+		);
 	}
 
 	cycleThinkingLevel(direction: "forward" | "backward" = "forward"): boolean {
