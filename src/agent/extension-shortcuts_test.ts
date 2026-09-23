@@ -1,12 +1,13 @@
 import { test } from "bun:test";
 
-import type { ExtensionShortcut } from "@earendil-works/pi-coding-agent";
+import { ExtensionRunner, type ExtensionShortcut } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
 
 import { assertEquals } from "#testing/assertions";
 
 import {
 	appShortcutToKeyId,
+	extensionShortcutKeybindings,
 	findExtensionShortcut,
 	listExtensionShortcuts,
 	normalizeKeyId,
@@ -111,4 +112,36 @@ test("findExtensionShortcut looks up a normalized keyId regardless of pi-ui's ow
 	// (see `findExtensionShortcut`'s doc comment).
 	assertEquals(findExtensionShortcut(runner, "alt+o"), target);
 	assertEquals(findExtensionShortcut(runner, "ctrl+z"), undefined);
+});
+
+test("the SDK drops extension shortcuts on keys a real pi TUI session reserves", () => {
+	// Runs the SDK's own conflict resolution (`ExtensionRunner.getShortcuts`)
+	// against the keybindings pi-ui passes it, over a minimal runner `this`.
+	const register = (key: string) =>
+		[
+			key,
+			shortcut({ shortcut: key as KeyId, extensionPath: `/ext/${key}.ts` }),
+		] as const;
+	const runnerThis = {
+		extensions: [
+			{
+				shortcuts: new Map([
+					register("ctrl+d"),
+					register("shift+tab"),
+					register("escape"),
+					register("enter"),
+					register("alt+k"),
+				]),
+			},
+		],
+		hasUI: () => true,
+		shortcutDiagnostics: [],
+	};
+	// Only the fields `getShortcuts()` reads; the constructor's session wiring is irrelevant here.
+	const runner: ExtensionRunner = Object.assign(
+		Object.create(ExtensionRunner.prototype),
+		runnerThis,
+	);
+	const shortcuts = runner.getShortcuts(extensionShortcutKeybindings());
+	assertEquals([...shortcuts.keys()], ["alt+k"]);
 });

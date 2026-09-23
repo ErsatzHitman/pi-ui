@@ -29,48 +29,62 @@ export type ExtensionShortcutInfo = {
 	readonly reachableByKeyboard: boolean;
 };
 
+/** pi-coding-agent's own `useWindowsKeybindings()` (`core/keybindings.js`),
+ * which picks the Windows/WSL defaults for a few reserved `app.*` ids. */
+const windowsKeybindings =
+	process.platform === "win32" ||
+	(process.platform === "linux" &&
+		Boolean(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP));
+
 /**
- * The `KeybindingsConfig` passed to `ExtensionRunner.getShortcuts()`, used
- * only to decide which extension-registered shortcuts collide with a
- * *pi-tui* built-in (real interactive-mode's `RESERVED_KEYBINDINGS_FOR_
- * EXTENSION_CONFLICTS` list in `core/extensions/runner.js`, cross-referenced
- * against pi-coding-agent's own `KEYBINDINGS` table — the ~15 `"app.*"` ids
- * on top of pi-tui's `TUI_KEYBINDINGS`). That subclass (`core/keybindings.ts`)
- * merges in the user's `keybindings.json` and adds the `app.*` entries, but
- * — like the analogous `KeybindingsManager` cast in
- * `terminal-surface-controller.ts` — lives outside the package's public
- * `exports` map and can't be constructed here.
- *
- * pi-ui doesn't read `~/.pi/agent/keybindings.json` (that file configures
- * pi's *terminal* keybindings, not this browser UI's own — see
- * `src/keybinds.ts`), so passing just `TUI_KEYBINDINGS`'s resolved defaults
- * only protects the subset of reserved ids pi-tui itself defines (`tui.input.submit`
- * "enter", `tui.select.confirm` "enter", `tui.select.cancel` "escape",
- * `tui.input.copy` "ctrl+c", `tui.editor.deleteToLineEnd` "ctrl+k") — the
- * ones meaningful to a plain browser textarea anyway. A shortcut that
- * collides with one of THESE never even reaches `getShortcuts()`'s returned
- * map (the SDK drops it itself, the same as the real TUI would), which is
- * correct: it's a genuine conflict with pi-tui's own core editing/selection
- * keys, not a pi-ui web invention.
- *
- * pi-ui's OWN reserved keys (Alt+L for the Live Workspace, Ctrl+B for the
- * session sidebar, Alt+O for "toggle tool output", …) are a separate,
- * browser-only catalog (`src/keybinds.ts`'s `appCommandCatalog`) with no real
- * TUI equivalent to defer to — real interactive-mode's own copy of `btw.ts`
- * happily binds Alt+O to something else entirely, since the real TUI has no
- * "toggle tool output" concept to collide with (round-5 runtime-validation
- * finding, using the real `btw.ts`/`plan-mode.ts` extensions). Mirroring the
- * TUI's precedence rules for ITS OWN reserved keys (above) does not extend to
- * inventing a rule for pi-ui's unrelated web bindings, so a collision there
- * is resolved by `reachableByKeyboard` below rather than by dropping the
- * shortcut: pi-ui's own bind still wins the keyboard chord (checked
- * separately by `listExtensionShortcuts`/`findExtensionShortcut`'s callers),
- * but the extension's shortcut stays fully invocable from the `/hotkeys`
- * dialog and the command palette, never silently unreachable.
+ * Default keys of the `app.*` ids in interactive-mode's
+ * `RESERVED_KEYBINDINGS_FOR_EXTENSION_CONFLICTS` (`core/extensions/runner.js`),
+ * copied from pi-coding-agent's `KEYBINDINGS` table (`core/keybindings.js`).
+ * That table and its `KeybindingsManager` subclass live outside the package's
+ * public `exports` map, so they can't be imported; keep this in step with
+ * them when the SDK is upgraded. pi-ui doesn't read the user's
+ * `~/.pi/agent/keybindings.json` (it configures pi's *terminal* keys, not this
+ * browser UI's — see `src/keybinds.ts`), so the defaults are what apply.
  */
-const shortcutKeybindings: KeybindingsConfig = new KeybindingsManager(
-	TUI_KEYBINDINGS,
-).getResolvedBindings();
+const reservedAppKeybindings: KeybindingsConfig = {
+	"app.interrupt": "escape",
+	"app.clear": "ctrl+c",
+	"app.exit": "ctrl+d",
+	"app.suspend": process.platform === "win32" ? [] : "ctrl+z",
+	"app.thinking.cycle": "shift+tab",
+	"app.model.cycleForward": "ctrl+p",
+	"app.model.cycleBackward": windowsKeybindings ? "alt+p" : "shift+ctrl+p",
+	"app.model.select": "ctrl+l",
+	"app.tools.expand": "ctrl+o",
+	"app.thinking.toggle": "ctrl+t",
+	"app.editor.external": "ctrl+g",
+	"app.message.copy": "ctrl+x",
+	"app.message.followUp": windowsKeybindings ? "ctrl+q" : "alt+enter",
+};
+
+/**
+ * The `KeybindingsConfig` passed to `ExtensionRunner.getShortcuts()`: pi-tui's
+ * resolved `TUI_KEYBINDINGS` plus the reserved `app.*` defaults above, so the
+ * SDK drops every extension shortcut a real pi TUI session would drop — one
+ * that collides with a reserved built-in (`tui.input.submit` "enter",
+ * `tui.select.cancel` "escape", `app.exit` "ctrl+d", `app.thinking.cycle`
+ * "shift+tab", …) never even reaches `getShortcuts()`'s returned map.
+ *
+ * pi-ui's OWN keys (Alt+L for the Live Workspace, Ctrl+B for the session
+ * sidebar, Alt+O for "toggle tool output", …) are a separate, browser-only
+ * catalog (`src/keybinds.ts`'s `appCommandCatalog`) with no real TUI
+ * equivalent to defer to — real interactive-mode's copy of `btw.ts` happily
+ * binds Alt+O, since the real TUI has no such bind to collide with (round-5
+ * runtime-validation finding, using the real `btw.ts`/`plan-mode.ts`
+ * extensions). So a collision there is resolved by `reachableByKeyboard`
+ * below rather than by dropping the shortcut: pi-ui's own bind still wins
+ * the keyboard chord, but the extension's shortcut stays invocable from the
+ * `/hotkeys` dialog and the command palette, never silently unreachable.
+ */
+const shortcutKeybindings: KeybindingsConfig = {
+	...new KeybindingsManager(TUI_KEYBINDINGS).getResolvedBindings(),
+	...reservedAppKeybindings,
+};
 
 export function extensionShortcutKeybindings(): KeybindingsConfig {
 	return shortcutKeybindings;
