@@ -1,3 +1,4 @@
+import type { JsonValue } from "../../utils/json-types.ts";
 import {
 	booleanField,
 	readActionSignals,
@@ -27,6 +28,23 @@ export const extensionUiRoutes = {
 				stringField(signals, "extensionResponse"),
 				booleanField(signals, "extensionCancelled", { optional: true }),
 			);
+			return datastarResponse();
+		},
+	},
+	[endpoints.extensionUiAction]: {
+		POST: async (request, context) => {
+			const signals = await readActionSignals(request);
+			// SAFETY: `value` is an arbitrary extension-defined JSON payload (a
+			// form's collected field values, a roster row id, or nothing).
+			// Datastar has already parsed the request body into JSON values, so
+			// this narrows the wire type (`Jsonifiable`, which also permits a
+			// nested `undefined`) to the domain type this route forwards.
+			const value = signals.value as JsonValue | undefined;
+			await requireHost(context).dispatchExtensionUiAction({
+				elementId: requiredString(signals, "elementId"),
+				actionId: requiredString(signals, "actionId"),
+				value,
+			});
 			return datastarResponse();
 		},
 	},
