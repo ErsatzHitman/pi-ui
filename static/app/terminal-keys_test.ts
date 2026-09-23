@@ -273,11 +273,16 @@ test("focus returns to the prompt when a focused overlay or inline surface unmou
 			return null;
 		}
 	}
+	interface FakeDocument {
+		body: object;
+		activeElement: object;
+		getElementById(id: string): { focus(): void } | null;
+	}
 	let focused = 0;
 	const body = {};
-	const fakeDocument = {
+	const fakeDocument: FakeDocument = {
 		body,
-		activeElement: body as unknown,
+		activeElement: body,
 		getElementById: (id: string) =>
 			id === "prompt-input" ? { focus: () => (focused += 1) } : null,
 	};
