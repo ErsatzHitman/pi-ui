@@ -165,10 +165,20 @@ function ensureProbe() {
 	return probe;
 }
 
+function inlinePadding(element) {
+	const style = getComputedStyle(element);
+	return (
+		(Number.parseFloat(style.paddingInlineStart) || 0) +
+		(Number.parseFloat(style.paddingInlineEnd) || 0)
+	);
+}
+
 function measureCell() {
 	const element = ensureProbe();
 	const rect = element.getBoundingClientRect();
-	const width = rect.width / 20;
+	// The probe shares `.terminal-surface-body`'s padding; measure its content box only,
+	// or every cell reads ~padding/20 px too wide and grids fit ~10% short of the pane.
+	const width = (rect.width - inlinePadding(element)) / 20;
 	const height =
 		rect.height || Number.parseFloat(getComputedStyle(element).lineHeight) || 0;
 	if (!width || !height) return undefined;
@@ -232,9 +242,12 @@ function sendResize(surfaceId, grid) {
 	const cell = measureCell();
 	if (!cell) return;
 	const rect = grid.getBoundingClientRect();
-	const cols = Math.max(20, Math.floor(rect.width / cell.width));
-	const rows = Math.max(3, Math.floor(rect.height / cell.height));
 	const body = grid.querySelector(bodySelector);
+	// The body's client box (inside its border and any scrollbar, minus padding) is
+	// what lines actually get; the grid's border box over-fits by a column on phones.
+	const available = body ? body.clientWidth - inlinePadding(body) : rect.width;
+	const cols = Math.max(20, Math.floor(available / cell.width));
+	const rows = Math.max(3, Math.floor(rect.height / cell.height));
 	const previousCols = Number(body?.dataset.cols);
 	const previousRows = Number(body?.dataset.rows);
 	if (cols === previousCols && rows === previousRows) return;

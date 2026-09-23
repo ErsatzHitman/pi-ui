@@ -179,12 +179,12 @@
 
 	/* --- Persistent (widget/footer/header) surfaces above/below the editor --- */
 
+	/* No chrome of its own: the grid already carries the code-block frame
+	   (border + --surface-code), and a tinted wrapper around it read as a box
+	   inside a box next to the single-frame PIUI cards in the same prompt box. */
 	.terminal-surface {
 		display: grid;
 		gap: 0.25rem;
-		border-radius: var(--radius-md);
-		background: var(--surface-muted);
-		padding: 0.5rem 0.625rem;
 	}
 	.terminal-surface-title {
 		color: var(--text-muted);
