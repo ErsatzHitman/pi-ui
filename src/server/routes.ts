@@ -2,6 +2,7 @@ import type { RouteMap } from "./route.ts";
 import { assetRoutes } from "./routes/assets.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { codeThemeRoutes } from "./routes/code-theme.ts";
+import { commandRoutes } from "./routes/commands.ts";
 import type { RouteContext } from "./routes/context.ts";
 import { displayPreferenceRoutes } from "./routes/display-preferences.ts";
 import { displayRefreshRoutes } from "./routes/display-refresh.ts";
@@ -38,4 +39,5 @@ export const appRoutes: RouteMap<RouteContext> = {
 	...llamaRoutes,
 	...treeRoutes,
 	...fileRoutes,
+	...commandRoutes,
 };

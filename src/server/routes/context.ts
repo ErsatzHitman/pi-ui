@@ -15,6 +15,7 @@ export type RouteRuntime = Pick<
 	| "cycleThinkingLevel"
 	| "deleteSession"
 	| "forkSessionToWorkspace"
+	| "getArgumentCompletions"
 	| "getWorkspacePath"
 	| "listSessions"
 	| "logout"
