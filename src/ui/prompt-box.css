@@ -31,18 +31,6 @@
 
 	.prompt-picker-popover {
 		align-self: stretch;
-
-		/*
-		 * O2: sized to fit above the prompt box even in the worst case, not just capped to
-		 * something arbitrary — the popover grows upward from wherever the prompt box's top
-		 * edge lands, and with a full PIUI strip (`#piui-widgets`'s own 28dvh/16rem cap) and
-		 * maxed-out persistent terminal surfaces (`#terminal-surface-persistent`'s 30dvh/18rem
-		 * cap) stacked above the editor, well over half of a short desktop viewport is already
-		 * spoken for before the popover gets a say; `.picker-list`'s own 18rem is too tall to
-		 * reliably fit in what's left. Still internally scrollable for longer lists.
-		 */
-		max-height: min(22dvh, 12rem);
-		overflow-y: auto;
 		margin-block-end: 0.5rem;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-md);
@@ -51,6 +39,17 @@
 		color: var(--text);
 		box-shadow: var(--shadow-md);
 		pointer-events: auto;
+	}
+
+	/*
+	 * O2: the picker popover grows upward from the prompt box's top edge. When PIUI widgets or
+	 * terminal surfaces already stack inside the prompt box (each capped in
+	 * pi-ui-elements.css / terminal-surface.css), a short desktop viewport doesn't have room
+	 * for `.picker-list`'s default 18rem above them, so the list — the one scroll container —
+	 * gets a tighter, viewport-relative cap only in that case.
+	 */
+	.prompt-box:has(.piui-element, .terminal-surface-grid) .picker-list {
+		max-height: min(22dvh, 12rem);
 	}
 
 	.prompt-attachments {
