@@ -505,6 +505,31 @@ test("host-dependent actions return 503 when runtime is absent", async () => {
 	assertEquals(response.status, 503);
 });
 
+test("clearing the Live Workspace activity log delegates to the runtime", async () => {
+	let cleared = 0;
+	const context = fakeContext({
+		host: fakeHost({ clearLiveWorkspaceActivity: () => (cleared += 1) }),
+	});
+	const response = await createRouter(context).fetch(
+		new Request("http://localhost/live-workspace/clear-activity", {
+			method: "POST",
+		}),
+	);
+	assertEquals(response.status, 204);
+	assertEquals(cleared, 1);
+});
+
+test("clearing the Live Workspace activity log returns 503 when runtime is absent", async () => {
+	const context = fakeContext();
+	context.resources.host = undefined;
+	const response = await createRouter(context).fetch(
+		new Request("http://localhost/live-workspace/clear-activity", {
+			method: "POST",
+		}),
+	);
+	assertEquals(response.status, 503);
+});
+
 test("file imports report content-detected image MIME types", async () => {
 	const tempDir = await makeTempDir({ prefix: "pi-ui-image-mime-test-" });
 	const path = `${tempDir}/screenshot.bin`;
@@ -1010,6 +1035,7 @@ function fakeHost(overrides: Partial<RuntimeResource> = {}): RuntimeResource {
 	return {
 		abort: async () => {},
 		abortBackgroundSession: async () => true,
+		clearLiveWorkspaceActivity: () => {},
 		closeAuth: () => {},
 		closeLlama: () => {},
 		cycleModel: async () => true,

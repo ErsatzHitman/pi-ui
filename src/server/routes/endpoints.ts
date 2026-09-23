@@ -54,6 +54,8 @@ export const endpoints = {
 	workspaceReviewHistory: "/workspace/review/history",
 	workspaceReviewPreferences: "/workspace/review/preferences",
 	workspaceReviewSubmit: "/workspace/review/submit",
+	liveWorkspacePreferences: "/live-workspace/preferences",
+	liveWorkspaceClearActivity: "/live-workspace/clear-activity",
 	model: "/model",
 	modelCycle: "/model/cycle",
 	modelsRefresh: "/models/refresh",

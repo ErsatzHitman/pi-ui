@@ -8,6 +8,7 @@ import { SessionTransitionController } from "../agent/session-transition-control
 import { defaultCodeThemes, validCodeThemes } from "../code-themes.ts";
 import { defaultFonts, setActiveFonts, validFonts } from "../fonts.ts";
 import { parseKeybindOverrides, setActiveKeybinds } from "../keybinds.ts";
+import { normalizeLiveWorkspacePreferences } from "../live-workspace-types.ts";
 import { setActiveCodeTheme } from "../pierre-theme.ts";
 import {
 	normalizeSessionSidebarPreferences,
@@ -39,6 +40,9 @@ export async function createApp() {
 	const workspaceReviewPreferences = normalizeWorkspaceReviewPreferences(
 		appConfig.gitView,
 	);
+	const liveWorkspacePreferences = normalizeLiveWorkspacePreferences(
+		appConfig.liveWorkspace,
+	);
 	const sessionSidebar = normalizeSessionSidebarPreferences(appConfig.sessionSidebar);
 	setActiveCodeTheme(codeTheme);
 	setActiveFonts(fonts);
@@ -50,6 +54,7 @@ export async function createApp() {
 		});
 	}
 	store.setWorkspaceReviewPreferences(workspaceReviewPreferences);
+	store.setLiveWorkspacePreferences(liveWorkspacePreferences);
 	const sessionImages = new SessionImageStore();
 	const renderer = new UiRenderer(store, new DatastarClientHub(), {
 		registerImage: (image) => sessionImages.register(image),

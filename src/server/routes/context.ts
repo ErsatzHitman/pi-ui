@@ -9,6 +9,7 @@ export type RouteRuntime = Pick<
 	RuntimeController,
 	| "abort"
 	| "abortBackgroundSession"
+	| "clearLiveWorkspaceActivity"
 	| "closeAuth"
 	| "closeLlama"
 	| "cycleModel"
