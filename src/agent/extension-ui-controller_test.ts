@@ -458,3 +458,13 @@ test("onTerminalInput listeners see terminal-surface input first and may rewrite
 	assertEquals(await result, "closed");
 	unsubscribe();
 });
+
+test("ExtensionUiController strips ANSI styling from extension notices", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	ui.notify("\u001b[1mRTK\u001b[0m: \u001b[32mON\u001b[0m", "info");
+
+	assertEquals(store.snapshot().messages.at(-1)?.text, "RTK: ON");
+});

@@ -27,6 +27,7 @@ import {
 	type CustomComponentFactory,
 } from "./terminal-surface/terminal-surface-controller.ts";
 import type { TerminalSurfaceColorScheme } from "./terminal-surface/theme.ts";
+import { stripAnsi } from "./tool-presentation.ts";
 
 const defaultWorkingVisible = true;
 
@@ -475,7 +476,10 @@ export class ExtensionUiController {
 		// Each level gets its own status-dot color and screen-reader prefix in the
 		// transcript (renderSystemMessage) instead of every notice reading
 		// "Warning: …" regardless of severity — see r1-audit #24.
-		this.store.appendMessage("notice", message, { noticeTone: type });
+		// Extensions written for the TUI often style notices with ANSI SGR codes (e.g. pi-rtk's
+		// status line); the transcript renders plain text, so drop the escapes instead of
+		// showing them as raw control characters.
+		this.store.appendMessage("notice", stripAnsi(message), { noticeTone: type });
 	}
 
 	private select(
