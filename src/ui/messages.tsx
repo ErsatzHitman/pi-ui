@@ -604,6 +604,11 @@ function renderSystemMessage(message: AppMessage): string {
 	// notices, e.g. "Usage: /name <title>") default to "warning", matching
 	// their look before this field was introduced.
 	const tone = noticeToneLabels[message.noticeTone ?? "warning"];
+	// Notices read as chat prose, not tool output: the body font unless the
+	// sender explicitly asked for preformatted text (`format: "pre"`, e.g.
+	// /session's stat block) — bold monospace on every notice clashed with the
+	// rest of the transcript (r2-audit m11).
+	const isPre = message.format === "pre";
 	return syncHtml(
 		<article
 			class={[
@@ -619,8 +624,14 @@ function renderSystemMessage(message: AppMessage): string {
 					<span class={`tool-status-ball ${tone.className}`} />
 				</span>
 			)}
-			<p class={["message-system-text", hasStatus && "tool-header"]}>
-				<span class={hasStatus ? "tool-title" : undefined}>
+			<p
+				class={[
+					"message-system-text",
+					hasStatus && "notice-header",
+					isPre && "notice-pre",
+				]}
+			>
+				<span class={hasStatus ? "notice-title" : undefined}>
 					{hasStatus && <span class="sr-only">{tone.prefix}</span>}
 					{message.title ? (
 						<>
@@ -688,7 +699,11 @@ function renderContextMessage(message: AppMessage): string {
 			]}
 			data-message-id={message.id}
 		>
-			<details class="context-details" data-preserve-attr="open">
+			{/* Custom messages are a command's own output (memory-info, rtk-status, …) —
+			the extension already opted in by setting `display`, so the point of the
+			message is to be read, not hidden behind a click (r2-audit M2). Compaction
+			and skill/summary context stay collapsed by default, as before. */}
+			<details class="context-details" data-preserve-attr="open" open={isCustom}>
 				<summary class="context-summary">
 					<span class="tool-state-dot status-dot" aria-hidden="true">
 						<span class="tool-status-ball tool-status-success" />

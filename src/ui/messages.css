@@ -449,6 +449,25 @@
 		white-space: pre-wrap;
 	}
 
+	/* Notice prose reads like chat, not like a tool card: body font at chat size,
+	   switching to the code font only when the sender asked for preformatted text
+	   (`format: "pre"`, e.g. /session's stat block). See renderSystemMessage. */
+	.notice-header {
+		display: flex;
+		min-height: 1.125rem;
+		align-items: flex-start;
+		gap: 0.5rem;
+		font: var(--text-base)/1.5 var(--font-sans);
+	}
+	.notice-title {
+		min-width: 0;
+		flex: 1;
+		font-weight: 500;
+	}
+	.notice-pre {
+		font: var(--text-base)/1.125rem var(--font-mono);
+	}
+
 	.context-summary {
 		display: flex;
 		min-height: 1.125rem;
