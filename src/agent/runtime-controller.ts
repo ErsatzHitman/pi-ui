@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { basename, extname, isAbsolute, resolve as resolvePath } from "node:path";
 
 import {
@@ -577,6 +578,7 @@ export class RuntimeController {
 			this.state.appendMessage(
 				"notice",
 				`Current thinking level: ${this.state.thinkingLevel}\nAvailable: ${available}`,
+				{ noticeTone: "info" },
 			);
 			return;
 		}
@@ -629,7 +631,10 @@ export class RuntimeController {
 			`Tokens: ${stats.tokens.input} in, ${stats.tokens.output} out, ${stats.tokens.cacheRead} cache read, ${stats.tokens.cacheWrite} cache write`,
 			`Cost: $${stats.cost.toFixed(4)}`,
 		];
-		this.state.appendMessage("notice", lines.join("\n"), { format: "pre" });
+		this.state.appendMessage("notice", lines.join("\n"), {
+			format: "pre",
+			noticeTone: "info",
+		});
 	}
 
 	private showChangelog(): void {
@@ -674,6 +679,7 @@ export class RuntimeController {
 			this.state.appendMessage(
 				"notice",
 				`Failed to save project trust: ${errorMessage(error)}`,
+				{ noticeTone: "error" },
 			);
 		}
 	}
@@ -727,6 +733,7 @@ export class RuntimeController {
 			this.state.appendMessage(
 				"notice",
 				`Failed to export session: ${errorMessage(error)}`,
+				{ noticeTone: "error" },
 			);
 		}
 	}
@@ -739,6 +746,17 @@ export class RuntimeController {
 		}
 		const cwd = this.runtime.session.sessionManager.getCwd();
 		const path = isAbsolute(trimmed) ? trimmed : resolvePath(cwd, trimmed);
+		// SessionManager.open() never fails for a missing path: it starts a brand-new session
+		// file there, in the server's own cwd, and resuming that would silently switch the
+		// workspace. Only import a file that actually exists.
+		if (!statSync(path, { throwIfNoEntry: false })?.isFile()) {
+			this.state.appendMessage(
+				"notice",
+				`No session file at ${formatHomePath(path)}`,
+				{ noticeTone: "error" },
+			);
+			return;
+		}
 		try {
 			const manager = this.dependencies.openSessionManager(path, this.sessionDir);
 			const target = manager.getSessionFile();
@@ -746,6 +764,7 @@ export class RuntimeController {
 				this.state.appendMessage(
 					"notice",
 					`Could not read session file: ${formatHomePath(path)}`,
+					{ noticeTone: "error" },
 				);
 				return;
 			}
@@ -754,12 +773,14 @@ export class RuntimeController {
 				this.state.appendMessage(
 					"notice",
 					`Failed to import session: ${formatHomePath(path)}`,
+					{ noticeTone: "error" },
 				);
 			}
 		} catch (error) {
 			this.state.appendMessage(
 				"notice",
 				`Failed to import session: ${errorMessage(error)}`,
+				{ noticeTone: "error" },
 			);
 		}
 	}
@@ -1302,9 +1323,17 @@ export class RuntimeController {
 
 		this.state.setActivityText("Reloading...");
 		try {
-			await session.reload();
+			// `session.reload()` re-runs every extension's `session_start`, which re-mounts its
+			// statuses, widgets, footer and header through the still-bound UI context. Clear the
+			// previous extension UI just before that happens: clearing it afterwards (as
+			// unbindSession() does) would wipe everything the reloaded extensions just set.
+			await session.reload({
+				beforeSessionStart: () => {
+					if (runtime === this.runtime) this.extensionUi.cancelAll();
+				},
+			});
 			if (runtime !== this.runtime) return false;
-			this.unbindSession();
+			this.unbindSession({ cancelExtensionUi: false });
 			this.bindSessionState();
 			this.loadCurrentSessionMessages();
 			this.state.appendMessage(
@@ -1818,8 +1847,8 @@ export class RuntimeController {
 		this.bindSessionState(options);
 	}
 
-	private unbindSession(): void {
-		this.extensionUi.cancelAll();
+	private unbindSession(options: { cancelExtensionUi?: boolean } = {}): void {
+		if (options.cancelExtensionUi ?? true) this.extensionUi.cancelAll();
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
 		this.usage.suspend();

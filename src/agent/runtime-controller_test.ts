@@ -1,4 +1,6 @@
 import { test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type {
 	AgentSessionEvent,
@@ -148,9 +150,13 @@ function fakeRuntime(
 			return Promise.resolve();
 		},
 		waitForIdle: () => Promise.resolve(),
-		reload: () => {
+		reload: async (options?: { beforeSessionStart?: () => void | Promise<void> }) => {
 			fake.reloadCount += 1;
-			return Promise.resolve();
+			await options?.beforeSessionStart?.();
+			// Like the SDK, reloaded extensions re-run `session_start` through the bound UI context.
+			fake.extensionBindings
+				.at(-1)
+				?.uiContext?.setStatus("reloaded", "after reload");
 		},
 		compact: () => compact(),
 		abort: () => {
@@ -721,6 +727,19 @@ test("RuntimeController reloads resources without sending the command to the mod
 		state.slashCommands.some((command) => command.name === "reload"),
 		true,
 	);
+	await controller.dispose();
+});
+
+test("RuntimeController keeps extension UI that reloaded extensions set during /reload", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+	fake.extensionBindings.at(-1)?.uiContext?.setStatus("stale", "before reload");
+
+	assertEquals(await controller.prompt("/reload"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(state.extensionStatuses, [{ key: "reloaded", text: "after reload" }]);
 	await controller.dispose();
 });
 
@@ -1559,6 +1578,21 @@ test("RuntimeController requires a path for /import without prompting the model"
 
 	assertEquals(fake.promptInputs, []);
 	assertEquals(state.messages.at(-1)?.text, "Usage: /import <path to .jsonl file>");
+	await controller.dispose();
+});
+
+test("RuntimeController rejects /import of a missing file instead of starting a new session there", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+	const missing = join(tmpdir(), `pi-ui-missing-${crypto.randomUUID()}.jsonl`);
+
+	assertEquals(await controller.prompt(`/import ${missing}`), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(fake.promptInputs, []);
+	assertEquals(state.currentSessionPath, "/sessions/a.jsonl");
+	assertEquals(state.messages.at(-1)?.noticeTone, "error");
 	await controller.dispose();
 });
 
