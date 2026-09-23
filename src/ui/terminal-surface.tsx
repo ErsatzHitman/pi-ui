@@ -137,8 +137,7 @@ const knownAnchors = new Set([
  * Options are sanitized to finite numbers and `N%` strings by the controller before they get
  * here. pi-tui resolves a percentage against the whole terminal, which here is the viewport
  * (`percentUnit`): as a CSS percentage it would resolve against the fit-content dialog itself,
- * which is circular, so a `width: "92%"` overlay collapsed to its min-width and a
- * `maxHeight: "85%"` capped nothing.
+ * which is circular, so a `maxHeight: "85%"` capped nothing.
  */
 function sizeValue(
 	value: number | string | undefined,
@@ -156,14 +155,28 @@ function sizeValue(
  * properties `terminal-surface.css` reads — a best-effort approximation of
  * pi-tui's cell-based overlay layout using the same `ch`/`lh` units the
  * cell grid itself is sized with, not pixel-perfect terminal math.
+ *
+ * `width` is sized from `resolvedWidth` — the column count
+ * `TerminalSurfaceController` (mirroring pi-tui's own `resolveOverlayLayout`)
+ * actually rendered the component at — rather than re-deriving a box width
+ * from the raw `options.width` here. A `width: "N%"` option is *already*
+ * resolved against the client-reported terminal size once, server-side
+ * (`tui-shim.ts`'s `#resolveOverlayWidth`); converting that same percentage
+ * straight to `Nvw` here applied it a *second* time, since `terminal-keys.js`
+ * measures the resulting dialog to report the next terminal size — a 92%
+ * overlay converged to ~92% of its own already-92%-wide box, leaving an
+ * ~8% gap on the right that never closed (F4). Sizing from the already-
+ * resolved column count instead always fits exactly, whatever the option.
  */
 function overlayStyleVars(
 	options: TerminalSurfaceOverlayOptions | undefined,
+	resolvedWidth: number,
 ): string | undefined {
 	if (!options) return undefined;
 	const decls: string[] = [];
-	const width = sizeValue(options.width, "ch", "vw");
-	if (width) decls.push(`--terminal-overlay-width:${width}`);
+	if (options.width !== undefined) {
+		decls.push(`--terminal-overlay-width:${resolvedWidth}ch`);
+	}
 	if (options.minWidth !== undefined) {
 		decls.push(`--terminal-overlay-min-width:${options.minWidth}ch`);
 	}
@@ -193,7 +206,7 @@ function renderTerminalSurfaceDialog(surface: TerminalSurface): string {
 			data-preserve-attr="open"
 			data-nonblocking={nonCapturing ? "true" : undefined}
 			data-anchor={anchor}
-			style={overlayStyleVars(options)}
+			style={overlayStyleVars(options, surface.width)}
 			data-on:close={`@post('${endpoints.terminalSurfaceInput}', { payload: { surfaceId: ${JSON.stringify(surface.id)}, data: '\\u001b' } })`}
 		>
 			{/* The dialog's single child is its panel (shared `.dialog > *` chrome); the panel is
@@ -234,11 +247,18 @@ function renderTerminalSurfaceBody(surface: TerminalSurface): string {
 		? `--terminal-cursor-row:${cursor.row};--terminal-cursor-col:${cursor.column}`
 		: undefined;
 	const label = surface.title ?? "Terminal panel";
+	// See `overlayStyleVars`: the dialog is now sized to exactly fit `surface.width`, so
+	// re-measuring the grid itself as the reference for the *next* percentage resolution
+	// would just feed the previous answer back in, shrinking a `N%` overlay further on every
+	// resize pass. `terminal-keys.js` reads this flag to measure the viewport instead.
+	const percentWidth =
+		surface.kind === "overlay" && isString(surface.overlayOptions?.width);
 	return syncHtml(
 		<div
 			class="terminal-surface-grid"
 			data-terminal-surface-grid={surface.id}
 			data-terminal-surface-kind={surface.kind}
+			data-terminal-surface-percent-width={percentWidth ? "true" : undefined}
 			role="group"
 			aria-label={label}
 		>

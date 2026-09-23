@@ -72,6 +72,17 @@
 		width: var(--terminal-overlay-width, min(44rem, calc(100vw - 2rem)));
 		min-width: var(--terminal-overlay-min-width, min(20rem, calc(100vw - 2rem)));
 		max-height: var(--terminal-overlay-max-height, min(70dvh, 32rem));
+
+		/* `width`/`min-width` above are in `ch`/`lh` — CSS resolves those units against
+		   THIS element's own font, not its `.terminal-surface-body` descendant's. Left at the
+		   inherited `.dialog > *` font (proportional sans-serif, `--text-base`), a `147ch` box
+		   sized itself against a completely unrelated glyph width, so the monospace grid it
+		   wrapped no longer fit inside it (F4 follow-up: a residual horizontal scrollbar even
+		   after `overlayStyleVars` stopped double-applying a percentage). Matching
+		   `.terminal-surface-body`'s font here makes `ch` mean the same cell width the actual
+		   text renders at. */
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
 	}
 
 	.terminal-surface-dialog-content > header h2 {
@@ -123,9 +134,12 @@
 	   are exactly what the component rendered — never padded to the full terminal height (see
 	   `terminal-surface.tsx`) — so a fixed height left blank space under a short component
 	   (O7); size to content instead, still capped so a tall one (an editor, a long list) fits
-	   the viewport. `min-height` above keeps a near-empty component from collapsing to nothing. */
+	   the viewport. The base rule's 6rem floor is sized for an overlay dialog, not a one-line
+	   inline component — left in place it re-created O7's gap under a single-line component
+	   (F4), so this uses the same small floor as widget/footer/header below. */
 	.terminal-surface-inline .terminal-surface-grid {
 		height: auto;
+		min-height: 2rem;
 		max-height: min(60dvh, 24rem);
 	}
 	.terminal-surface-widget .terminal-surface-grid,

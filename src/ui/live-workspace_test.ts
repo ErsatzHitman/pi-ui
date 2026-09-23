@@ -344,7 +344,10 @@ test("the extensions tab reuses the shared PIUI renderer and links sheets to the
 	});
 	assertStringIncludes(html, 'class="piui-element piui-element-roster"');
 	assertStringIncludes(html, "Fleet");
-	assertStringIncludes(html, 'commandfor="piui-sheet-workflow-review"');
+	assertStringIncludes(html, "getElementById(&#34;piui-sheet-workflow-review&#34;)");
+	// The Open button guards against re-invoking showModal() on an already-open dialog (F3),
+	// rather than using an unguarded `command=\"show-modal\"` invoker.
+	assertStringIncludes(html, "if (dialog && !dialog.open) dialog.showModal();");
 	assertStringIncludes(html, "Review plan");
 	// The sheet's own <dialog> lives in #piui-sheets; the tab must not duplicate it.
 	assertFalse(html.includes("<dialog"));
