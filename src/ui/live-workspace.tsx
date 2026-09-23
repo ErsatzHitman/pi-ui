@@ -208,7 +208,91 @@ export function renderLiveWorkspace(
 	);
 }
 
-/** The patchable data region; also re-rendered wholesale on a fresh `/stream` connection. */
+/**
+ * The patchable data region, split into one standalone fragment per tab (each keeps the
+ * `id` it always had) so `UiRenderer` can patch only the tab(s) whose underlying state
+ * actually changed instead of re-rendering and re-sending all five on every Live Workspace
+ * commit (round-2 audit A#13) — active tools, agents and activity change far more often
+ * than usage or the extensions roster. `renderLiveWorkspaceData` composes all five for a
+ * fresh `/stream` connection, where the whole pane is sent at once regardless.
+ */
+export function renderLiveWorkspaceNowSection(
+	snapshot: LiveWorkspaceSnapshot,
+	tab: LiveWorkspaceTab,
+): string {
+	return syncHtml(
+		<section
+			id="live-workspace-now"
+			aria-label="Now"
+			data-show="($liveWorkspacePreferences.tab || 'now') === 'now'"
+			style={tab === "now" ? undefined : "display: none"}
+		>
+			{renderNowTab(snapshot)}
+		</section>,
+	);
+}
+export function renderLiveWorkspaceAgentsSection(
+	snapshot: LiveWorkspaceSnapshot,
+	tab: LiveWorkspaceTab,
+): string {
+	return syncHtml(
+		<section
+			id="live-workspace-agents"
+			aria-label="Agents"
+			data-show="$liveWorkspacePreferences.tab === 'agents'"
+			style={tab === "agents" ? undefined : "display: none"}
+		>
+			{renderAgentsTab(snapshot)}
+		</section>,
+	);
+}
+export function renderLiveWorkspaceUsageSection(
+	usage: AppUsage,
+	tab: LiveWorkspaceTab,
+): string {
+	return syncHtml(
+		<section
+			id="live-workspace-usage"
+			aria-label="Usage"
+			data-show="$liveWorkspacePreferences.tab === 'usage'"
+			style={tab === "usage" ? undefined : "display: none"}
+		>
+			{renderUsageTab(usage)}
+		</section>,
+	);
+}
+export function renderLiveWorkspaceActivitySection(
+	snapshot: LiveWorkspaceSnapshot,
+	tab: LiveWorkspaceTab,
+): string {
+	return syncHtml(
+		<section
+			id="live-workspace-activity"
+			aria-label="Activity"
+			data-show="$liveWorkspacePreferences.tab === 'activity'"
+			style={tab === "activity" ? undefined : "display: none"}
+		>
+			{renderActivityTab(snapshot)}
+		</section>,
+	);
+}
+export function renderLiveWorkspaceExtensionsSection(
+	extensions: LiveWorkspaceExtensions,
+	tab: LiveWorkspaceTab,
+): string {
+	return syncHtml(
+		<section
+			id="live-workspace-extensions"
+			aria-label="Extensions"
+			data-show="$liveWorkspacePreferences.tab === 'extensions'"
+			style={tab === "extensions" ? undefined : "display: none"}
+		>
+			{renderExtensionsTab(extensions)}
+		</section>,
+	);
+}
+
+/** All five tabs, composed for a fresh `/stream` connection's one-time full render. */
 export function renderLiveWorkspaceData(
 	snapshot: LiveWorkspaceSnapshot,
 	preferences: LiveWorkspacePreferences,
@@ -216,49 +300,12 @@ export function renderLiveWorkspaceData(
 	extensions: LiveWorkspaceExtensions = noExtensions,
 ): string {
 	const tab = preferences.tab ?? "now";
-	return syncHtml(
-		<div id="live-workspace-data">
-			<section
-				id="live-workspace-now"
-				aria-label="Now"
-				data-show="($liveWorkspacePreferences.tab || 'now') === 'now'"
-				style={tab === "now" ? undefined : "display: none"}
-			>
-				{renderNowTab(snapshot)}
-			</section>
-			<section
-				id="live-workspace-agents"
-				aria-label="Agents"
-				data-show="$liveWorkspacePreferences.tab === 'agents'"
-				style={tab === "agents" ? undefined : "display: none"}
-			>
-				{renderAgentsTab(snapshot)}
-			</section>
-			<section
-				id="live-workspace-usage"
-				aria-label="Usage"
-				data-show="$liveWorkspacePreferences.tab === 'usage'"
-				style={tab === "usage" ? undefined : "display: none"}
-			>
-				{renderUsageTab(usage)}
-			</section>
-			<section
-				id="live-workspace-activity"
-				aria-label="Activity"
-				data-show="$liveWorkspacePreferences.tab === 'activity'"
-				style={tab === "activity" ? undefined : "display: none"}
-			>
-				{renderActivityTab(snapshot)}
-			</section>
-			<section
-				id="live-workspace-extensions"
-				aria-label="Extensions"
-				data-show="$liveWorkspacePreferences.tab === 'extensions'"
-				style={tab === "extensions" ? undefined : "display: none"}
-			>
-				{renderExtensionsTab(extensions)}
-			</section>
-		</div>,
+	return (
+		renderLiveWorkspaceNowSection(snapshot, tab) +
+		renderLiveWorkspaceAgentsSection(snapshot, tab) +
+		renderLiveWorkspaceUsageSection(usage, tab) +
+		renderLiveWorkspaceActivitySection(snapshot, tab) +
+		renderLiveWorkspaceExtensionsSection(extensions, tab)
 	);
 }
 

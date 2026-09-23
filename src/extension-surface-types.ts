@@ -104,3 +104,16 @@ export function isPiUiSheetElement(element: Pick<PiUiElement, "placement">): boo
 export function piUiDialogId(element: Pick<PiUiElement, "id" | "ns">): string {
 	return `piui-sheet-${piUiSlug(element.ns)}-${piUiSlug(element.id)}`;
 }
+
+/**
+ * `localStorage` key a browser tab uses to remember that it dismissed a `sheet`/`screen`
+ * element (Esc, backdrop, Close) — shared between the sheet's `close` handler (which writes
+ * the element's current `revision`) and the initial-connect script that decides whether to
+ * auto-`showModal()` it (which skips the sheet when the stored revision still matches, i.e.
+ * the extension hasn't pushed a newer version since). A `durable` sheet that the extension
+ * never removes would otherwise reopen on every reload/reconnect even after the user closed
+ * it (round-2 audit A#16). Single source of truth so the two call sites can't drift apart.
+ */
+export function piUiDismissedStorageKey(element: Pick<PiUiElement, "id" | "ns">): string {
+	return `piui-dismissed-${piUiDialogId(element)}`;
+}

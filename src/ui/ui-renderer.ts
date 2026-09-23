@@ -1,3 +1,9 @@
+import {
+	isPiUiSheetElement,
+	type PiUiElement,
+	piUiDialogId,
+	piUiDismissedStorageKey,
+} from "../extension-surface-types.ts";
 import { DatastarClientHub } from "../server/datastar-client-hub.ts";
 import type {
 	AppStateSnapshot,
@@ -13,14 +19,21 @@ import { renderDebugOverlay } from "./debug.tsx";
 import { DisplayRefreshClients } from "./display-refresh-clients.ts";
 import { renderExtensionDialogContent } from "./extension-dialog.tsx";
 import { renderExtensionWidgets } from "./extension-widgets.tsx";
-import { renderLiveWorkspaceData } from "./live-workspace.tsx";
+import {
+	renderLiveWorkspaceActivitySection,
+	renderLiveWorkspaceAgentsSection,
+	renderLiveWorkspaceData,
+	renderLiveWorkspaceExtensionsSection,
+	renderLiveWorkspaceNowSection,
+	renderLiveWorkspaceUsageSection,
+} from "./live-workspace.tsx";
 import { renderLlamaDialogContent } from "./llama-dialog.tsx";
 import {
 	MessageRenderService,
 	type MessageRenderServiceOptions,
 } from "./message-render-service.ts";
 import { renderMessages } from "./messages.tsx";
-import { piUiSheetIds, renderPiUiSheets, renderPiUiWidgets } from "./pi-ui-elements.tsx";
+import { renderPiUiSheets, renderPiUiWidgets } from "./pi-ui-elements.tsx";
 import {
 	renderSessionPickerContent,
 	renderSlashPicker,
@@ -55,7 +68,13 @@ type DirtyRegions = {
 	sessions: boolean;
 	sessionSidebar: boolean;
 	workspaceReview: boolean;
-	liveWorkspace: boolean;
+	extensionElements: boolean;
+	terminalSurfaces: boolean;
+	liveWorkspaceNow: boolean;
+	liveWorkspaceAgents: boolean;
+	liveWorkspaceUsage: boolean;
+	liveWorkspaceActivity: boolean;
+	liveWorkspaceExtensions: boolean;
 };
 
 export class UiRenderer implements AppStorePresentation {
@@ -70,7 +89,13 @@ export class UiRenderer implements AppStorePresentation {
 	private sessionsDirty = false;
 	private sessionSidebarDirty = false;
 	private workspaceReviewDirty = false;
-	private liveWorkspaceDirty = false;
+	private extensionElementsDirty = false;
+	private terminalSurfacesDirty = false;
+	private liveWorkspaceNowDirty = false;
+	private liveWorkspaceAgentsDirty = false;
+	private liveWorkspaceUsageDirty = false;
+	private liveWorkspaceActivityDirty = false;
+	private liveWorkspaceExtensionsDirty = false;
 	private replaceTranscriptOnCommit = false;
 
 	constructor(
@@ -164,13 +189,25 @@ export class UiRenderer implements AppStorePresentation {
 			sessions: this.sessionsDirty,
 			sessionSidebar: this.sessionSidebarDirty,
 			workspaceReview: this.workspaceReviewDirty,
-			liveWorkspace: this.liveWorkspaceDirty,
+			extensionElements: this.extensionElementsDirty,
+			terminalSurfaces: this.terminalSurfacesDirty,
+			liveWorkspaceNow: this.liveWorkspaceNowDirty,
+			liveWorkspaceAgents: this.liveWorkspaceAgentsDirty,
+			liveWorkspaceUsage: this.liveWorkspaceUsageDirty,
+			liveWorkspaceActivity: this.liveWorkspaceActivityDirty,
+			liveWorkspaceExtensions: this.liveWorkspaceExtensionsDirty,
 		};
 		this.pickersDirty = false;
 		this.sessionsDirty = false;
 		this.sessionSidebarDirty = false;
 		this.workspaceReviewDirty = false;
-		this.liveWorkspaceDirty = false;
+		this.extensionElementsDirty = false;
+		this.terminalSurfacesDirty = false;
+		this.liveWorkspaceNowDirty = false;
+		this.liveWorkspaceAgentsDirty = false;
+		this.liveWorkspaceUsageDirty = false;
+		this.liveWorkspaceActivityDirty = false;
+		this.liveWorkspaceExtensionsDirty = false;
 		if (this.hub.clientCount > 0) {
 			const state = this.store.snapshot();
 			if (this.replaceTranscriptOnCommit) {
@@ -195,6 +232,27 @@ export class UiRenderer implements AppStorePresentation {
 		effects: readonly UiCommitEffect[],
 		dirty: DirtyRegions,
 	): void {
+		if (dirty.extensionElements) {
+			// Must run before the `pickers` branch below: a freshly appeared `sheet`/
+			// `screen` element's `<dialog>` needs to already exist in the DOM before that
+			// branch's `showModal()` effect script (queued by `setExtensionElements`,
+			// which also marks `pickers` dirty) can find and open it.
+			this.hub.patchView(
+				renderPiUiWidgets(snapshot) + renderPiUiSheets(snapshot),
+				"{}",
+				[],
+			);
+		}
+		if (dirty.terminalSurfaces) {
+			// Same ordering constraint as PIUI sheets: a newly mounted `custom()` overlay's
+			// `<dialog>` must exist before the `pickers` branch's `showModal()` effect runs.
+			this.hub.patchView(
+				renderTerminalSurfacePersistent(snapshot) +
+					renderTerminalSurfaceOverlays(snapshot),
+				"{}",
+				[],
+			);
+		}
 		if (dirty.pickers) {
 			this.hub.patchView(
 				this.renderPickerElements(snapshot),
@@ -228,14 +286,44 @@ export class UiRenderer implements AppStorePresentation {
 				[],
 			);
 		}
-		if (dirty.liveWorkspace) {
+		const liveWorkspaceTab = snapshot.liveWorkspacePreferences.tab ?? "now";
+		if (dirty.liveWorkspaceNow) {
 			this.hub.patchView(
-				renderLiveWorkspaceData(
+				renderLiveWorkspaceNowSection(snapshot.liveWorkspace, liveWorkspaceTab),
+				"{}",
+				[],
+			);
+		}
+		if (dirty.liveWorkspaceAgents) {
+			this.hub.patchView(
+				renderLiveWorkspaceAgentsSection(
 					snapshot.liveWorkspace,
-					snapshot.liveWorkspacePreferences,
-					snapshot.usage,
-					snapshot,
+					liveWorkspaceTab,
 				),
+				"{}",
+				[],
+			);
+		}
+		if (dirty.liveWorkspaceUsage) {
+			this.hub.patchView(
+				renderLiveWorkspaceUsageSection(snapshot.usage, liveWorkspaceTab),
+				"{}",
+				[],
+			);
+		}
+		if (dirty.liveWorkspaceActivity) {
+			this.hub.patchView(
+				renderLiveWorkspaceActivitySection(
+					snapshot.liveWorkspace,
+					liveWorkspaceTab,
+				),
+				"{}",
+				[],
+			);
+		}
+		if (dirty.liveWorkspaceExtensions) {
+			this.hub.patchView(
+				renderLiveWorkspaceExtensionsSection(snapshot, liveWorkspaceTab),
 				"{}",
 				[],
 			);
@@ -282,8 +370,26 @@ export class UiRenderer implements AppStorePresentation {
 	workspaceReviewChanged(): void {
 		this.workspaceReviewDirty = true;
 	}
-	liveWorkspaceChanged(): void {
-		this.liveWorkspaceDirty = true;
+	extensionElementsChanged(): void {
+		this.extensionElementsDirty = true;
+	}
+	terminalSurfacesChanged(): void {
+		this.terminalSurfacesDirty = true;
+	}
+	liveWorkspaceNowChanged(): void {
+		this.liveWorkspaceNowDirty = true;
+	}
+	liveWorkspaceAgentsChanged(): void {
+		this.liveWorkspaceAgentsDirty = true;
+	}
+	liveWorkspaceUsageChanged(): void {
+		this.liveWorkspaceUsageDirty = true;
+	}
+	liveWorkspaceActivityChanged(): void {
+		this.liveWorkspaceActivityDirty = true;
+	}
+	liveWorkspaceExtensionsChanged(): void {
+		this.liveWorkspaceExtensionsDirty = true;
 	}
 	codeThemeChanged(): void {
 		if (this.hub.clientCount > 0) this.messages.codeThemeChanged();
@@ -369,6 +475,11 @@ export class UiRenderer implements AppStorePresentation {
 		);
 	}
 	private renderAppElements(snapshot: AppStateSnapshot): string {
+		// PIUI widgets/sheets (`#piui-widgets`/`#piui-sheets`) are NOT rendered here: unlike
+		// the rest of this region, they have their own dirty flag (`extensionElementsDirty`,
+		// patched in `patchDirtyRegions`) so an extension UI update doesn't force a fat morph
+		// of the toolbar/prompt status/etc. on every commit, and vice versa (round-2 audit
+		// A#11). A fresh connection still gets them once, via `renderView` below.
 		return (
 			renderPromptAction(snapshot) +
 			renderPromptQueue(snapshot) +
@@ -376,10 +487,6 @@ export class UiRenderer implements AppStorePresentation {
 			renderPromptStatus(snapshot) +
 			renderExtensionWidgets(snapshot, "aboveEditor") +
 			renderExtensionWidgets(snapshot, "belowEditor") +
-			renderPiUiWidgets(snapshot) +
-			renderPiUiSheets(snapshot) +
-			renderTerminalSurfacePersistent(snapshot) +
-			renderTerminalSurfaceOverlays(snapshot) +
 			renderPromptStart(snapshot) +
 			renderSessionTransition(snapshot) +
 			renderDebugOverlay(snapshot)
@@ -410,6 +517,10 @@ export class UiRenderer implements AppStorePresentation {
 		return {
 			elements:
 				this.renderElements(snapshot) +
+				renderPiUiWidgets(snapshot) +
+				renderPiUiSheets(snapshot) +
+				renderTerminalSurfacePersistent(snapshot) +
+				renderTerminalSurfaceOverlays(snapshot) +
 				this.renderPickerElements(snapshot) +
 				renderSessionPickerContent(snapshot) +
 				renderSessionSidebarContent(snapshot) +
@@ -479,14 +590,31 @@ export class UiRenderer implements AppStorePresentation {
 			.filter((entry) => Boolean(entry[1]))
 			.map(([id]) => id)
 			.toArray();
-		const ids: readonly string[] = [
-			...staticIds,
-			...piUiSheetIds(snapshot),
-			...terminalSurfaceOverlayIds(snapshot),
+		return [
+			...[...staticIds, ...terminalSurfaceOverlayIds(snapshot)].map(
+				(id) =>
+					`{ const dialog = document.getElementById('${id}'); if (dialog && !dialog.open) dialog.showModal(); }`,
+			),
+			...snapshot.extensionElements
+				.filter(isPiUiSheetElement)
+				.map((element) => this.piUiSheetReopenScript(element)),
 		];
-		return ids.map(
-			(id) =>
-				`{ const dialog = document.getElementById('${id}'); if (dialog && !dialog.open) dialog.showModal(); }`,
-		);
+	}
+	/**
+	 * Auto-opens a `sheet`/`screen` PIUI element on a fresh connection (reload, reconnect,
+	 * new tab) — unless this same browser previously dismissed this exact revision of it (see
+	 * `dismissAction` in pi-ui-elements.tsx and `piUiDismissedStorageKey`); a `durable` sheet
+	 * the extension never removes must stay closed instead of reopening every time (A#16).
+	 */
+	private piUiSheetReopenScript(element: PiUiElement): string {
+		const id = piUiDialogId(element);
+		const key = piUiDismissedStorageKey(element);
+		const revision = JSON.stringify(String(element.revision));
+		return `{
+			const dialog = document.getElementById('${id}');
+			let dismissedRevision;
+			try { dismissedRevision = localStorage.getItem(${JSON.stringify(key)}); } catch {}
+			if (dialog && !dialog.open && dismissedRevision !== ${revision}) dialog.showModal();
+		}`;
 	}
 }
