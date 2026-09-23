@@ -79,7 +79,17 @@ export type AppAuthDialog = {
 	error?: string;
 };
 export type AppExtensionDialog =
-	| { id: string; kind: "select"; title: string; options: readonly string[] }
+	| {
+			id: string;
+			kind: "select";
+			title: string;
+			options: readonly string[];
+			/** True when `options` already includes something that acts as its own cancel
+			 * (e.g. compact-pct's own "Cancel" row) — the renderer then skips its generic
+			 * Cancel footer instead of showing two (round-2 audit m8). Optional/falsy-default
+			 * so an existing fixture that doesn't set it keeps today's "always show" behavior. */
+			hasOwnCancel?: boolean;
+	  }
 	| { id: string; kind: "confirm"; title: string; message: string }
 	| {
 			id: string;
@@ -354,6 +364,15 @@ export class AppStore {
 	extensionElements: PiUiElement[] = [];
 	extensionChannels: ExtensionChannelSnapshot[] = [];
 	terminalSurfaces: TerminalSurface[] = [];
+	/**
+	 * The browser client's actual `prefers-color-scheme`, reported once per connection and on
+	 * change (see `pi-ui-elements.tsx`'s sheet-mount script) and read by `ExtensionUiController`
+	 * for a terminal surface's real `Theme` and `ctx.ui.theme`'s `colorScheme`. Defaults to
+	 * `"dark"` — pi-coding-agent's own default and this app's previous always-dark behavior —
+	 * until a client actually reports otherwise (round-2 audit m9). Never part of the render
+	 * snapshot: it drives extension-facing behavior only, not any rendered HTML here.
+	 */
+	clientColorScheme: "light" | "dark" = "dark";
 	extensionWorkingIndicator: AppExtensionWorkingIndicator | undefined;
 	extensionWorkingMessage: string | undefined;
 	extensionWorkingVisible = true;
@@ -777,11 +796,16 @@ export class AppStore {
 		// rendered, and a freshly created `<dialog>` needs an explicit
 		// `showModal()` to actually appear (mirroring `setAuthDialog`/
 		// `setExtensionDialog`'s "dialog" effect). Diff against the previous
-		// element list so only elements that are *newly* present get an open
-		// effect — an already-open sheet just re-renders in place on every
-		// commit and must not be told to reopen.
-		const previouslyOpenSheetIds = new Set(
-			this.extensionElements.filter(isPiUiSheetElement).map(piUiDialogId),
+		// element list's `openGeneration` (not just id, and not `revision`) so only an id
+		// that's new OR whose extension deliberately re-`set`/`upsert`-ed it gets an open
+		// effect: an already-open sheet just re-renders in place on every commit and must not
+		// be told to reopen, but an existing, user-dismissed sheet the extension explicitly
+		// re-shows DOES reopen — `openGeneration` only bumps on that deliberate re-show, never
+		// on a `patch`/`append` content update (round-2 audit M4a/M4b).
+		const previousOpenGenerations = new Map(
+			this.extensionElements
+				.filter(isPiUiSheetElement)
+				.map((element) => [piUiDialogId(element), element.openGeneration]),
 		);
 		this.extensionElements = elements.map((element) => structuredClone(element));
 		// Two independent regions read this list: the above-editor widget/sheet area and
@@ -792,15 +816,27 @@ export class AppStore {
 		this.commit();
 		for (const element of elements.filter(isPiUiSheetElement)) {
 			const id = piUiDialogId(element);
-			if (!previouslyOpenSheetIds.has(id)) {
+			const previousGeneration = previousOpenGenerations.get(id);
+			if (
+				previousGeneration === undefined ||
+				previousGeneration !== element.openGeneration
+			) {
 				// `pickersChanged()` is what makes `patchDirtyRegions` actually run
 				// `pickerEffectScripts` (where "dialog" effects are turned into a
 				// `showModal()` script) — matching `setAuthDialog`/
-				// `setExtensionDialog`'s identical pairing.
+				// `setExtensionDialog`'s identical pairing. The script itself guards on
+				// `!dialog.open`, so this is a no-op for a sheet the user hasn't dismissed.
 				this.presentation?.pickersChanged();
 				this.presentation?.requestCommit({ type: "dialog", id, open: true });
 			}
 		}
+	}
+	/**
+	 * Records the browser client's actual light/dark preference (see `clientColorScheme`).
+	 * No commit: nothing rendered here depends on it, only extension-facing behavior does.
+	 */
+	setClientColorScheme(value: "light" | "dark"): void {
+		this.clientColorScheme = value;
 	}
 	/**
 	 * Replaces the full terminal-surface list (see `TerminalSurfaceController`).

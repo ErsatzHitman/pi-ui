@@ -216,6 +216,9 @@ test("PiUiElementStore applies set/patch/append/remove/channel ops", () => {
 	element = store.elements()[0]!;
 	assertEquals(element.data, { text: "updated" });
 	assertEquals(element.revision, 2);
+	// `patch` bumps `revision` but must NOT bump `openGeneration` — it's a content update to
+	// an already-shown element, not a deliberate re-show (round-2 audit M4).
+	assertEquals(element.openGeneration, 1);
 
 	assertEquals(
 		store.apply({ op: "append", id: "panel", ns: "advisor", data: "line one" }),
@@ -227,6 +230,8 @@ test("PiUiElementStore applies set/patch/append/remove/channel ops", () => {
 	);
 	element = store.elements()[0]!;
 	assertEquals(element.data.lines, ["line one", "line two"]);
+	// `append` likewise must not bump `openGeneration`.
+	assertEquals(element.openGeneration, 1);
 
 	assertEquals(
 		store.apply({ op: "channel", channel: "subagents:fleet", payload: { jobs: 1 } }),
@@ -242,6 +247,36 @@ test("PiUiElementStore applies set/patch/append/remove/channel ops", () => {
 
 	assertEquals(store.apply({ op: "remove", id: "panel", ns: "advisor" }), true);
 	assertEquals(store.elements(), []);
+});
+
+test("re-`set`ing an existing element bumps openGeneration, unlike patch/append (M4)", () => {
+	const store = new PiUiElementStore();
+	store.apply({
+		op: "set",
+		el: { id: "sheet", ns: "btw", kind: "panel", placement: "sheet", text: "one" },
+	});
+	const first = store.elements()[0]!;
+	assertEquals(first.revision, 1);
+	assertEquals(first.openGeneration, 1);
+
+	store.apply({ op: "patch", id: "sheet", ns: "btw", patch: { text: "streaming" } });
+	const patched = store.elements()[0]!;
+	assertEquals(patched.revision, 2);
+	assertEquals(
+		patched.openGeneration,
+		1,
+		"a patch must not look like a fresh (re)show",
+	);
+
+	// A genuine re-`set` of the same id (e.g. the extension deliberately re-showing a sheet
+	// the user dismissed) bumps both `revision` and `openGeneration`.
+	store.apply({
+		op: "set",
+		el: { id: "sheet", ns: "btw", kind: "panel", placement: "sheet", text: "two" },
+	});
+	const reset = store.elements()[0]!;
+	assertEquals(reset.revision, 3);
+	assertEquals(reset.openGeneration, 3);
 });
 
 test("PiUiElementStore ignores patch/append targeting an element that was never set", () => {
