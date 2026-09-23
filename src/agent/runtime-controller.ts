@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { resolveModelScopeFromModels } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/model-resolver.js";
+import type { PiUiActionRequest } from "../extension-surface-types.ts";
 import { sessionPerformance } from "../perf/session-performance.ts";
 import {
 	type AppSlashCommand,
@@ -122,6 +123,8 @@ const systemSlashCommands = [
 const systemSlashCommandNames = new Set(
 	systemSlashCommands.map((command) => command.name),
 );
+/** Reverse-channel command bridge-aware extensions register — see `dispatchExtensionUiAction`. */
+const piUiEventCommandName = "pi_ui_event";
 
 type BackgroundSession = {
 	runtime: AgentSessionRuntime;
@@ -1011,6 +1014,34 @@ export class RuntimeController {
 		cancelled: boolean,
 	): boolean {
 		return this.extensionUi.respond(requestId, response, cancelled);
+	}
+
+	/**
+	 * Routes a user action on a rendered PIUI element (a button click, a form
+	 * submit) back to the extension that owns it, by invoking its
+	 * `pi_ui_event` command directly — the same command
+	 * `~/.pi/agent/extensions/lib/bridge.ts`'s `install()` registers to decode
+	 * `POST /extensions/ui/action`'s `{elementId, actionId, value}` as
+	 * `base64url(JSON)` args. This deliberately does **not** go through
+	 * `session.prompt()`/`RuntimeController.prompt()`: that path is meant for
+	 * user-authored chat text, queues behind streaming, and would surface as
+	 * transcript noise. Invoking the extension's own command handler works
+	 * while the agent is mid-turn and produces no visible message.
+	 * Returns `false` (rather than throwing) when no extension in the current
+	 * session registered `pi_ui_event` — e.g. the bridge-aware extension that
+	 * owned this element unloaded, or the session changed underneath the click.
+	 */
+	async dispatchExtensionUiAction(request: PiUiActionRequest): Promise<boolean> {
+		const session = this.runtime.session;
+		const command = session.extensionRunner.getCommand(piUiEventCommandName);
+		if (!command) return false;
+		const args = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
+		try {
+			await command.handler(args, session.extensionRunner.createCommandContext());
+		} catch (error) {
+			console.error("Extension pi_ui_event handler failed", error);
+		}
+		return true;
 	}
 
 	async refreshModels(signal?: AbortSignal): Promise<void> {

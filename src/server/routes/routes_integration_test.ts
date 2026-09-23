@@ -629,6 +629,72 @@ test("extension UI responses return to the active agent backend", async () => {
 	});
 });
 
+test("extension UI actions route to the active extension's pi_ui_event handler", async () => {
+	let dispatched: unknown;
+	const host = fakeHost({
+		dispatchExtensionUiAction: async (request) => {
+			dispatched = request;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest("/extensions/ui/action", {
+			elementId: "panel",
+			actionId: "submit",
+			value: { note: "typed value" },
+		}),
+	);
+
+	assertEquals(response.status, 204);
+	assertEquals(dispatched, {
+		elementId: "panel",
+		actionId: "submit",
+		value: { note: "typed value" },
+	});
+});
+
+test("extension UI actions accept an action with no value", async () => {
+	let dispatched: unknown;
+	const host = fakeHost({
+		dispatchExtensionUiAction: async (request) => {
+			dispatched = request;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest("/extensions/ui/action", {
+			elementId: "roster",
+			actionId: "dismiss",
+		}),
+	);
+
+	assertEquals(response.status, 204);
+	assertEquals(dispatched, {
+		elementId: "roster",
+		actionId: "dismiss",
+		value: undefined,
+	});
+});
+
+test("extension UI actions reject a missing elementId without dispatching", async () => {
+	let dispatched = false;
+	const host = fakeHost({
+		dispatchExtensionUiAction: async () => {
+			dispatched = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest("/extensions/ui/action", { actionId: "submit" }),
+	);
+
+	assertEquals(response.status, 400);
+	assertEquals(dispatched, false);
+});
+
 test("main stream binds a validated display client identity", async () => {
 	const clientId = "123e4567-e89b-42d3-a456-426614174000";
 	let connectedClientId: string | undefined;
@@ -1112,6 +1178,7 @@ function fakeHost(overrides: Partial<RuntimeResource> = {}): RuntimeResource {
 		cycleModel: async () => true,
 		cycleThinkingLevel: () => true,
 		deleteSession: async () => true,
+		dispatchExtensionUiAction: async () => true,
 		dispose: async () => {},
 		forkSessionToWorkspace: async () => ({ status: "success" }),
 		getWorkspacePath: () => process.cwd(),

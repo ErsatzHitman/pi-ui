@@ -17,6 +17,38 @@ import {
 	type RuntimeControllerDependencies,
 } from "./runtime-controller.ts";
 
+const piUiFixtureSource = `
+export default function (pi) {
+  pi.registerCommand("piui-fixture", {
+    description: "Exercise the Pi UI Bridge (PIUI) protocol over notify()",
+    handler: async (_args, ctx) => {
+      ctx.ui.notify(
+        "PIUI " + JSON.stringify({
+          v: 1,
+          op: "set",
+          el: {
+            id: "panel",
+            ns: "fixture",
+            kind: "panel",
+            placement: "sheet",
+            title: "Fixture panel",
+            actions: [{ id: "go", label: "Go" }],
+          },
+        }),
+        "info",
+      );
+    },
+  });
+  pi.registerCommand("pi_ui_event", {
+    description: "Internal Pi UI Bridge action receiver",
+    handler: async (args, ctx) => {
+      const decoded = JSON.parse(Buffer.from(args, "base64url").toString("utf8"));
+      ctx.ui.setStatus("piui-action", JSON.stringify(decoded));
+    },
+  });
+}
+`;
+
 const fixtureSource = `
 export default function (pi) {
   pi.registerCommand("ui-fixture", {
@@ -105,6 +137,66 @@ test("a discovered pi extension uses the web UI bridge end to end", async () => 
 	}
 });
 
+test("a bridge-aware extension's PIUI elements render natively and route actions back", async () => {
+	const root = await makeTempDir();
+	const agentDir = `${root}/agent`;
+	const cwd = `${root}/workspace`;
+	await mkdir(`${agentDir}/extensions`, { recursive: true });
+	await mkdir(cwd);
+	await Bun.write(`${agentDir}/extensions/piui-fixture.js`, piUiFixtureSource);
+
+	const store = new AppStore();
+	let controller: RuntimeController | undefined;
+	try {
+		controller = await RuntimeController.prepare(store, cwd, {
+			dependencies: dependencies(agentDir),
+		});
+		controller.activate();
+
+		const messagesBefore = store.messages.length;
+		assertEquals(await controller.prompt("/piui-fixture"), true);
+
+		// The PIUI element is decoded and rendered — never surfaced as a
+		// transcript notice, no matter what `ctx.ui.notify()` shipped it as.
+		assertEquals(store.messages.length, messagesBefore);
+		assertEquals(store.extensionElements.length, 1);
+		const element = store.extensionElements[0]!;
+		assertEquals(element.ns, "fixture");
+		assertEquals(element.id, "panel");
+		assertEquals(element.kind, "panel");
+		assertEquals(element.placement, "sheet");
+		assertEquals(element.title, "Fixture panel");
+		assertEquals(element.actions, [
+			{ id: "go", label: "Go", variant: undefined, confirm: undefined },
+		]);
+
+		// A user action on the rendered element routes to the extension's own
+		// `pi_ui_event` command handler — not through `session.prompt()` — and
+		// the extension observes exactly the decoded {elementId, actionId, value}.
+		assertEquals(
+			await controller.dispatchExtensionUiAction({
+				elementId: "panel",
+				actionId: "go",
+				value: { confirmed: true },
+			}),
+			true,
+		);
+		await waitFor(() =>
+			store.extensionStatuses.some((status) => status.key === "piui-action"),
+		);
+		assertEquals(
+			JSON.parse(
+				store.extensionStatuses.find((status) => status.key === "piui-action")!
+					.text,
+			),
+			{ elementId: "panel", actionId: "go", value: { confirmed: true } },
+		);
+	} finally {
+		await controller?.dispose();
+		await rm(root, { recursive: true });
+	}
+});
+
 function dependencies(agentDir: string): RuntimeControllerDependencies {
 	return {
 		createRuntime: (_factory, options) =>
@@ -159,4 +251,12 @@ function respond(controller: RuntimeController, store: AppStore, value: string):
 	const id = store.extensionDialog?.id;
 	if (!id) throw new Error("extension dialog is not open");
 	assertEquals(controller.respondExtensionUi(id, value, false), true);
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+	for (let attempt = 0; attempt < 1_000; attempt += 1) {
+		if (predicate()) return;
+		await new Promise((resolve) => setTimeout(resolve, 1));
+	}
+	throw new Error("condition did not become true in time");
 }

@@ -72,6 +72,7 @@ export const endpoints = {
 	llamaClose: "/llama/close",
 	extensionUiResponse: "/extensions/ui/respond",
 	extensionUiEditor: "/extensions/ui/editor",
+	extensionUiAction: "/extensions/ui/action",
 	treeOpen: "/tree/open",
 	treeNavigate: "/tree/navigate",
 	filesSearch: "/files/search",
