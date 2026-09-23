@@ -1130,6 +1130,18 @@ test("a live workspace fleet storm patches only the agents tab, not usage/now/ac
 		assertEqual(count(output, 'id="live-workspace-usage"'), 0);
 		assertEqual(count(output, 'id="live-workspace-extensions"'), 0);
 		assertEqual(count(output, 'id="piui-widgets"'), 0);
+		// Morph-bytes budget: each agents-tab patch carries only that tab's small fragment,
+		// never a whole-pane re-render.
+		const agentPatchBytes = output
+			.split("event: ")
+			.filter((event) => event.includes('id="live-workspace-agents"'))
+			.map((event) => new TextEncoder().encode(event).byteLength);
+		assertEqual(agentPatchBytes.length, storms);
+		assertEqual(
+			agentPatchBytes.every((bytes) => bytes < 4096),
+			true,
+			`agents patch sizes: ${agentPatchBytes.join(", ")}`,
+		);
 	} finally {
 		controller.abort();
 	}
