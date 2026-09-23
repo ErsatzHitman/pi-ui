@@ -71,12 +71,16 @@ function renderSlashRow(item: AppSlashCommand, index: number): string {
 	const label = `/${item.name}`;
 	const name = slashCommandName(item);
 	const runsImmediately = item.source === "system" && !item.argumentHint;
-	// "/copy" is a browser-only action (clipboard access) — never post it to the server.
+	// "/copy" is a browser-only action (clipboard access) — never post it to the
+	// server on success; when there is nothing to copy, fall through to the
+	// server so it can show a notice instead of silently doing nothing.
 	const clickAction =
 		name === "copy"
 			? `window.piUi.pickers.close();
-			window.piUi.pickers.copyLastMessage();
-			$prompt = '';`
+			$prompt = '';
+			if (!window.piUi.pickers.copyLastMessage()) {
+				@post('${endpoints.prompt}', { payload: { prompt: '/copy' } });
+			}`
 			: runsImmediately
 				? `window.piUi.messageScroll.scrollBottom();
 			$prompt = '';

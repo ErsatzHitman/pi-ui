@@ -1400,6 +1400,26 @@ test("RuntimeController rejects an invalid /thinking level without prompting the
 	await controller.dispose();
 });
 
+test("RuntimeController rejects a syntactically valid /thinking level the session doesn't offer", async () => {
+	// "high" is a real AppThinkingLevel, unlike "turbo" above — the bug this
+	// guards was reporting success for any recognized level name even when
+	// the session's own getAvailableThinkingLevels() (here: only "off") didn't
+	// include it.
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/thinking high"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(fake.promptInputs, []);
+	assertEquals(
+		state.messages.at(-1)?.text.includes("Invalid thinking level: high"),
+		true,
+	);
+	await controller.dispose();
+});
+
 test("RuntimeController opens the model picker for a bare /model, without prompting the model", async () => {
 	const state = new AppStore();
 	const fake = fakeRuntime();
@@ -1517,6 +1537,38 @@ test("RuntimeController renames the session for /name <title> without prompting 
 
 	assertEquals(fake.promptInputs, []);
 	assertEquals(fake.setSessionNames, ["My Session"]);
+	// Previously silent: confirm the rename so the command gives feedback.
+	assertEquals(state.messages.at(-1)?.text, 'Session renamed to "My Session".');
+	await controller.dispose();
+});
+
+test("RuntimeController reports nothing-to-copy when the client forwards a failed /copy", async () => {
+	// The client (pickers.tsx / prompt-box.tsx) only ever posts "/copy" to the
+	// server after its own clipboard copy failed — see static/app/pickers.js.
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/copy"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(fake.promptInputs, []);
+	assertEquals(state.messages.at(-1)?.text, "Nothing to copy yet.");
+	await controller.dispose();
+});
+
+test("RuntimeController includes the matching changelog entry for /changelog", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/changelog"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(fake.promptInputs, []);
+	const notice = state.messages.at(-1);
+	assertEquals(notice?.format, "pre");
+	assertEquals(notice?.text.startsWith("## ["), true);
 	await controller.dispose();
 });
 

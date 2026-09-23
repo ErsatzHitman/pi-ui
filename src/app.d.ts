@@ -1,3 +1,11 @@
+// Matches bun-types' `*.txt` declaration (extensions.d.ts) for a Bun `type: "text"`
+// import assertion, which bun-types doesn't cover for `.md` — used to embed
+// pi-coding-agent's CHANGELOG.md into the compiled binary for `/changelog`.
+declare module "*.md" {
+	const content: string;
+	export default content;
+}
+
 interface TransferFileCollection {
 	readonly length: number;
 }
