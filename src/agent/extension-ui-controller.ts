@@ -125,7 +125,20 @@ export class ExtensionUiController {
 	 * later can tell a stale surface needs disposing.
 	 */
 	readonly #componentWidgetKeys = new Set<string>();
-	readonly #terminalInputHandlers = new Set<TerminalInputHandler>();
+	/**
+	 * `ctx.ui.onTerminalInput` listeners, per runtime like `#piUiStores`: an
+	 * extension registers them once from `session_start`, so they must survive
+	 * the runtime being backgrounded and re-foregrounded without a rebind
+	 * (`RuntimeController.activateRuntime`), which never re-runs
+	 * `session_start`. Only `#inputRuntime`'s listeners are routed.
+	 */
+	readonly #terminalInputHandlers = new WeakMap<
+		AgentSessionRuntime,
+		Set<TerminalInputHandler>
+	>();
+	/** The foreground runtime whose listeners receive input; `undefined`
+	 * between `cancelAll()` and the next `restoreElements()`. */
+	#inputRuntime: AgentSessionRuntime | undefined;
 	readonly #autocompleteProviders: AutocompleteProviderFactory[] = [];
 	/**
 	 * One PIUI decoder/element store per runtime (session) — never a single
@@ -168,6 +181,11 @@ export class ExtensionUiController {
 		isActive: () => boolean,
 		runtimeKey: AgentSessionRuntime,
 	): ExtensionUIContext {
+		// A new context means the SDK is about to (re)bind this runtime's
+		// extensions and re-run `session_start`, which registers their
+		// listeners again: drop the previous binding's so none is doubled.
+		this.#terminalInputHandlers.delete(runtimeKey);
+		if (this.#inputRuntime === runtimeKey) this.syncTerminalInputActive();
 		return {
 			select: (title, options, dialogOptions) =>
 				this.select(isActive, title, options, dialogOptions),
@@ -178,11 +196,20 @@ export class ExtensionUiController {
 			notify: (message, type = "info") =>
 				this.notify(isActive, runtimeKey, message, type),
 			onTerminalInput: (handler) => {
-				if (!isActive()) return () => {};
-				this.#terminalInputHandlers.add(handler);
+				// Registered even while inactive (e.g. `session_start` of a
+				// replacement runtime bound before it is adopted): routing only
+				// ever reads the foreground runtime's own set.
+				let handlers = this.#terminalInputHandlers.get(runtimeKey);
+				if (!handlers) {
+					handlers = new Set();
+					this.#terminalInputHandlers.set(runtimeKey, handlers);
+				}
+				const owned = handlers;
+				owned.add(handler);
+				if (isActive()) this.#inputRuntime = runtimeKey;
 				this.syncTerminalInputActive();
 				return () => {
-					this.#terminalInputHandlers.delete(handler);
+					owned.delete(handler);
 					this.syncTerminalInputActive();
 				};
 			},
@@ -335,7 +362,8 @@ export class ExtensionUiController {
 	 */
 	#runTerminalInputHandlers(data: string): TerminalInputRoutingResult {
 		let forwarded = data;
-		for (const handler of this.#terminalInputHandlers) {
+		// A snapshot: a listener may unsubscribe itself (or another) mid-dispatch.
+		for (const handler of Array.from(this.#activeTerminalInputHandlers())) {
 			let result: ReturnType<TerminalInputHandler>;
 			try {
 				result = handler(forwarded);
@@ -383,7 +411,14 @@ export class ExtensionUiController {
 	/** Whether `handlePromptLevelInput` currently has anything to route to — see
 	 * `AppStore.extensionTerminalInputActive`. */
 	private syncTerminalInputActive(): void {
-		this.store.setExtensionTerminalInputActive(this.#terminalInputHandlers.size > 0);
+		this.store.setExtensionTerminalInputActive(
+			this.#activeTerminalInputHandlers().size > 0,
+		);
+	}
+
+	#activeTerminalInputHandlers(): ReadonlySet<TerminalInputHandler> {
+		const runtime = this.#inputRuntime;
+		return (runtime && this.#terminalInputHandlers.get(runtime)) || new Set();
 	}
 
 	/** Applies a client-measured grid resize to a mounted surface. `false` if `id` is unknown. */
@@ -415,6 +450,10 @@ export class ExtensionUiController {
 	 * view instead of leaving the foreground blank (A#23).
 	 */
 	restoreElements(runtimeKey: AgentSessionRuntime): void {
+		// Same moment for `ctx.ui.onTerminalInput`: route this runtime's
+		// listeners again (see `#terminalInputHandlers`).
+		this.#inputRuntime = runtimeKey;
+		this.syncTerminalInputActive();
 		const runtimeStore = this.#piUiStores.get(runtimeKey);
 		this.store.setExtensionElements(runtimeStore?.elements.elements() ?? []);
 		if (!this.hooks.onChannel) {
@@ -470,7 +509,9 @@ export class ExtensionUiController {
 		this.#statuses.clear();
 		this.#widgets.clear();
 		this.#componentWidgetKeys.clear();
-		this.#terminalInputHandlers.clear();
+		// Not clearing the per-runtime listener sets, for the same reason as
+		// `#piUiStores` below; the runtime just stops being routed to.
+		this.#inputRuntime = undefined;
 		this.syncTerminalInputActive();
 		this.#autocompleteProviders.length = 0;
 		// Deliberately NOT clearing `#piUiStores` here: this runs on every

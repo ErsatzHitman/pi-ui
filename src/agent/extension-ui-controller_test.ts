@@ -548,6 +548,43 @@ test("onTerminalInput listeners see terminal-surface input first and may rewrite
 	unsubscribe();
 });
 
+test("prompt-level onTerminalInput listeners survive backgrounding and come back with their runtime", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const runtimeA = fakeRuntimeKey();
+	const runtimeB = fakeRuntimeKey();
+	let foreground = runtimeA;
+	const uiA = controller.context(() => foreground === runtimeA, runtimeA);
+	const seen: string[] = [];
+	uiA.onTerminalInput((data) => {
+		seen.push(data);
+		return data === "j" ? { consume: true } : undefined;
+	});
+	assertEquals(store.snapshot().extensionTerminalInputActive, true);
+	assertEquals(controller.handlePromptLevelInput("j").consumed, true);
+
+	// Switch away (unbind) to B, which registers nothing.
+	controller.cancelAll();
+	foreground = runtimeB;
+	controller.context(() => foreground === runtimeB, runtimeB);
+	controller.restoreElements(runtimeB);
+	assertEquals(store.snapshot().extensionTerminalInputActive, false);
+	assertEquals(controller.handlePromptLevelInput("j").consumed, false);
+
+	// Re-foreground A without a rebind (no session_start re-run).
+	controller.cancelAll();
+	foreground = runtimeA;
+	controller.restoreElements(runtimeA);
+	assertEquals(store.snapshot().extensionTerminalInputActive, true);
+	assertEquals(controller.handlePromptLevelInput("j").consumed, true);
+	assertEquals(seen, ["j", "j"]);
+
+	// A rebind of A (new context) drops the old binding's listeners.
+	controller.context(() => foreground === runtimeA, runtimeA);
+	assertEquals(store.snapshot().extensionTerminalInputActive, false);
+	assertEquals(controller.handlePromptLevelInput("j").consumed, false);
+});
+
 test("ExtensionUiController strips ANSI styling from extension notices", () => {
 	const store = new AppStore();
 	const controller = new ExtensionUiController(store);
