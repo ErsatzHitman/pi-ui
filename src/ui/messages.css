@@ -187,7 +187,7 @@
 	}
 	.older-messages-sensor-top {
 		top: 0;
-		height: min(50vh, 100%);
+		height: min(50dvh, 100%);
 	}
 	.older-messages-sensor-bottom {
 		height: 1px;

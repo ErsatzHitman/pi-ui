@@ -27,7 +27,7 @@ test("page opts into keyboard resizing without disabling zoom", async () => {
 	const response = await createRouter(context).fetch(new Request("http://localhost/"));
 	assertStringIncludes(
 		await response.text(),
-		'name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content"',
+		'name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"',
 	);
 });
 

@@ -1,10 +1,12 @@
 import { fuzzyFilter, fuzzyMatch } from "../../src/client/pi-fuzzy.ts";
+import { shouldAutofocusPromptOnLoad } from "./autofocus.js";
 import { bindCodeCopy } from "./code-copy.js";
 import { activateCommandItem, bindControls, refreshControls } from "./controls.js";
 import { hydrateDateTime } from "./date-time.js";
 import { bindDisplayRefreshMeasurement } from "./display-refresh.js";
 import { bindFileLinks } from "./file-links.js";
 import * as fileTransfer from "./file-transfer.js";
+import { bindDismissibleHistory } from "./history-stack.js";
 import {
 	bindMessageResize,
 	bindMessageScroll,
@@ -30,6 +32,7 @@ import {
 	readTransitionState,
 	startSessionPerformanceMeasurement,
 } from "./session-performance.js";
+import { bindStreamReconnect } from "./stream-reconnect.js";
 import { bindTooltips } from "./tooltips.js";
 import { bindVimScroll } from "./vim-scroll.js";
 import { windowFocus } from "./window-focus.js";
@@ -92,13 +95,15 @@ bindFileLinks();
 
 window.addEventListener("DOMContentLoaded", async () => {
 	bindControls();
-	focusPromptEnd();
+	if (shouldAutofocusPromptOnLoad()) focusPromptEnd();
+	bindDismissibleHistory();
 	bindPickers({ fuzzyFilter });
 	bindMessageScroll();
 	bindCodeCopy();
 	bindTooltips();
 	bindVimScroll();
 	bindDisplayRefreshMeasurement();
+	bindStreamReconnect();
 	bindDebugFps();
 
 	await Promise.all([
