@@ -602,6 +602,76 @@ test("clearing the Live Workspace activity log returns 503 when runtime is absen
 	assertEquals(response.status, 503);
 });
 
+test("the Live Workspace activity export is a downloadable JSON snapshot of the current log", async () => {
+	const context = fakeContext();
+	context.store.setLiveWorkspace({
+		revision: 1,
+		turn: undefined,
+		activeTools: [],
+		queuedSteering: 0,
+		queuedFollowUp: 0,
+		agents: [],
+		activity: [
+			{
+				id: "1",
+				at: 500,
+				kind: "retry",
+				text: "Retrying (1/3)",
+				background: false,
+			},
+		],
+	});
+	const response = await createRouter(context).fetch(
+		new Request("http://localhost/live-workspace/activity/export"),
+	);
+	assertEquals(response.status, 200);
+	assertStringIncludes(response.headers.get("content-disposition") ?? "", "attachment");
+	const body = (await response.json()) as unknown[];
+	assertEquals(body.length, 1);
+});
+
+test("the Live Workspace workflow journal route patches the panel from the current workspace", async () => {
+	const home = await makeTempDir({ prefix: "pi-ui-workflow-route-test-" });
+	const originalHome = process.env.HOME;
+	const originalProfile = process.env.USERPROFILE;
+	process.env.HOME = home;
+	process.env.USERPROFILE = home;
+	try {
+		const context = fakeContext();
+		context.store.setWorkspacePath("/workspace/no-run-yet");
+		const response = await createRouter(context).fetch(
+			new Request("http://localhost/live-workspace/workflow-journal"),
+		);
+		assertEquals(response.status, 200);
+		assertStringIncludes(
+			await response.text(),
+			"No workflow run found for this workspace.",
+		);
+	} finally {
+		if (originalHome === undefined) delete process.env.HOME;
+		else process.env.HOME = originalHome;
+		if (originalProfile === undefined) delete process.env.USERPROFILE;
+		else process.env.USERPROFILE = originalProfile;
+		await rm(home, { recursive: true });
+	}
+});
+
+test("the Live Workspace delegate ledger route patches the panel from the delegate directory", async () => {
+	const original = process.env.PI_HERDR_DELEGATE_DIR;
+	process.env.PI_HERDR_DELEGATE_DIR = "/definitely/not/on/disk";
+	try {
+		const context = fakeContext();
+		const response = await createRouter(context).fetch(
+			new Request("http://localhost/live-workspace/delegate-ledger"),
+		);
+		assertEquals(response.status, 200);
+		assertStringIncludes(await response.text(), "No delegations recorded.");
+	} finally {
+		if (original === undefined) delete process.env.PI_HERDR_DELEGATE_DIR;
+		else process.env.PI_HERDR_DELEGATE_DIR = original;
+	}
+});
+
 test("file imports report content-detected image MIME types", async () => {
 	const tempDir = await makeTempDir({ prefix: "pi-ui-image-mime-test-" });
 	const path = `${tempDir}/screenshot.bin`;
