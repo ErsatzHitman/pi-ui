@@ -547,6 +547,19 @@ function publishScrollbarSize() {
 export function bindTerminalSurfaces() {
 	publishScrollbarSize();
 	reportViewportCells();
+	// The call above runs before Datastar has bound `<body>`'s
+	// `data-on:pi-ui-terminal-viewport`, so on a fresh page load its event goes
+	// nowhere. The server also forgets a client's hint when its stream
+	// disconnects. So report again whenever the main SSE stream (the
+	// `data-init` `@get` on `#app`, see page.tsx) starts or retries: by then
+	// the body handler is bound, and the report reaches the server as the
+	// connection comes back.
+	document.addEventListener("datastar-fetch", (event) => {
+		const detail = event.detail;
+		if (detail?.el?.id !== "app") return;
+		if (detail.type !== "started" && detail.type !== "retrying") return;
+		setTimeout(reportViewportCells, 0);
+	});
 	observeNewGrids();
 	const mutationObserver = new MutationObserver((mutations) => {
 		for (const mutation of mutations) {
