@@ -105,10 +105,12 @@ function applySgr(state: SgrState, params: readonly number[]): void {
 		else if (code === 29) state.strikethrough = false;
 		else if (code >= 30 && code <= 37) state.fg = ansiBasicToken[code - 30];
 		else if (code === 39) state.fg = undefined;
-		else if (code >= 40 && code <= 47) state.bg = translucent(ansiBasicToken[code - 40]);
+		else if (code >= 40 && code <= 47)
+			state.bg = translucent(ansiBasicToken[code - 40]);
 		else if (code === 49) state.bg = undefined;
 		else if (code >= 90 && code <= 97) state.fg = ansiBasicToken[code - 90];
-		else if (code >= 100 && code <= 107) state.bg = translucent(ansiBasicToken[code - 100]);
+		else if (code >= 100 && code <= 107)
+			state.bg = translucent(ansiBasicToken[code - 100]);
 		else if (code === 38 || code === 48) {
 			const isBackground = code === 48;
 			const mode = params[index + 1];
@@ -116,7 +118,8 @@ function applySgr(state: SgrState, params: readonly number[]): void {
 				const paletteIndex = params[index + 2];
 				if (paletteIndex !== undefined) {
 					const color = paletteColor(paletteIndex);
-					if (isBackground) state.bg = paletteIndex < 16 ? translucent(color) : color;
+					if (isBackground)
+						state.bg = paletteIndex < 16 ? translucent(color) : color;
 					else state.fg = color;
 				}
 				index += 2;
@@ -170,7 +173,8 @@ function isStylePlain(state: SgrState): boolean {
 	);
 }
 
-const escapeSequence = /\x1b(?:\[([0-9;]*)([A-Za-z@])|\]8;[^;]*;([^\x07\x1b]*)(?:\x07|\x1b\\)|[^[\]])/g;
+const escapeSequence =
+	/\x1b(?:\[([0-9;]*)([A-Za-z@])|\]8;[^;]*;([^\x07\x1b]*)(?:\x07|\x1b\\)|[^[\]])/g;
 
 export type AnsiRenderedLine = {
 	/** Pre-escaped, safe HTML for this line's content (no wrapping element). */
@@ -189,7 +193,8 @@ export function ansiLineToHtml(line: string): AnsiRenderedLine {
 	let cursorColumn: number | undefined;
 	const markerIndex = line.indexOf(cursorMarker);
 	if (markerIndex >= 0) {
-		withoutCursor = line.slice(0, markerIndex) + line.slice(markerIndex + cursorMarker.length);
+		withoutCursor =
+			line.slice(0, markerIndex) + line.slice(markerIndex + cursorMarker.length);
 	}
 
 	let html = "";
@@ -284,6 +289,8 @@ function visibleColumnAt(line: string, index: number): number {
 /** OSC 8 URIs are extension-controlled; only allow schemes a browser can safely open. */
 function isSafeLinkTarget(uri: string): boolean {
 	return (
-		uri.startsWith("https://") || uri.startsWith("http://") || uri.startsWith("mailto:")
+		uri.startsWith("https://") ||
+		uri.startsWith("http://") ||
+		uri.startsWith("mailto:")
 	);
 }
