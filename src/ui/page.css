@@ -155,8 +155,9 @@
 		align-items: center;
 		interpolate-size: allow-keywords;
 		margin-inline: var(--workspace-inset);
-		margin-block-start: var(--workspace-inset);
-		padding-inline: var(--workspace-inset);
+		margin-block-start: max(var(--workspace-inset), env(safe-area-inset-top));
+		padding-inline: calc(var(--workspace-inset) + env(safe-area-inset-left))
+			calc(var(--workspace-inset) + env(safe-area-inset-right));
 		container: prompt / inline-size;
 		opacity: 1;
 		translate: 0;

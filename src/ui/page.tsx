@@ -61,6 +61,16 @@ export function renderPage(
 	const fonts = activeFontStacks();
 	const displayClientId = crypto.randomUUID();
 	const initialSignals = JSON.stringify(projectBackendSignals(state));
+	// Shared by the initial connection and the forced-reconnect handler below, so
+	// a stale mobile connection is re-opened with the exact same options. Passing
+	// 'cleanup' aborts any still-open request under this same key before starting
+	// the new one, so re-issuing this action is always safe to call again.
+	const streamConnectAction = `@get('${endpoints.stream}?clientId=${displayClientId}&appVersion=${appVersion}', {
+						payload: {},
+						retry: 'always',
+						retryMaxCount: Infinity,
+						requestCancellation: 'cleanup',
+					})`;
 
 	return syncHtml(
 		"<!doctype html>" +
@@ -74,7 +84,7 @@ export function renderPage(
 					<meta charset="utf-8" />
 					<meta
 						name="viewport"
-						content="width=device-width, initial-scale=1, interactive-widget=resizes-content"
+						content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
 					/>
 					<meta name="color-scheme" content="light dark" />
 					<meta name="theme-color" content="" />
@@ -220,12 +230,8 @@ export function renderPage(
 						data-on:pi-ui-workspace-review-open={`$_workspaceReviewOpen = evt.detail.open`}
 						data-effect="window.piUi.workspaceReview.applyOpen($_workspaceReviewOpen)"
 						data-signals:_workspace-review-open__ifmissing="false"
-						data-init={`@get('${endpoints.stream}?clientId=${displayClientId}&appVersion=${appVersion}', {
-						payload: {},
-						retry: 'always',
-						retryMaxCount: Infinity,
-						requestCancellation: 'cleanup',
-					})`}
+						data-init={streamConnectAction}
+						data-on:pi-ui-stream-reconnect__window={streamConnectAction}
 					>
 						{renderSessionSidebar(state, {
 							open: sessionSidebarOpen,
@@ -400,8 +406,8 @@ export function renderPage(
 					>
 						<div
 							class="command"
-							style="height: calc(100dvh - 2rem)"
-							data-style:height="$treeSelectedId ? 'auto' : 'calc(100dvh - 2rem)'"
+							style="height: calc(100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))"
+							data-style:height="$treeSelectedId ? 'auto' : 'calc(100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))'"
 						>
 							<header data-class:sr-only="$treeSelectedId">
 								<Icon icon={Search} />

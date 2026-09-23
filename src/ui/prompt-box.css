@@ -6,9 +6,12 @@
 
 @layer components {
 	.prompt-box {
+		--prompt-inset-start: max(1rem, env(safe-area-inset-left));
+		--prompt-inset-end: max(1rem, env(safe-area-inset-right));
+
 		position: absolute;
-		inset-inline: 1rem;
-		bottom: 0.5rem;
+		inset-inline: var(--prompt-inset-start) var(--prompt-inset-end);
+		bottom: max(0.5rem, env(safe-area-inset-bottom));
 		z-index: 10;
 		max-width: var(--prompt-max-width);
 		margin-inline: auto;
@@ -384,8 +387,10 @@
 	/* Viewport-specific touch spacing; control density follows the footer width. */
 	@media (width <= 639px) {
 		.prompt-box {
-			inset-inline: 0.5rem;
-			bottom: 0.25rem;
+			--prompt-inset-start: max(0.5rem, env(safe-area-inset-left));
+			--prompt-inset-end: max(0.5rem, env(safe-area-inset-right));
+
+			bottom: max(0.25rem, env(safe-area-inset-bottom));
 		}
 		.prompt-surface {
 			--prompt-surface-padding: 0.5rem;
