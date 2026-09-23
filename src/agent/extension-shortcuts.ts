@@ -141,6 +141,46 @@ export function normalizeKeyId(keyId: string): string {
 }
 
 /**
+ * `KeyId`s a real browser tab already reserves for its own chrome — new/close
+ * tab, new window, tab switching, reload — before the keydown ever reaches
+ * page JavaScript (Round 6 F3). Unlike a collision with one of pi-ui's own
+ * binds (`excludeKeys`), the client's `matchesKeyId()`
+ * (`static/app/extension-keys.js`) never even gets a chance to see one of
+ * these: the browser intercepts it first. `listExtensionShortcuts` flags a
+ * shortcut on one of these keys `reachableByKeyboard: false` for the same
+ * reason it does for a pi-ui collision — so `/hotkeys` and the command
+ * palette show it muted with an explanation instead of a keyboard chord that
+ * silently never fires — while `findExtensionShortcut` still invokes it
+ * directly for a tap on that row, same as any other unreachable shortcut.
+ * Both the Ctrl (Windows/Linux) and Cmd (`super`, macOS) forms are listed,
+ * since either could appear in an extension's registered `KeyId` regardless
+ * of which platform this server runs on.
+ */
+export const browserReservedKeyIds: ReadonlySet<string> = new Set([
+	"ctrl+t",
+	"ctrl+w",
+	"ctrl+n",
+	"ctrl+shift+t",
+	"ctrl+shift+w",
+	"ctrl+shift+n",
+	"ctrl+tab",
+	"ctrl+shift+tab",
+	"super+t",
+	"super+w",
+	"super+n",
+	"super+shift+t",
+	"super+shift+w",
+	"super+shift+n",
+	"f5",
+	"ctrl+f5",
+	"shift+f5",
+]);
+
+function isKeyboardReachable(key: string, excludeKeys: ReadonlySet<string>): boolean {
+	return !excludeKeys.has(key) && !browserReservedKeyIds.has(key);
+}
+
+/**
  * Every active `pi.registerShortcut()` shortcut that doesn't collide with a
  * pi-tui built-in (already excluded from `getShortcuts()`'s own returned map
  * by the SDK — see `extensionShortcutKeybindings()`'s doc comment), flagged
@@ -156,7 +196,7 @@ export function listExtensionShortcuts(
 	const shortcuts = extensionRunner.getShortcuts(shortcutKeybindings);
 	const infos: ExtensionShortcutInfo[] = [];
 	for (const [key, shortcut] of shortcuts) {
-		infos.push(shortcutInfo(key, shortcut, !excludeKeys.has(key)));
+		infos.push(shortcutInfo(key, shortcut, isKeyboardReachable(key, excludeKeys)));
 	}
 	return infos.sort((a, b) => a.key.localeCompare(b.key));
 }
