@@ -1577,6 +1577,15 @@ test("RuntimeController reports nothing-to-copy when the client forwards a faile
 
 	assertEquals(fake.promptInputs, []);
 	assertEquals(state.messages.at(-1)?.text, "Nothing to copy yet.");
+
+	// The client reports a clipboard failure (API missing/denied and the execCommand
+	// fallback failed too) as "/copy unavailable" — a distinct, visible notice.
+	assertEquals(await controller.prompt("/copy unavailable"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assertEquals(
+		state.messages.at(-1)?.text,
+		"Couldn't copy: this browser blocked clipboard access.",
+	);
 	await controller.dispose();
 });
 

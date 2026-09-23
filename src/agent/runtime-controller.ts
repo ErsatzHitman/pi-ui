@@ -562,9 +562,15 @@ export class RuntimeController {
 			case "copy":
 				// Handled client-side (copies the last assistant message to the clipboard)
 				// before the prompt ever reaches the server — see static/app/pickers.js.
-				// The client only forwards here when the clipboard copy failed (nothing
-				// to copy yet), so give that case real feedback instead of a silent no-op.
-				this.state.appendMessage("notice", "Nothing to copy yet.");
+				// The client only forwards here when there is nothing to copy yet, or as
+				// "/copy unavailable" when both the Clipboard API and the execCommand
+				// fallback failed, so give both cases real feedback instead of a no-op.
+				this.state.appendMessage(
+					"notice",
+					args.trim() === "unavailable"
+						? "Couldn't copy: this browser blocked clipboard access."
+						: "Nothing to copy yet.",
+				);
 				return;
 			case "name":
 				void this.dispatchNameCommand(args);

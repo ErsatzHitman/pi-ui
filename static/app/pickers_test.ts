@@ -2,10 +2,12 @@ import { test } from "bun:test";
 
 import { CombinedAutocompleteProvider } from "@earendil-works/pi-tui";
 
-import { assertEquals } from "#testing/assertions";
+import { assertEquals, waitForCondition } from "#testing/assertions";
 
+import { endpoints } from "../../src/server/routes/endpoints.ts";
 import {
 	completeFileValue,
+	copyLastAssistantMessage,
 	extractArgumentQuery,
 	extractFilePrefix,
 	nextPickerIndex,
@@ -110,4 +112,105 @@ test("file completion preserves surrounding prompt text and directory flow", () 
 		text: "see @src/",
 		cursor: 9,
 	});
+});
+
+/** Patches a global via `Object.defineProperty` (see terminal-keys_test.ts's `patchGlobal`). */
+function patchGlobal(name: string, value: unknown): () => void {
+	return patchProperty(globalThis, name, value);
+}
+
+function patchProperty(
+	target: typeof globalThis | Navigator,
+	name: string,
+	value: unknown,
+): () => void {
+	const original = Object.getOwnPropertyDescriptor(target, name);
+	Object.defineProperty(target, name, { configurable: true, writable: true, value });
+	return () => {
+		if (original) Object.defineProperty(target, name, original);
+		else Reflect.deleteProperty(target, name);
+	};
+}
+
+/** Fakes just the DOM `copyLastAssistantMessage()` touches (O3). */
+function installCopyDom(options: {
+	replyText?: string;
+	clipboard?: { writeText(text: string): Promise<void> };
+	execCommandResult: boolean;
+}) {
+	const posts: unknown[] = [];
+	const execCalls: string[] = [];
+	const textarea = {
+		value: "",
+		style: {},
+		setAttribute() {},
+		focus() {},
+		select() {},
+		setSelectionRange() {},
+		remove() {},
+	};
+	const fakeDocument = {
+		querySelectorAll: () =>
+			options.replyText === undefined ? [] : [{ textContent: options.replyText }],
+		createElement: () => textarea,
+		body: { append() {} },
+		execCommand: (command: string) => {
+			execCalls.push(command);
+			return options.execCommandResult;
+		},
+	};
+	const restores = [
+		patchGlobal("document", fakeDocument),
+		patchProperty(globalThis.navigator, "clipboard", options.clipboard),
+		patchGlobal("fetch", async (url: string, init: RequestInit) => {
+			posts.push({ url, body: JSON.parse(String(init.body)) });
+			return new Response(null, { status: 204 });
+		}),
+	];
+	return {
+		posts,
+		execCalls,
+		restore: () => {
+			for (const restore of restores.reverse()) restore();
+		},
+	};
+}
+
+test("/copy falls through to the server when there is no reply to copy", () => {
+	const dom = installCopyDom({ execCommandResult: true });
+	try {
+		assertEquals(copyLastAssistantMessage(), false);
+		assertEquals(dom.posts, []);
+	} finally {
+		dom.restore();
+	}
+});
+
+test("/copy uses the execCommand fallback when the Clipboard API is missing", () => {
+	const dom = installCopyDom({ replyText: "reply", execCommandResult: true });
+	try {
+		assertEquals(copyLastAssistantMessage(), true);
+		assertEquals(dom.execCalls, ["copy"]);
+		assertEquals(dom.posts, []);
+	} finally {
+		dom.restore();
+	}
+});
+
+test("/copy reports a visible failure when writeText rejects and the fallback fails", async () => {
+	const dom = installCopyDom({
+		replyText: "reply",
+		clipboard: { writeText: () => Promise.reject(new Error("denied")) },
+		execCommandResult: false,
+	});
+	try {
+		assertEquals(copyLastAssistantMessage(), true);
+		await waitForCondition(() => dom.posts.length > 0);
+		assertEquals(dom.execCalls, ["copy"]);
+		assertEquals(dom.posts, [
+			{ url: endpoints.prompt, body: { prompt: "/copy unavailable" } },
+		]);
+	} finally {
+		dom.restore();
+	}
 });

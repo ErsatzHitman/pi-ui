@@ -1,3 +1,4 @@
+import { endpoints } from "../../src/server/routes/endpoints.ts";
 import { focusPromptEnd, promptInput, setPromptValue } from "./prompt.js";
 
 let activeFilePrefix;
@@ -224,22 +225,35 @@ export function completeSlashCommand(name) {
 // and never send it to the server. `RuntimeController.prompt()` still no-ops "/copy" too,
 // as a defensive fallback for any caller that posts it anyway.
 //
-// The return value means "the copy actually happened" (used to decide whether to fall
-// through to the server for a "Nothing to copy yet." notice), so it has to reflect real
-// success, not just that there was text to copy: `navigator.clipboard` doesn't exist over
-// plain HTTP on a LAN and in some embedded webviews (O3), and `writeText` itself can reject
-// (permission denied, no focused document). `execCommand("copy")` on a detached, invisible
-// textarea is synchronous and works in both of those cases, so it's the fallback rather than
+// The return value means "handled client-side": `false` only when there is no assistant
+// reply to copy, so the caller falls through to the server for a "Nothing to copy yet."
+// notice. `navigator.clipboard` doesn't exist over plain HTTP on a LAN and in some embedded
+// webviews (O3), and `writeText` itself can reject (permission denied, no focused
+// document), so a synchronous hidden-textarea `execCommand("copy")` is the fallback. If
+// that fails too — synchronously or after `writeText`'s promise rejects — the failure is
+// reported to the server as `/copy unavailable`, which shows a visible notice, instead of
 // silently reporting success with nothing copied.
 export function copyLastAssistantMessage() {
+	const clipboard = navigator.clipboard;
 	const nodes = document.querySelectorAll(".message-assistant .markdown-content");
 	const text = nodes[nodes.length - 1]?.textContent?.trim();
 	if (!text) return false;
-	if (navigator.clipboard?.writeText) {
-		navigator.clipboard.writeText(text).catch(() => copyWithFallback(text));
+	if (clipboard?.writeText) {
+		clipboard.writeText(text).catch(() => {
+			if (!copyWithFallback(text)) reportCopyUnavailable();
+		});
 		return true;
 	}
-	return copyWithFallback(text);
+	if (!copyWithFallback(text)) reportCopyUnavailable();
+	return true;
+}
+
+function reportCopyUnavailable() {
+	fetch(endpoints.prompt, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ prompt: "/copy unavailable" }),
+	}).catch(() => {});
 }
 
 function copyWithFallback(text) {
