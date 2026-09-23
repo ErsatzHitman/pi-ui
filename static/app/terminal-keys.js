@@ -110,3 +110,47 @@ export function fitTerminalColumns(element) {
 	const columns = Math.floor(available / cellWidth);
 	return columns >= 20 ? columns : undefined;
 }
+
+/** @type {Map<string, string[]>} Keys waiting to be sent, per surface, in typing order. */
+const pendingTerminalInput = new Map();
+
+/**
+ * Posts encoded terminal input to a surface in the order it was typed. Each key is its own
+ * request (a component's `handleInput()` expects one key sequence per call), but a surface
+ * only ever has one request in flight: parallel posts can reach the server out of order, and
+ * Datastar's `@post` cancels an in-flight request to the same URL, dropping keys typed faster
+ * than a network round trip.
+ * @param {string} endpoint
+ * @param {string} surfaceId
+ * @param {string} data
+ * @param {typeof fetch} [send]
+ */
+export function sendTerminalInput(endpoint, surfaceId, data, send = fetch) {
+	const queued = pendingTerminalInput.get(surfaceId);
+	if (queued) {
+		queued.push(data);
+		return;
+	}
+	const queue = [data];
+	pendingTerminalInput.set(surfaceId, queue);
+	return (async () => {
+		try {
+			for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+				try {
+					await send(endpoint, {
+						method: "POST",
+						headers: {
+							"content-type": "application/json",
+							"datastar-request": "true",
+						},
+						body: JSON.stringify({ surfaceId, data: next }),
+					});
+				} catch {
+					// The connection is gone; later keys are still tried in order.
+				}
+			}
+		} finally {
+			pendingTerminalInput.delete(surfaceId);
+		}
+	})();
+}

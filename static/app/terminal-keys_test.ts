@@ -6,6 +6,7 @@ import {
 	encodeTerminalKey,
 	encodeTerminalPaste,
 	encodeTerminalWheel,
+	sendTerminalInput,
 } from "./terminal-keys.js";
 
 function key(
@@ -60,4 +61,26 @@ test("terminal paste is bracketed and wheel maps to bounded arrow steps", () => 
 	assertEquals(encodeTerminalWheel({ deltaY: -40 }), "\u001b[A");
 	assertEquals(encodeTerminalWheel({ deltaY: 1000 }), "\u001b[B".repeat(5));
 	assertEquals(encodeTerminalWheel({ deltaY: 0 }), undefined);
+});
+
+test("terminal input reaches the server one key at a time, in typing order", async () => {
+	const sent: string[] = [];
+	const releases: Array<() => void> = [];
+	const send = (_url: string, init?: RequestInit) => {
+		sent.push(JSON.parse(String(init?.body)).data);
+		return new Promise<Response>((resolve) =>
+			releases.push(() => resolve(new Response())),
+		);
+	};
+	const done = sendTerminalInput("/input", "s1", "a", send as typeof fetch);
+	sendTerminalInput("/input", "s1", "b", send as typeof fetch);
+	sendTerminalInput("/input", "s1", "c", send as typeof fetch);
+	// Only the first key is in flight until the server answers it.
+	assertEquals(sent, ["a"]);
+	for (let step = 0; step < 3; step += 1) {
+		releases.shift()?.();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	}
+	await done;
+	assertEquals(sent, ["a", "b", "c"]);
 });

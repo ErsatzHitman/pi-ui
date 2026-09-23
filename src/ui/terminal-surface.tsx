@@ -102,7 +102,7 @@ function renderTerminalSurfaceDialog(surface: TerminalSurface): string {
 			aria-labelledby={surface.title ? `${id}-title` : undefined}
 			closedby="any"
 			data-preserve-attr="open"
-			data-on:close={`@post('${endpoints.terminalSurfaceInput}', { payload: { surfaceId: ${JSON.stringify(surface.id)}, data: '\\u001b' } })`}
+			data-on:close={postTerminalInput(surface.id, "'\\u001b'")}
 		>
 			{/* The dialog's single child is its panel (shared `.dialog > *` chrome); the panel is
 			    sized to the surface's column grid, capped to the viewport. */}
@@ -136,9 +136,13 @@ function renderTerminalSurfaceBlock(surface: TerminalSurface): string {
 	);
 }
 
-/** A Datastar expression posting `data` (an expression) to this surface's input route. */
+/**
+ * A Datastar expression sending `data` (an expression) to this surface's input route. Not an
+ * `@post()`: keys must arrive once each and in typing order, which concurrent (and, by
+ * default, mutually cancelling) `@post()` requests don't guarantee — see `sendTerminalInput`.
+ */
 function postTerminalInput(surfaceId: string, data: string): string {
-	return `@post('${endpoints.terminalSurfaceInput}', { payload: { surfaceId: ${JSON.stringify(surfaceId)}, data: ${data} } })`;
+	return `window.piUi.terminal.send('${endpoints.terminalSurfaceInput}', ${JSON.stringify(surfaceId)}, ${data})`;
 }
 
 function renderTerminalSurfaceBody(surface: TerminalSurface): string {

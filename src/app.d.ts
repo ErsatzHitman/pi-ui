@@ -86,6 +86,7 @@ interface PiUiNamespace {
 		encodePaste(text: string): string;
 		encodeWheel(event: WheelEvent): string | undefined;
 		fitColumns(element: HTMLElement): number | undefined;
+		send(endpoint: string, surfaceId: string, data: string): void;
 	};
 	shouldAbortOnEscape(event: KeyboardEvent): boolean;
 }

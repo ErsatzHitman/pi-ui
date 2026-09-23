@@ -38,6 +38,7 @@ import {
 	encodeTerminalPaste,
 	encodeTerminalWheel,
 	fitTerminalColumns,
+	sendTerminalInput,
 } from "./terminal-keys.js";
 import { bindTooltips } from "./tooltips.js";
 import { bindVimScroll } from "./vim-scroll.js";
@@ -82,6 +83,7 @@ window.piUi = {
 		encodePaste: encodeTerminalPaste,
 		encodeWheel: encodeTerminalWheel,
 		fitColumns: fitTerminalColumns,
+		send: sendTerminalInput,
 	},
 	windowFocus,
 	workspaceReview: { applyOpen: () => {} },
