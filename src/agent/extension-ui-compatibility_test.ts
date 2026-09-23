@@ -380,6 +380,72 @@ test("a command that throws is surfaced as an error and the dialog queue recover
 	}
 });
 
+const modeFixtureSource = `
+export default function (pi) {
+  pi.registerCommand("ui-mode", {
+    description: "Reports ctx.mode and ctx.hasUI",
+    handler: async (_args, ctx) => {
+      ctx.ui.notify(JSON.stringify({ mode: ctx.mode, hasUI: ctx.hasUI }), "info");
+    },
+  });
+}
+`;
+
+test('extensions bind as "tui" by default (R4-A)', async () => {
+	const root = await makeTempDir();
+	const agentDir = `${root}/agent`;
+	const cwd = `${root}/workspace`;
+	await mkdir(`${agentDir}/extensions`, { recursive: true });
+	await mkdir(cwd);
+	await Bun.write(`${agentDir}/extensions/ui-mode.js`, modeFixtureSource);
+
+	const store = new AppStore();
+	let controller: RuntimeController | undefined;
+	try {
+		controller = await RuntimeController.prepare(store, cwd, {
+			dependencies: dependencies(agentDir),
+		});
+		controller.activate();
+
+		assertEquals(await controller.prompt("/ui-mode"), true);
+		assertEquals(JSON.parse(store.messages.at(-1)?.text ?? ""), {
+			mode: "tui",
+			hasUI: true,
+		});
+	} finally {
+		await controller?.dispose();
+		await rm(root, { recursive: true });
+	}
+});
+
+test('extensionsMode: "rpc" keeps the pre-Round-4 binding as an escape hatch', async () => {
+	const root = await makeTempDir();
+	const agentDir = `${root}/agent`;
+	const cwd = `${root}/workspace`;
+	await mkdir(`${agentDir}/extensions`, { recursive: true });
+	await mkdir(cwd);
+	await Bun.write(`${agentDir}/extensions/ui-mode.js`, modeFixtureSource);
+
+	const store = new AppStore();
+	let controller: RuntimeController | undefined;
+	try {
+		controller = await RuntimeController.prepare(store, cwd, {
+			dependencies: dependencies(agentDir),
+			extensionsMode: "rpc",
+		});
+		controller.activate();
+
+		assertEquals(await controller.prompt("/ui-mode"), true);
+		assertEquals(JSON.parse(store.messages.at(-1)?.text ?? ""), {
+			mode: "rpc",
+			hasUI: true,
+		});
+	} finally {
+		await controller?.dispose();
+		await rm(root, { recursive: true });
+	}
+});
+
 function dependencies(agentDir: string): RuntimeControllerDependencies {
 	return {
 		createRuntime: (_factory, options) =>

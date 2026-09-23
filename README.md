@@ -268,21 +268,35 @@ starts waiting for input while the tab is hidden.
 
 ## extension compatibility
 
-pi-ui hosts pi extensions in `rpc` mode and renders their UI natively instead of a terminal:
+pi-ui binds pi SDK extensions as `"tui"` by default and renders their UI natively instead of a
+terminal:
 
-- Extensions that speak the **PIUI bridge protocol** (`ctx.ui.notify("PIUI …")`) render as
-  widgets, rosters, progress bars, markdown/diff panels, and native `<dialog>` sheets or forms,
-  reusing pi-ui's own components — no per-extension code.
 - Extensions that call `custom()`, `setWidget`, `setFooter`/`setHeader`, or read keyboard input
   through `onTerminalInput` get a **terminal surface**: a headless TUI host renders their ANSI
   output as themed HTML (light and dark) inside a dialog or an inline panel below the editor, and
   forwards browser keys (including modifiers, arrows, and paste) back to the extension.
+- Extensions gated on `ctx.mode === "tui"` (checking for terminal-only feature support — mcp/
+  mcp-auth panels, bash-background and subagents key handling, the jev card, and similar) now see
+  `"tui"` and work through the same terminal surface, instead of silently degrading to a text
+  fallback.
+- Extensions that speak the **PIUI bridge protocol** (`ctx.ui.notify("PIUI …")`) render as
+  widgets, rosters, progress bars, markdown/diff panels, and native `<dialog>` sheets or forms,
+  reusing pi-ui's own components — no per-extension code. Because `"tui"` binding alone would push
+  these extensions onto their `custom()` fallback too (their own live-RPC-client check keys off
+  the RPC family of modes), pi-ui sets the `PI_UI_BRIDGE=1` environment variable before any
+  extension loads as a documented host-capability signal. An extension's own bridge helper (or
+  equivalent) can check it — at both its top-level "use the bridge at all" gate and, importantly,
+  its own internal wire-delivery gate, if it has one — to stay on its native HTML path under
+  `"tui"`; see `scratchpad/r4-bridge.patch` (not part of this repo) for the small change one such
+  bridge helper needed (validated live: patching only the top-level gate left the panel silently
+  undelivered). Nothing here requires it, and an extension that doesn't check the marker still
+  works, just as a terminal surface instead.
 - Slash commands — every built-in plus every extension-registered command — get argument
   completions and native handling (pickers, dialogs, or notices) instead of being sent to the
   model as chat text.
-- Extensions gated on `ctx.mode === "tui"` (checking for a real terminal rather than feature
-  support) still degrade to their text fallback; this is a known, documented gap rather than a
-  crash — nothing in the RPC contract throws.
+- `extensions.mode` in the app config (`"tui"` by default, or `"rpc"`) is an escape hatch back to
+  the pre-`"tui"` binding, for the unlikely case a `ctx.mode === "tui"`-gated extension assumes a
+  real terminal process in a way the terminal surface shim doesn't cover.
 
 ## mobile and Capacitor wrapping
 
