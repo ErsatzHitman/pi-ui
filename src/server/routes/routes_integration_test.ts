@@ -792,6 +792,47 @@ test("extension UI actions reject a missing elementId without dispatching", asyn
 	assertEquals(dispatched, false);
 });
 
+test("extension UI actions reject an oversized elementId without dispatching", async () => {
+	let dispatched = false;
+	const host = fakeHost({
+		dispatchExtensionUiAction: async () => {
+			dispatched = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest("/extensions/ui/action", {
+			elementId: "x".repeat(600),
+			actionId: "submit",
+		}),
+	);
+
+	assertEquals(response.status, 400);
+	assertEquals(dispatched, false);
+});
+
+test("extension UI actions reject an oversized value without dispatching", async () => {
+	let dispatched = false;
+	const host = fakeHost({
+		dispatchExtensionUiAction: async () => {
+			dispatched = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest("/extensions/ui/action", {
+			elementId: "panel",
+			actionId: "submit",
+			value: { note: "x".repeat(70_000) },
+		}),
+	);
+
+	assertEquals(response.status, 400);
+	assertEquals(dispatched, false);
+});
+
 test("main stream binds a validated display client identity", async () => {
 	const clientId = "123e4567-e89b-42d3-a456-426614174000";
 	let connectedClientId: string | undefined;

@@ -70,9 +70,29 @@ export type PiUiActionRequest = {
  * must name the exact dialog id to open when a `sheet`/`screen` element first
  * appears) and the renderer that gives a `<dialog>` that same id — keeping a
  * single source of truth prevents the two from drifting apart.
+ *
+ * Substituting disallowed characters can collide two different inputs onto
+ * the same slug (`"a.b"` and `"a_b"` both become `"a_b"`). Whenever the
+ * substitution actually changed the value, a short deterministic hash of the
+ * original is appended so the two remain distinct; a value that was already
+ * a clean slug (the common case) passes through unchanged.
  */
 export function piUiSlug(value: string): string {
-	return value.replaceAll(/[^a-zA-Z0-9_-]/g, "_");
+	const slug = value.replaceAll(/[^a-zA-Z0-9_-]/g, "_");
+	return slug === value ? slug : `${slug}-${shortHash(value)}`;
+}
+
+/**
+ * A short, deterministic, non-cryptographic (FNV-1a) hash, used only to
+ * disambiguate slugs — never as an identifier or security boundary.
+ */
+function shortHash(value: string): string {
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < value.length; index += 1) {
+		hash ^= value.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return (hash >>> 0).toString(36);
 }
 
 /** Whether an element renders as a native `<dialog>` sheet rather than inline. */
