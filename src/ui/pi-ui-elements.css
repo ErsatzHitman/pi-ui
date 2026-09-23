@@ -227,7 +227,7 @@
 		overflow-wrap: anywhere;
 	}
 
-	.piui-sheet {
+	.piui-sheet > .piui-sheet-panel {
 		width: min(32rem, calc(100vw - 2rem));
 	}
 }
@@ -235,13 +235,15 @@
 @media (width <= 48rem) {
 	@layer components {
 		.piui-sheet {
-			position: fixed;
 			inset-block-end: 0;
 			inset-inline: 0;
 			top: auto;
 			width: 100%;
-			max-width: none;
 			margin: 0;
+			padding: 0;
+		}
+		.piui-sheet > .piui-sheet-panel {
+			width: 100%;
 			border-end-end-radius: 0;
 			border-end-start-radius: 0;
 			padding-block-end: max(1rem, env(safe-area-inset-bottom));

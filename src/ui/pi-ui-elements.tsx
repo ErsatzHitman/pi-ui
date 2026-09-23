@@ -191,26 +191,29 @@ function renderPiUiSheetDialog(element: PiUiElement): string {
 			data-preserve-attr="open"
 			data-on:close={dismissAction(element)}
 		>
-			<header>
-				<h2 id={`${dialogId(element)}-title`} safe>
-					{element.title ?? element.ns}
-				</h2>
-			</header>
-			{renderPiUiBody(element)}
-			<footer>
-				{!element.actions?.some((action) => action.id === closeActionId) && (
-					<button
-						type="button"
-						class="btn"
-						data-variant="outline"
-						commandfor={dialogId(element)}
-						command="close"
-					>
-						Close
-					</button>
-				)}
-				{renderPiUiActions(element)}
-			</footer>
+			{/* A `.dialog`'s single child is its panel (shared `.dialog > *` chrome). */}
+			<div class="piui-sheet-panel">
+				<header>
+					<h2 id={`${dialogId(element)}-title`} safe>
+						{element.title ?? element.ns}
+					</h2>
+				</header>
+				{renderPiUiBody(element)}
+				<footer>
+					{!element.actions?.some((action) => action.id === closeActionId) && (
+						<button
+							type="button"
+							class="btn"
+							data-variant="outline"
+							commandfor={dialogId(element)}
+							command="close"
+						>
+							Close
+						</button>
+					)}
+					{renderPiUiActions(element)}
+				</footer>
+			</div>
 		</dialog>,
 	);
 }
