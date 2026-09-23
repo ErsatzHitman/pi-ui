@@ -341,3 +341,25 @@ test("passes through the caller-supplied queued message counts", () => {
 	assertEquals(snapshot.queuedSteering, 2);
 	assertEquals(snapshot.queuedFollowUp, 1);
 });
+
+test("caps distinct extension channels, evicting the oldest along with its agent rows", () => {
+	const { controller, input } = fixture();
+	controller.recordChannel("subagents:fleet", {
+		entries: [{ key: "a1", name: "scout", state: "running", depth: 1 }],
+	});
+	const fleetRows = controller.snapshot(input).agents.length;
+	for (let index = 0; index < 80; index += 1) {
+		controller.recordChannel(`job:${index}`, { index });
+	}
+	const channels = controller.channelSnapshots().map((entry) => entry.channel);
+	assertEquals(channels.length, 64);
+	// The first channel published was evicted first, and its derived rows went with it.
+	assertEquals(channels.includes("subagents:fleet"), false);
+	assertEquals(channels.includes("job:79"), true);
+	assertEquals(channels.includes("job:15"), false);
+	assertEquals(
+		controller.snapshot(input).agents.some((row) => row.source === "subagents:fleet"),
+		false,
+	);
+	assertEquals(fleetRows > 0, true);
+});

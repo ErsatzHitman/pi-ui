@@ -5,6 +5,7 @@ import {
 	liveWorkspaceActivityLimit,
 	liveWorkspaceActivityTextLimit,
 	liveWorkspaceChannelJsonLimit,
+	liveWorkspaceChannelLimit,
 	liveWorkspaceChannelRowLimit,
 	liveWorkspaceToolPreviewLimit,
 	truncateForDisplay,
@@ -311,6 +312,18 @@ export class LiveWorkspaceController {
 	 */
 	recordChannel(channel: string, payload: JsonValue): void {
 		const value = asDisplayableJson(payload);
+		if (!this.channels.has(channel) && this.channels.size >= liveWorkspaceChannelLimit) {
+			// An extension keying channels by job/request id must not grow this map (and the
+			// Extensions tab it renders into) forever: evict the oldest-published channel —
+			// `Map` keeps insertion order — along with the agent rows derived from it.
+			const oldest = this.channels.keys().next().value;
+			if (oldest !== undefined) {
+				this.channels.delete(oldest);
+				for (const [id, row] of this.agents) {
+					if (row.source === oldest) this.agents.delete(id);
+				}
+			}
+		}
 		this.channels.set(channel, { channel, payload: value, updatedAt: Date.now() });
 		const rows = deriveAgentRows(channel, value);
 		const rowIds = new Set(rows.map((row) => row.id));

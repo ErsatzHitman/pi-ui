@@ -23,6 +23,8 @@ export const liveWorkspaceActivityTextLimit = 400;
 export const liveWorkspaceToolPreviewLimit = 240;
 /** Upper bound on how many rows a single extension channel payload can contribute. */
 export const liveWorkspaceChannelRowLimit = 50;
+/** Upper bound on how many distinct extension channels are kept (oldest-published evicted). */
+export const liveWorkspaceChannelLimit = 64;
 /** Upper bound on the JSON text kept for an unrecognized channel payload's fallback view. */
 export const liveWorkspaceChannelJsonLimit = 4000;
 
