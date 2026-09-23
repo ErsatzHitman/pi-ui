@@ -64,3 +64,18 @@ export type PiUiActionRequest = {
 	actionId: string;
 	value?: JsonValue;
 };
+
+/**
+ * A DOM-safe slug for an element's `ns`/`id`. Shared between `AppStore` (which
+ * must name the exact dialog id to open when a `sheet`/`screen` element first
+ * appears) and the renderer that gives a `<dialog>` that same id — keeping a
+ * single source of truth prevents the two from drifting apart.
+ */
+export function piUiSlug(value: string): string {
+	return value.replaceAll(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+/** The `<dialog>` element id a `sheet`/`screen`-placement element renders under. */
+export function piUiDialogId(element: Pick<PiUiElement, "id" | "ns">): string {
+	return `piui-sheet-${piUiSlug(element.ns)}-${piUiSlug(element.id)}`;
+}
