@@ -17,6 +17,7 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { exportSessionToHtml } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/export-html/index.js";
 import { resolveModelScopeFromModels } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/model-resolver.js";
 import { exportSessionToJsonl } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-export.js";
+import { resolvePath as canonicalizeSessionPath } from "../../node_modules/@earendil-works/pi-coding-agent/dist/utils/paths.js";
 import agentPackageJson from "../../node_modules/@earendil-works/pi-coding-agent/package.json" with { type: "json" };
 import type { PiUiActionRequest } from "../extension-surface-types.ts";
 import { sessionPerformance } from "../perf/session-performance.ts";
@@ -754,7 +755,7 @@ export class RuntimeController {
 	}
 
 	async abortBackgroundSession(sessionPath: string): Promise<boolean> {
-		const session = this.backgroundSessions.get(sessionPath);
+		const session = this.backgroundSessions.get(this.backgroundKey(sessionPath));
 		if (session?.status !== "running") return false;
 		await session.runtime.session.abort();
 		session.status = "completed";
@@ -871,7 +872,7 @@ export class RuntimeController {
 			if (current.sessionManager.getSessionFile() === target) {
 				current.setSessionName(nextName);
 			} else {
-				const background = this.backgroundSessions.get(target);
+				const background = this.backgroundSessions.get(this.backgroundKey(target));
 				if (background) background.runtime.session.setSessionName(nextName);
 				else manager.appendSessionInfo(nextName);
 			}
@@ -902,7 +903,10 @@ export class RuntimeController {
 			);
 			return false;
 		}
-		if (this.backgroundSessions.get(targetSessionFile)?.status === "running") {
+		if (
+			this.backgroundSessions.get(this.backgroundKey(targetSessionFile))
+				?.status === "running"
+		) {
 			this.state.appendMessage(
 				"system",
 				"Cannot delete a running background session.",
@@ -921,11 +925,13 @@ export class RuntimeController {
 			if (this.state.previousSessionPath === targetSessionFile) {
 				this.state.setPreviousSessionPath(undefined);
 			}
-			const backgroundSession = this.backgroundSessions.get(targetSessionFile);
+			const backgroundSession = this.backgroundSessions.get(
+				this.backgroundKey(targetSessionFile),
+			);
 			if (backgroundSession) {
 				this.unsubscribeBackgroundSession(backgroundSession);
 				await backgroundSession.runtime.dispose();
-				this.backgroundSessions.delete(targetSessionFile);
+				this.backgroundSessions.delete(this.backgroundKey(targetSessionFile));
 			}
 			this.state.removeSession(targetSessionFile);
 			await this.refreshSessions();
@@ -1054,7 +1060,7 @@ export class RuntimeController {
 				persisted: sourcePersisted,
 			}),
 			findBackground: (path) => {
-				const session = this.backgroundSessions.get(path);
+				const session = this.backgroundSessions.get(this.backgroundKey(path));
 				sessionPerformance.recordOwnershipDiagnostics(
 					{
 						targetBackgroundLookup: session ? "hit" : "miss",
@@ -1069,7 +1075,9 @@ export class RuntimeController {
 				return session;
 			},
 			activateBackground: async (path, session) => {
-				const activation = this.backgroundSessions.beginActivation(path);
+				const activation = this.backgroundSessions.beginActivation(
+					this.backgroundKey(path),
+				);
 				if (!activation || activation.runtime !== session) {
 					throw new RuntimeOwnershipInvariantError();
 				}
@@ -1483,6 +1491,19 @@ export class RuntimeController {
 		return this.backgroundSessions.liveCount(this.isCurrentRuntimeActive());
 	}
 
+	/**
+	 * Canonicalizes a session file path the same way `session-resume.ts` does
+	 * before using it as a `backgroundSessions` key, so registration and lookup
+	 * always agree regardless of how the caller spelled the path. In production
+	 * `getSessionFile()` already returns an absolute, canonical path, so this is
+	 * a no-op there; it only matters cross-platform, where a POSIX-style path
+	 * resolves differently than an already-platform-absolute one (e.g. on
+	 * Windows, `resolve("/sessions/a.jsonl")` lands under the current drive).
+	 */
+	private backgroundKey(sessionFile: string): string {
+		return canonicalizeSessionPath(sessionFile);
+	}
+
 	private unsubscribeBackgroundSession(session: BackgroundSession): void {
 		const unsubscribe = session.unsubscribe;
 		session.unsubscribe = () => {};
@@ -1557,7 +1578,7 @@ export class RuntimeController {
 	private backgroundCurrentRuntime(): void {
 		const sessionFile = this.runtime.session.sessionManager.getSessionFile();
 		if (!sessionFile) return;
-		if (this.backgroundSessions.has(sessionFile)) {
+		if (this.backgroundSessions.has(this.backgroundKey(sessionFile))) {
 			throw new RuntimeOwnershipInvariantError();
 		}
 		const snapshot = this.state.snapshotChat();
@@ -1582,7 +1603,10 @@ export class RuntimeController {
 		backgroundSession.unsubscribe = this.runtime.session.subscribe((event) =>
 			this.handleBackgroundEvent(backgroundSession, event),
 		);
-		this.backgroundSessions.register(sessionFile, backgroundSession);
+		this.backgroundSessions.register(
+			this.backgroundKey(sessionFile),
+			backgroundSession,
+		);
 		this.liveWorkspace.setBackgroundSession(
 			sessionFile,
 			"running",

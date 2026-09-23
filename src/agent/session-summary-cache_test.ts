@@ -1,8 +1,9 @@
 import { test } from "bun:test";
-import { appendFile, mkdir, rm, stat, symlink } from "node:fs/promises";
+import { appendFile, mkdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { assertEquals, assertFalse } from "#testing/assertions";
+import { symlinkDir } from "#testing/symlink";
 import { makeTempDir } from "#testing/temp";
 
 import { listCachedSessions } from "./session-catalog.ts";
@@ -130,7 +131,7 @@ test("flat custom session dirs and symlinked workspaces are discovered", async (
 				message("user", "Linked session", 2_000),
 			]),
 		);
-		await symlink(linkedWorkspace, join(sessionsRoot, "workspace"));
+		await symlinkDir(linkedWorkspace, join(sessionsRoot, "workspace"));
 
 		const sessions = await listCachedSessions(sessionsRoot, cachePath);
 		assertEquals(
