@@ -134,6 +134,37 @@ test("system messages make share URLs actionable and escape text", () => {
 	assertStringIncludes(html, 'target="_blank"');
 });
 
+test("notices render in the body font by default, not bold monospace", () => {
+	const html = renderMessage({
+		id: "notice-1",
+		presentationState: "plain",
+		presentationVersion: 1,
+		role: "notice",
+		noticeTone: "info",
+		text: "Set to gpt-5.",
+		timestamp: new Date(0),
+	});
+	assertStringIncludes(html, "notice-header");
+	assertStringIncludes(html, "notice-title");
+	assertStringExcludes(html, "notice-pre");
+	assertStringExcludes(html, "tool-header");
+	assertStringExcludes(html, "tool-title");
+});
+
+test("a pre-formatted notice keeps the monospace treatment", () => {
+	const html = renderMessage({
+		id: "notice-2",
+		presentationState: "plain",
+		presentationVersion: 1,
+		role: "notice",
+		noticeTone: "info",
+		format: "pre",
+		text: "tokens: 1,234\ncost: $0.01",
+		timestamp: new Date(0),
+	});
+	assertStringIncludes(html, "notice-header notice-pre");
+});
+
 test("custom messages render their customType as the label and markdown content", () => {
 	const html = renderMessage({
 		id: "custom-1",
@@ -175,6 +206,41 @@ test("a custom message without a customType falls back to a generic label", () =
 		timestamp: new Date(0),
 	});
 	assertStringIncludes(html, "custom");
+});
+
+test("custom messages (command output such as memory-info, rtk-status) render expanded", () => {
+	const html = renderMessage({
+		id: "custom-4",
+		presentationState: "plain",
+		presentationVersion: 1,
+		role: "custom",
+		text: "3 memories stored",
+		meta: "memory-info",
+		timestamp: new Date(0),
+	});
+	assertStringIncludes(html, "<details");
+	assertStringIncludes(html, 'data-preserve-attr="open" open>');
+});
+
+test("compaction and skill context messages stay collapsed by default", () => {
+	const compaction = renderMessage({
+		id: "compaction-1",
+		presentationState: "plain",
+		presentationVersion: 1,
+		role: "compaction",
+		text: "summary text",
+		timestamp: new Date(0),
+	});
+	assertStringExcludes(compaction, 'data-preserve-attr="open" open>');
+	const skill = renderMessage({
+		id: "skill-1",
+		presentationState: "plain",
+		presentationVersion: 1,
+		role: "skill",
+		text: "skill body",
+		timestamp: new Date(0),
+	});
+	assertStringExcludes(skill, 'data-preserve-attr="open" open>');
 });
 
 test("bodyless tools show only their title", () => {
