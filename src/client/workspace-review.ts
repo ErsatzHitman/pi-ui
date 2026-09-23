@@ -58,6 +58,7 @@ type CommitView = { detail: WorkspaceCommitDetail; items: ReviewItem[] };
 
 const diffListEndPadding = 10;
 const workspaceGap = 2;
+const historyNavigationCodes = new Set(["ArrowDown", "ArrowUp", "Home", "End"]);
 const codeThemeLight = document.body.dataset.codeThemeLight;
 const codeThemeDark = document.body.dataset.codeThemeDark;
 if (codeThemeLight && codeThemeDark) {
@@ -547,7 +548,7 @@ async function loadWorkingDiff(key: string): Promise<void> {
 		workingItems = [];
 		displayedWorkingKey = undefined;
 		viewer?.setItems([]);
-		workingError = error instanceof Error ? error.message : "Unable to load diff";
+		workingError = Error.isError(error) ? error.message : "Unable to load diff";
 	} finally {
 		if (!request.signal.aborted) {
 			workingRequest = undefined;
@@ -900,7 +901,7 @@ function handleHistoryKeydown(event: KeyboardEvent): void {
 		event.ctrlKey ||
 		event.metaKey ||
 		event.shiftKey ||
-		!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.code)
+		!historyNavigationCodes.has(event.code)
 	) {
 		return;
 	}
@@ -1080,7 +1081,6 @@ function createVisibility(
 		);
 		if (!button) return;
 		button.inert = !available;
-		button.style.visibility = available ? "visible" : "hidden";
 	};
 	const requestOpen = (next: boolean) => {
 		app.dispatchEvent(
@@ -1138,7 +1138,7 @@ function emptyMessage(): string {
 }
 
 function showEmpty(message?: string): void {
-	empty.style.display = message ? "grid" : "none";
+	empty.hidden = !message;
 	if (message) empty.textContent = message;
 }
 
@@ -1154,22 +1154,22 @@ function writePreferences(): void {
 function submitWorkspaceReviewComments(
 	comments: readonly WorkspaceReviewComment[],
 ): Promise<boolean> {
-	return new Promise((resolve) => {
-		const timeout = setTimeout(() => resolve(false), 10_000);
-		window.addEventListener(
-			"pi-ui-workspace-review-submitted",
-			() => {
-				clearTimeout(timeout);
-				resolve(true);
-			},
-			{ once: true },
-		);
-		document.body.dispatchEvent(
-			new CustomEvent("pi-ui-workspace-review-submit", {
-				detail: { comments },
-			}),
-		);
-	});
+	const { promise, resolve } = Promise.withResolvers<boolean>();
+	const timeout = setTimeout(() => resolve(false), 10_000);
+	window.addEventListener(
+		"pi-ui-workspace-review-submitted",
+		() => {
+			clearTimeout(timeout);
+			resolve(true);
+		},
+		{ once: true },
+	);
+	document.body.dispatchEvent(
+		new CustomEvent("pi-ui-workspace-review-submit", {
+			detail: { comments },
+		}),
+	);
+	return promise;
 }
 
 function writeWorkspaceReviewPreferences(value: WorkspaceReviewPreferences): void {
@@ -1181,13 +1181,11 @@ function writeWorkspaceReviewPreferences(value: WorkspaceReviewPreferences): voi
 function updateWorkingAnnotations(path: string): void {
 	const index = workingItems.findIndex((item) => item.fileDiff.name === path);
 	if (index < 0) return;
-	const next = [...workingItems];
-	next[index] = {
-		...next[index],
+	workingItems = workingItems.with(index, {
+		...workingItems[index],
 		annotations: comments.annotations.get(path),
 		version: ++version,
-	};
-	workingItems = next;
+	});
 	if (selection.kind === "working") {
 		items = workingItems;
 		itemsByPath = itemMap(items);

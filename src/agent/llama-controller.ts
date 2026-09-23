@@ -1,15 +1,12 @@
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
-import type { AppLlamaDialog, AppLlamaModel, AppStore } from "../state/app-store.ts";
-import { errorMessage } from "../utils/errors.ts";
 import {
 	LlamaClient,
-	llamaLoadProgress,
 	type LlamaModelInfo,
-	llamaProviderId,
-} from "./llama-client.ts";
-
-const pollIntervalMs = 500;
+} from "../../node_modules/@earendil-works/pi-coding-agent/dist/extensions/llama/client.js";
+import { LLAMA_PROVIDER_ID } from "../../node_modules/@earendil-works/pi-coding-agent/dist/extensions/llama/provider.js";
+import type { AppLlamaDialog, AppLlamaModel, AppStore } from "../state/app-store.ts";
+import { errorMessage } from "../utils/errors.ts";
 type LlamaRuntime = {
 	services: {
 		modelRuntime: Pick<
@@ -73,7 +70,7 @@ export class LlamaController {
 		try {
 			const client = await this.client();
 			if (!this.state.llamaDialog) return;
-			const models = await client.list(AbortSignal.timeout(15_000));
+			const models = await client.list({ signal: AbortSignal.timeout(15_000) });
 			if (!this.state.llamaDialog) return;
 			this.state.setLlamaDialog({
 				models: models.map(toAppModel),
@@ -90,11 +87,22 @@ export class LlamaController {
 		try {
 			const client = await this.client();
 			operation.client = client;
-			if (load) this.watchProgress(operation);
-			await client.setLoaded(modelId, load, abortController.signal);
-			const catalog = await this.waitForStatus(operation);
+			if (load) {
+				await client.loadAndWait(
+					modelId,
+					({ message, ratio }) => {
+						if (this.operation === operation) {
+							this.updateDialog({ progress: { label: message, ratio } });
+						}
+					},
+					abortController.signal,
+				);
+			} else {
+				await client.unloadAndWait(modelId, abortController.signal);
+			}
+			const catalog = await client.list({ signal: abortController.signal });
 			await this.getRuntime().services.modelRuntime.refresh({
-				providers: [llamaProviderId],
+				providers: [LLAMA_PROVIDER_ID],
 				signal: abortController.signal,
 			});
 			if (this.operation !== operation || !this.state.llamaDialog) return;
@@ -118,43 +126,9 @@ export class LlamaController {
 		}
 	}
 
-	private watchProgress(operation: LlamaOperation): void {
-		const client = operation.client;
-		if (!client) return;
-		void client
-			.watch((event) => {
-				if (event.model !== operation.modelId || this.operation !== operation)
-					return;
-				const progress = llamaLoadProgress(event);
-				if (progress) this.updateDialog({ progress });
-			}, operation.abortController.signal)
-			.catch(() => {});
-	}
-
-	private async waitForStatus(operation: LlamaOperation): Promise<LlamaModelInfo[]> {
-		const client = operation.client;
-		if (!client) throw new Error("llama.cpp client unavailable");
-		while (true) {
-			await sleep(pollIntervalMs, operation.abortController.signal);
-			const catalog = await client.list(operation.abortController.signal);
-			const model = catalog.find((candidate) => candidate.id === operation.modelId);
-			const reachedTarget = operation.load
-				? model?.status.value === "loaded"
-				: model?.status.value === "unloaded";
-			if (reachedTarget) return catalog;
-			if (model?.status.failed) {
-				throw new Error(
-					model.status.exit_code === undefined
-						? `Failed to ${operation.load ? "load" : "unload"} ${operation.modelId}`
-						: `llama.cpp exited with code ${model.status.exit_code}`,
-				);
-			}
-		}
-	}
-
 	private async client(): Promise<LlamaClient> {
 		const result =
-			await this.getRuntime().services.modelRuntime.getAuth(llamaProviderId);
+			await this.getRuntime().services.modelRuntime.getAuth(LLAMA_PROVIDER_ID);
 		if (!result) throw configurationError();
 		const serverUrl = result.env?.LLAMA_BASE_URL ?? result.auth.baseUrl;
 		if (!serverUrl) throw configurationError();
@@ -173,7 +147,7 @@ export class LlamaController {
 		operation.abortController.abort();
 		if (operation.load && operation.client) {
 			void operation.client
-				.setLoaded(operation.modelId, false, AbortSignal.timeout(15_000))
+				.unload(operation.modelId, AbortSignal.timeout(15_000))
 				.catch(() => {});
 		}
 	}
@@ -189,22 +163,4 @@ function modelIsLoaded(status: string): boolean {
 
 function toAppModel(model: LlamaModelInfo): AppLlamaModel {
 	return { id: model.id, status: model.status.value };
-}
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-	return new Promise((resolve, reject) => {
-		if (signal.aborted) {
-			reject(signal.reason);
-			return;
-		}
-		const abort = () => {
-			clearTimeout(timeout);
-			reject(signal.reason);
-		};
-		const timeout = setTimeout(() => {
-			signal.removeEventListener("abort", abort);
-			resolve();
-		}, ms);
-		signal.addEventListener("abort", abort, { once: true });
-	});
 }

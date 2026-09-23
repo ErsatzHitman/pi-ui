@@ -37,9 +37,9 @@ export function syncWorkspaceTreePaths(
 		if (!before.has(path)) operations.push({ type: "add", path });
 	}
 	// Remove children before parents, including implicitly created folders.
-	for (const path of [...before]
-		.filter((path) => !after.has(path))
-		.sort((a, b) => b.length - a.length)) {
+	for (const path of [...before.difference(after)].toSorted(
+		(a, b) => b.length - a.length,
+	)) {
 		operations.push({ type: "remove", path });
 	}
 	if (operations.length > 0) tree.batch(operations);

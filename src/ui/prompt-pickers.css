@@ -120,7 +120,7 @@
 			width 130ms ease,
 			opacity 130ms ease;
 	}
-	.model-option:is(:hover, :focus-within) .model-scope-button,
+	.model-option:is(.active, :focus-within) .model-scope-button,
 	.model-scope-button:focus-visible,
 	.model-scope-button-active {
 		width: 1.75rem;

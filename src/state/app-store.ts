@@ -249,9 +249,9 @@ function datastarInspectorEnabled(): boolean {
 	return process.env.PI_UI_INSPECTOR === "1";
 }
 function uniqueStrings(values: string[]): string[] {
-	const unique: string[] = [];
-	for (const value of values) if (value && !unique.includes(value)) unique.push(value);
-	return unique;
+	const unique = new Set(values);
+	unique.delete("");
+	return [...unique];
 }
 
 /** Mutable authoritative application state. It has no renderer or transport dependency. */
@@ -310,13 +310,16 @@ export class AppStore {
 		return this.orderedSessions.slice(0, this.sessionLimit);
 	}
 	private get orderedSessions(): AppSessionSummary[] {
-		const priority = (session: AppSessionSummary) => {
+		const running: AppSessionSummary[] = [];
+		const completed: AppSessionSummary[] = [];
+		const idle: AppSessionSummary[] = [];
+		for (const session of this.sessionCatalog) {
 			const status = sessionStatus(session, this);
-			return status === "running" ? 0 : status === "completed" ? 1 : 2;
-		};
-		return this.sessionCatalog.toSorted(
-			(left, right) => priority(left) - priority(right),
-		);
+			if (status === "running") running.push(session);
+			else if (status === "completed") completed.push(session);
+			else idle.push(session);
+		}
+		return running.concat(completed, idle);
 	}
 	get sessionsHasMore(): boolean {
 		return (
@@ -383,12 +386,12 @@ export class AppStore {
 			thinkingHidden: this.thinkingHidden,
 			usage: { ...this.usage },
 			activityText: this.activityText,
-			queuedSteeringMessages: [...this.queuedSteeringMessages],
-			queuedFollowUpMessages: [...this.queuedFollowUpMessages],
+			queuedSteeringMessages: this.queuedSteeringMessages,
+			queuedFollowUpMessages: this.queuedFollowUpMessages,
 			workspacePath: this.workspacePath,
 			workspaceFilesRevision: this.workspaceFilesRevision,
 			workspaceTreeRevision: this.workspaceTreeRevision,
-			workspaceReview: structuredClone(this.workspaceReview),
+			workspaceReview: this.workspaceReview,
 			workspaceReviewPreferences: { ...this.workspaceReviewPreferences },
 			recentWorkspaces: [...this.recentWorkspaces],
 			sessionTransition: { ...this.sessionTransition },
@@ -397,7 +400,7 @@ export class AppStore {
 			documentTitle: this.documentTitle,
 			updateAvailable: this.updateAvailable,
 			hasOlderMessages: this.hasOlderMessages,
-			promptHistory: [...this.promptHistory],
+			promptHistory: this.promptHistory,
 			promptEditorText: this.promptEditorText,
 			emptyChatHint: { ...this.emptyChatHint },
 		});
@@ -550,19 +553,16 @@ export class AppStore {
 	}
 	promoteSession(path: string, options: { regroup?: boolean } = {}): boolean {
 		const catalog = this.getSessionCatalog();
-		const session = catalog.find((candidate) => candidate.path === path);
-		if (!session) return false;
-		if (catalog[0]?.path === path) {
+		const index = catalog.findIndex((candidate) => candidate.path === path);
+		if (index < 0) return false;
+		if (index === 0) {
 			if (options.regroup) {
 				this.presentation?.sessionsChanged();
 				this.commit();
 			}
 			return false;
 		}
-		this.sessionCatalog = [
-			session,
-			...catalog.filter((candidate) => candidate.path !== path),
-		];
+		this.sessionCatalog = [catalog[index], ...catalog.toSpliced(index, 1)];
 		this.presentation?.sessionsChanged();
 		this.commit();
 		return true;
@@ -575,24 +575,25 @@ export class AppStore {
 		const catalog = this.getSessionCatalog();
 		const index = catalog.findIndex((candidate) => candidate.path === path);
 		if (index < 0) return false;
-		this.sessionCatalog = catalog.map((session, candidateIndex) =>
-			candidateIndex === index ? update(session) : session,
-		);
+		this.sessionCatalog = catalog.with(index, update(catalog[index]));
 		if (options.sidebarOnly) this.presentation?.sessionSidebarChanged();
 		else this.presentation?.sessionsChanged();
 		this.commit();
 		return true;
 	}
 	searchSessions(query: string): AppSessionSummary[] {
-		const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-		if (terms.length === 0) return [...this.sessions];
+		const normalized = query.trim().toLowerCase();
+		if (!normalized) return [...this.sessions];
+		const terms = normalized.split(/\s+/);
 		return this.orderedSessions
+			.values()
 			.filter((session) => {
 				const haystack =
 					`${session.title} ${formatMessageCount(session.messageCount)} ${session.cwd} ${session.path}`.toLowerCase();
 				return terms.every((term) => haystack.includes(term));
 			})
-			.slice(0, this.sessionLimit);
+			.take(this.sessionLimit)
+			.toArray();
 	}
 	removeSession(path: string): void {
 		this.setSessionCatalog(
@@ -708,6 +709,7 @@ export class AppStore {
 		this.commit();
 	}
 	setActivityText(value: string | undefined): void {
+		if (this.activityText === value) return;
 		this.transcript.setActivityText(value);
 		this.presentation?.sessionsChanged();
 		this.commit();

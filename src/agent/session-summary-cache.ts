@@ -5,7 +5,7 @@ import type { SessionInfo } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
 import { Compile } from "typebox/compile";
 
-import { appCachePath } from "../utils/app-cache.ts";
+import { appCachePath } from "../utils/app-dirs.ts";
 import {
 	attachmentDisplayName,
 	splitLeadingAttachmentReferences,
@@ -184,7 +184,7 @@ async function parseSessionFile(
 			let lineStart = 0;
 			for (let index = 0; index < chunk.length; index += 1) {
 				if (chunk[index] !== 10) continue;
-				const part = chunk.slice(lineStart, index);
+				const part = chunk.subarray(lineStart, index);
 				const line = joinBytes(pending, pendingBytes, part);
 				pending.length = 0;
 				pendingBytes = 0;
@@ -193,7 +193,7 @@ async function parseSessionFile(
 				lineStart = index + 1;
 			}
 			if (lineStart < chunk.length) {
-				const remainder = chunk.slice(lineStart);
+				const remainder = chunk.subarray(lineStart);
 				pending.push(remainder);
 				pendingBytes += remainder.length;
 			}

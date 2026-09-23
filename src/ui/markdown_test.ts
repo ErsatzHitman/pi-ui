@@ -80,6 +80,10 @@ test("local image sources are served through the file preview route", async () =
 				assertIncludes(html, `src="${expected}"`);
 			}
 		}
+		const relative = await renderMarkdownFinal("![shot](shot.png)", {
+			localImageBase: dir,
+		});
+		assertIncludes(relative, `src="${expected}"`);
 	} finally {
 		await rm(dir, { recursive: true, force: true });
 	}

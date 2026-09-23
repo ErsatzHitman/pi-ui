@@ -2,17 +2,7 @@ import { test } from "bun:test";
 
 import { assertEquals } from "#testing/assertions";
 
-import { checkForUpdate, compareVersions, upgradeCommand } from "./update-check.ts";
-
-test("versions compare numerically and treat releases above prereleases", () => {
-	assertEquals(compareVersions("0.45.0", "0.44.0"), 1);
-	assertEquals(compareVersions("0.44.0", "0.45.0"), -1);
-	assertEquals(compareVersions("0.44.0", "0.44.0"), 0);
-	assertEquals(compareVersions("0.45.0", "0.45.0-beta.1"), 1);
-	assertEquals(compareVersions("0.45.0-beta.1", "0.45.0"), -1);
-	assertEquals(compareVersions("0.10.0", "0.9.0"), 1);
-	assertEquals(compareVersions("not a version", "0.44.0"), 0);
-});
+import { checkForUpdate, upgradeCommand } from "./update-check.ts";
 
 test("update checks report only newer published versions", async () => {
 	const newer = await checkForUpdate(
@@ -45,6 +35,12 @@ test("update checks ignore failed responses and malformed payloads", async () =>
 		"0.44.0",
 	);
 	assertEquals(malformed, undefined);
+
+	const invalidVersion = await checkForUpdate(
+		async () => Response.json({ version: "latest" }),
+		"0.44.0",
+	);
+	assertEquals(invalidVersion, undefined);
 
 	const offline = await checkForUpdate(async () => {
 		throw new Error("offline");

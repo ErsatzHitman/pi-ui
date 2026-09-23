@@ -90,6 +90,17 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 						data-bind:prompt
 						attrs={{
 							"data-on:input__debounce.150ms": `@post('${endpoints.extensionUiEditor}', { payload: { prompt: $prompt } })`,
+							"data-on:pi-ui-file-query__debounce.20ms": `
+								if (typeof evt.detail?.query === 'string') {
+									$_fileSearchController?.abort?.();
+									$_fileSearchController = new AbortController();
+									$fileQuery = evt.detail.query;
+									@get('${endpoints.filesSearch}', {
+										payload: { fileQuery: $fileQuery },
+										requestCancellation: $_fileSearchController,
+									});
+								}
+							`,
 							"data-on:keydown__window": keybindAction(
 								"focus-prompt",
 								`el.focus({ preventScroll: true });
@@ -103,25 +114,12 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 						!$prompt.includes(' ');
 						"
 						data-on:pi-ui-picker-close="$_slashPickerOpen = false"
-						data-on:pi-ui-file-query={`
-							if (typeof $_fileSearchController?.abort === 'function') {
-							$_fileSearchController.abort();
-						}
-						$_fileSearchController = new AbortController();
-							$fileQuery = evt.detail.query;
-							@get('${endpoints.filesSearch}', {
-						payload: { fileQuery: $fileQuery },
-						requestCancellation: $_fileSearchController,
-					});
-						`}
 						data-on:pi-ui-file-close={`
-							if (typeof $_fileSearchController?.abort === 'function') {
-							$_fileSearchController.abort();
-						}
-						$_fileSearchController = '';
+							$_fileSearchController?.abort?.();
+							$_fileSearchController = '';
 							$_filePickerOpen = false;
 						`}
-						data-effect={`if (!$_sessionTransitionLoading) {
+						data-effect={`if ($_sessionTransitionStatus !== 'loading') {
 							el.focus({ preventScroll: true });
 							el.selectionStart = el.value.length;
 							el.selectionEnd = el.value.length;
@@ -138,14 +136,11 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 							!evt.metaKey &&
 							!evt.altKey &&
 							!evt.shiftKey &&
-							!window.piUi.pickers.isOpen()
+							!window.piUi.pickers.isOpen() &&
+							document.querySelector('[data-send-trigger]')
 						) {
 							evt.preventDefault();
-							if ($_isBusy) {
-								@post('${endpoints.abort}', { payload: {} });
-							} else {
-								el.blur();
-							}
+							el.blur();
 						}
 						if (evt.altKey && evt.code === 'ArrowUp') {
 							evt.preventDefault();

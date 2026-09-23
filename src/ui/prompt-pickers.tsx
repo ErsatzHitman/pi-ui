@@ -26,7 +26,7 @@ export function renderWorkspacePicker(state: AppStateSnapshot): string {
 			aria-haspopup="dialog"
 			aria-controls="workspace-dialog"
 			aria-label={state.workspacePath}
-			data-attr:disabled="$_sessionTransitionLoading"
+			data-attr:disabled="$_sessionTransitionStatus === 'loading'"
 			commandfor="workspace-dialog"
 			command="show-modal"
 			data-on:click="$_workspaceAction = 'open'"
@@ -292,8 +292,9 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 													? "true"
 													: "false"
 											}
-											data-model-search-text={`${model.id} ${model.provider}`}
-											data-model-search-keywords={model.name}
+											data-model-id={model.id}
+											data-model-provider={model.provider}
+											data-model-name={model.name}
 											data-model-search-order={index}
 											data-on:click={`
 												$_modelQuery = '';
@@ -337,12 +338,9 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 													model.scoped ? "true" : "false"
 												}
 												aria-label="Toggle scoped model"
-												data-on:click={`
-													evt.stopPropagation();
-													@post('${endpoints.modelsScopeToggle}', {
-													payload: { model: ${JSON.stringify(value)} },
-												});
-												`}
+												data-on:click__stop={`@post('${endpoints.modelsScopeToggle}', {
+												payload: { model: ${JSON.stringify(value)} },
+												});`}
 											>
 												<Icon
 													icon={Star}

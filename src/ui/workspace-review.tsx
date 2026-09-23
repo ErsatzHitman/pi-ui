@@ -7,12 +7,12 @@ import {
 	gitPaneRatioDefault,
 	gitPaneRatioMax,
 	gitPaneRatioMin,
-	hasTrackedWorkspaceChanges,
 	reviewSidebarWidthDefault,
 	reviewSidebarWidthMax,
 	reviewSidebarWidthMin,
 	type WorkspaceReviewPreferences,
 	type WorkspaceReviewSnapshot,
+	workspaceChangeStats,
 } from "../workspace-review-types.ts";
 import { Icon } from "./icon.tsx";
 import { SquareSplitHorizontal, SquareSplitVertical, TextWrap, X } from "./icons.ts";
@@ -80,14 +80,7 @@ export function renderWorkspaceReview(
 	snapshot: WorkspaceReviewSnapshot,
 	preferences: WorkspaceReviewPreferences,
 ): string {
-	const additions = snapshot.changes.reduce(
-		(total, change) => total + change.additions,
-		0,
-	);
-	const deletions = snapshot.changes.reduce(
-		(total, change) => total + change.deletions,
-		0,
-	);
+	const stats = workspaceChangeStats(snapshot.changes);
 	return syncHtml(
 		<section
 			id="workspace-review"
@@ -173,21 +166,21 @@ export function renderWorkspaceReview(
 								class="review-change-totals"
 								title="Tracked line changes"
 								data-attr:hidden="!$_workspaceReviewStatsKnown"
-								hidden={!hasTrackedWorkspaceChanges(snapshot.changes)}
+								hidden={!stats.tracked}
 							>
 								<span
 									id="review-total-additions"
 									class="review-additions"
 									data-text="'+' + $_workspaceReviewAdditions"
 								>
-									+{additions}
+									+{stats.additions}
 								</span>
 								<span
 									id="review-total-deletions"
 									class="review-deletions"
 									data-text="'-' + $_workspaceReviewDeletions"
 								>
-									-{deletions}
+									-{stats.deletions}
 								</span>
 							</span>
 						</header>
@@ -295,7 +288,33 @@ export function renderWorkspaceReview(
 							<ShortcutKbd
 								shortcut={activeKeybind("focus-workspace-editor")}
 							/>
-							<div class="segmented-control review-icon-control">
+							<div
+								id="workspace-file-mode"
+								class="segmented-control"
+								aria-label="File view"
+								hidden
+							>
+								<button
+									id="workspace-file-preview-mode"
+									type="button"
+									class="review-segment-text"
+									aria-pressed="true"
+								>
+									Preview
+								</button>
+								<button
+									id="workspace-file-source-mode"
+									type="button"
+									class="review-segment-text"
+									aria-pressed="false"
+								>
+									Source
+								</button>
+							</div>
+							<div
+								id="workspace-file-wrap-control"
+								class="segmented-control review-icon-control"
+							>
 								<button
 									id="workspace-file-wrap"
 									type="button"
@@ -343,9 +362,16 @@ export function renderWorkspaceReview(
 						<div
 							id="workspace-file-view"
 							class="review-scroll-view"
-							aria-label="File contents"
+							aria-label="File source"
 							aria-keyshortcuts={keybindAria("focus-workspace-editor")}
 							tabindex="-1"
+						/>
+						<div
+							id="workspace-file-preview"
+							class="workspace-file-preview"
+							aria-label="File preview"
+							tabindex="-1"
+							hidden
 						/>
 						<div id="workspace-file-empty" class="review-empty">
 							Open a file from the workspace

@@ -24,7 +24,7 @@ const attachments = [];
 export function hasFiles(data) {
 	if (!data) return false;
 	if (data.files?.length) return true;
-	return [...data.types].some((type) => type === "Files" || type === "text/uri-list");
+	return data.types.includes("Files") || data.types.includes("text/uri-list");
 }
 
 export function pick() {
@@ -155,7 +155,9 @@ export function extractTransferredFilePaths(data) {
 	for (const file of transferredFiles(data)) {
 		references.push(file.path ?? "", file.webkitRelativePath ?? "");
 	}
-	return [...new Set(references.map(fileReferenceToPath).filter(Boolean))];
+	const paths = new Set(references.map(fileReferenceToPath));
+	paths.delete(undefined);
+	return [...paths];
 }
 
 function transferredFiles(data) {
@@ -188,17 +190,15 @@ export function fileWithDetectedMimeType(file, mimeType) {
 	});
 }
 
-async function prepareTransferredImages(files) {
-	const prepared = [];
-	for (const file of files) {
+function prepareTransferredImages(files) {
+	return Array.fromAsync(files, (file) => {
 		if (isHeicImageFile(file)) {
 			throw new Error(
 				"HEIC and HEIF images are not supported. Convert them to JPEG or PNG first.",
 			);
 		}
-		prepared.push(isAvifImageFile(file) ? await convertAvifToJpeg(file) : file);
-	}
-	return prepared;
+		return isAvifImageFile(file) ? convertAvifToJpeg(file) : file;
+	});
 }
 
 export async function convertAvifToJpeg(file) {
@@ -263,10 +263,13 @@ function validateTransferredFiles(files) {
 	if (files.length > MAX_TRANSFER_FILES) {
 		return `Attach at most ${MAX_TRANSFER_FILES} files at a time.`;
 	}
-	if (files.some((file) => file.size > MAX_TRANSFER_FILE_BYTES)) {
-		return "Dropped or pasted files must be 20 MiB or smaller; use the Files button for larger files.";
+	let totalBytes = 0;
+	for (const file of files) {
+		if (file.size > MAX_TRANSFER_FILE_BYTES) {
+			return "Dropped or pasted files must be 20 MiB or smaller; use the Files button for larger files.";
+		}
+		totalBytes += file.size;
 	}
-	const totalBytes = files.reduce((total, file) => total + file.size, 0);
 	if (totalBytes > MAX_TRANSFER_TOTAL_BYTES) {
 		return "Dropped or pasted files must total 50 MiB or less.";
 	}
@@ -374,17 +377,16 @@ function renderAttachments() {
 
 function renderAttachment(attachment) {
 	const name = attachment.file?.name || displayName(attachment.path);
+	const item = document.createElement("button");
+	item.type = "button";
+	item.className = `prompt-attachment prompt-attachment-${attachment.previewUrl ? "image" : "file"}`;
+	item.setAttribute("aria-label", `Remove ${name}`);
+	item.addEventListener("click", () => removeAttachment(attachment.path));
 	if (attachment.previewUrl) {
-		const item = document.createElement("button");
-		item.type = "button";
-		item.className = "prompt-attachment prompt-attachment-image";
-		item.setAttribute("aria-label", `Remove ${name}`);
-		item.addEventListener("click", () => removeAttachment(attachment.path));
 		const preview = document.createElement("span");
 		preview.className = "prompt-attachment-preview";
 		const image = document.createElement("img");
 		image.className = "prompt-attachment-image-content";
-		image.style.overflowClipMargin = "unset";
 		image.src = attachment.previewUrl;
 		image.alt = name;
 		preview.append(image);
@@ -392,11 +394,6 @@ function renderAttachment(attachment) {
 		return item;
 	}
 
-	const item = document.createElement("button");
-	item.type = "button";
-	item.className = "prompt-attachment prompt-attachment-file";
-	item.setAttribute("aria-label", `Remove ${name}`);
-	item.addEventListener("click", () => removeAttachment(attachment.path));
 	const extension = attachmentFileExtension(name);
 	const kind = attachmentFileKind(name, attachment.file?.type);
 	const icon = document.createElement("span");

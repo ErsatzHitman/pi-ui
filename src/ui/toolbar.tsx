@@ -147,18 +147,15 @@ function ToolbarButton(props: {
 					: undefined
 			}
 			inert={props.unavailable}
-			style={props.unavailable ? "visibility: hidden" : undefined}
 			data-preserve-attr={
-				props.action === "review"
-					? "aria-pressed data-variant inert style"
-					: undefined
+				props.action === "review" ? "aria-pressed data-variant inert" : undefined
 			}
 			data-size="icon-sm"
 			type="button"
 			data-indicator:_new-session-pending={isSessionChangingAction(props.action)}
 			data-attr:disabled={
 				isSessionChangingAction(props.action)
-					? "$_newSessionPending || $_sessionTransitionLoading"
+					? "$_newSessionPending || $_sessionTransitionStatus === 'loading'"
 					: undefined
 			}
 			data-on:click={toolbarClickAction(props.action)}

@@ -1,5 +1,5 @@
 import { responseErrorMessage } from "../../src/utils/errors.ts";
-import { isHtmlFileUri } from "../file-uri.js";
+import { fileUriToPath } from "../file-uri.js";
 
 export function bindFileLinks() {
 	document.addEventListener(
@@ -10,34 +10,18 @@ export function bindFileLinks() {
 				event.target instanceof Element ? event.target.closest("a[href]") : null;
 			if (!(link instanceof HTMLAnchorElement)) return;
 			const markedUri = link.getAttribute("data-pi-file-link") ?? "";
-			const uri = isFileUri(markedUri) ? markedUri : link.href;
-			if (!isFileUri(uri)) return;
+			const markedPath = markedUri ? fileUriToPath(markedUri) : undefined;
+			const uri = markedPath === undefined ? link.href : markedUri;
+			const path = markedPath ?? fileUriToPath(uri);
+			if (path === undefined) return;
 
 			// File navigation is forbidden from the HTTP UI. Claim the click even if
 			// another client handler already prevented it, then delegate to the backend.
 			event.preventDefault();
-			if (isHtmlFileUri(uri)) {
-				const endpoint = document.body.dataset.filesOpenEndpoint;
-				if (endpoint)
-					window.open(
-						`${endpoint}?uri=${encodeURIComponent(uri)}`,
-						"_blank",
-						"noopener,noreferrer",
-					);
-			} else {
-				void followFileLink(uri);
-			}
+			void followFileLink(uri);
 		},
 		{ capture: true },
 	);
-}
-
-export function isFileUri(uri) {
-	try {
-		return new URL(uri).protocol === "file:";
-	} catch {
-		return false;
-	}
 }
 
 async function followFileLink(uri) {
@@ -55,11 +39,12 @@ async function followFileLink(uri) {
 				await responseErrorMessage(response, "Could not open the file."),
 			);
 		}
-		const { path, workspacePath } = await response.json();
+		const result = await response.json();
+		if (result.opened) return;
 		const { openLinkedWorkspaceFile } =
 			await import("../../src/client/workspace-review.ts");
-		await openLinkedWorkspaceFile(path, workspacePath);
+		await openLinkedWorkspaceFile(result.path, result.workspacePath);
 	} catch (error) {
-		alert(error instanceof Error ? error.message : "Could not open the file.");
+		alert(Error.isError(error) ? error.message : "Could not open the file.");
 	}
 }

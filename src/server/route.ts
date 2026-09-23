@@ -55,9 +55,8 @@ function defaultErrorReporter(
 	request: Pick<Request, "method" | "url">,
 ): void {
 	const url = new URL(request.url);
-	const details =
-		error instanceof Error
-			? { name: error.name, stack: error.stack?.split("\n").slice(1).join("\n") }
-			: { type: Object.prototype.toString.call(error) };
+	const details = Error.isError(error)
+		? { name: error.name, stack: error.stack?.split("\n").slice(1).join("\n") }
+		: { type: Object.prototype.toString.call(error) };
 	console.error(`Route ${request.method} ${url.pathname} failed`, details);
 }

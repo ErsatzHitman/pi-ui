@@ -44,61 +44,54 @@ export const attachmentFileIcons = {
 	},
 };
 
+const audioExtensions = new Set(["aac", "flac", "m4a", "mp3", "ogg", "wav"]);
+const videoExtensions = new Set(["avi", "m4v", "mkv", "mov", "mp4", "webm"]);
+const archiveExtensions = new Set(["7z", "bz2", "gz", "rar", "tar", "xz", "zip"]);
+const codeExtensions = new Set([
+	"c",
+	"cpp",
+	"css",
+	"go",
+	"h",
+	"html",
+	"java",
+	"js",
+	"json",
+	"jsx",
+	"py",
+	"rs",
+	"sh",
+	"sql",
+	"toml",
+	"ts",
+	"tsx",
+	"xml",
+	"yaml",
+	"yml",
+]);
+const textExtensions = new Set(["csv", "log", "md", "rst", "txt"]);
+
 export function attachmentFileExtension(name) {
-	const extension = name.includes(".") ? name.split(".").at(-1) : "";
-	return extension.slice(0, 4).toLowerCase();
+	return fileExtension(name).slice(0, 4);
 }
 
 export function attachmentFileKind(name, mimeType) {
-	const extension = name.split(".").at(-1)?.toLowerCase() ?? "";
+	const extension = fileExtension(name);
 	if (mimeType === "application/pdf" || extension === "pdf") return "pdf";
+	if (mimeType?.startsWith("audio/") || audioExtensions.has(extension)) return "audio";
+	if (mimeType?.startsWith("video/") || videoExtensions.has(extension)) return "video";
+	if (mimeType?.includes("zip") || archiveExtensions.has(extension)) return "archive";
 	if (
-		mimeType?.startsWith("audio/") ||
-		["aac", "flac", "m4a", "mp3", "ogg", "wav"].includes(extension)
-	)
-		return "audio";
-	if (
-		mimeType?.startsWith("video/") ||
-		["avi", "m4v", "mkv", "mov", "mp4", "webm"].includes(extension)
-	)
-		return "video";
-	if (
-		mimeType?.includes("zip") ||
-		["7z", "bz2", "gz", "rar", "tar", "xz", "zip"].includes(extension)
-	)
-		return "archive";
-	if (
-		[
-			"c",
-			"cpp",
-			"css",
-			"go",
-			"h",
-			"html",
-			"java",
-			"js",
-			"json",
-			"jsx",
-			"py",
-			"rs",
-			"sh",
-			"sql",
-			"toml",
-			"ts",
-			"tsx",
-			"xml",
-			"yaml",
-			"yml",
-		].includes(extension) ||
+		codeExtensions.has(extension) ||
 		mimeType === "application/json" ||
 		mimeType?.includes("javascript") ||
 		mimeType?.includes("xml")
 	)
 		return "code";
-	if (
-		mimeType?.startsWith("text/") ||
-		["csv", "log", "md", "rst", "txt"].includes(extension)
-	)
-		return "text";
+	if (mimeType?.startsWith("text/") || textExtensions.has(extension)) return "text";
 	return "file";
+}
+
+function fileExtension(name) {
+	return name.match(/\.([^.]+)$/)?.[1].toLowerCase() ?? "";
 }

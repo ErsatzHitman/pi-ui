@@ -41,7 +41,7 @@ export const workspaceReviewRoutes = {
 			} catch (error) {
 				throw new RouteError(
 					400,
-					error instanceof Error ? error.message : "Invalid review comments.",
+					Error.isError(error) ? error.message : "Invalid review comments.",
 				);
 			}
 			if (
@@ -74,8 +74,8 @@ export const workspaceReviewRoutes = {
 		},
 	},
 	[endpoints.workspaceReviewDiff]: {
-		GET: async (request, context) => {
-			const query = new URL(request.url).searchParams;
+		GET: async (request, context, url) => {
+			const query = url.searchParams;
 			const workspacePath = context.store.workspacePath;
 			if (query.get("workspacePath") !== workspacePath)
 				throw new RouteError(409, "Workspace changed. Reopen the diff.");
@@ -99,8 +99,8 @@ export const workspaceReviewRoutes = {
 		},
 	},
 	[endpoints.workspaceReviewCommit]: {
-		GET: async (request, context) => {
-			const hash = new URL(request.url).searchParams.get("hash") ?? "";
+		GET: async (_request, context, url) => {
+			const hash = url.searchParams.get("hash") ?? "";
 			const detail = await readWorkspaceCommit(context.store.workspacePath, hash);
 			return detail
 				? Response.json(detail, { headers: { "cache-control": "no-cache" } })
@@ -108,8 +108,8 @@ export const workspaceReviewRoutes = {
 		},
 	},
 	[endpoints.workspaceReviewHistory]: {
-		GET: async (request, context) => {
-			const value = new URL(request.url).searchParams.get("offset") ?? "0";
+		GET: async (_request, context, url) => {
+			const value = url.searchParams.get("offset") ?? "0";
 			const offset = Number(value);
 			if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000) {
 				return new Response("Invalid history offset", { status: 400 });

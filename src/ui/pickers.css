@@ -40,10 +40,6 @@
 		padding: 0.5rem 0.75rem;
 		text-align: start;
 	}
-	.picker-row-button:is(:hover, :focus-visible) {
-		background: var(--surface-muted);
-		outline: 0;
-	}
 	.picker-row-content {
 		min-width: 0;
 	}

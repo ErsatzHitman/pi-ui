@@ -203,7 +203,7 @@ test("session transitions patch signals and replace only the transcript", async 
 			overlay: true,
 		});
 		const loading = await readUntil(reader, (text) =>
-			text.includes('"_sessionTransitionLoading":true'),
+			text.includes('"_sessionTransitionStatus":"loading"'),
 		);
 		assertNotIncludes(loading, "datastar-patch-elements");
 
@@ -219,7 +219,7 @@ test("session transitions patch signals and replace only the transcript", async 
 
 		state.setSessionTransition({ status: "idle", generation: 1 });
 		const idle = await readUntil(reader, (text) =>
-			text.includes('"_sessionTransitionLoading":false'),
+			text.includes('"_sessionTransitionStatus":"idle"'),
 		);
 		assertNotIncludes(idle, "datastar-patch-elements");
 	} finally {
@@ -243,18 +243,18 @@ test("session loading clears after fallback and before enhancement", async () =>
 		state.replaceMessages([markdownMessage("content ready")]);
 		state.setSessionTransition({ status: "idle", generation: 1 });
 		const beforeEnhancement = await readUntil(reader, (text) => {
-			const loading = text.indexOf('"_sessionTransitionLoading":true');
+			const loading = text.indexOf('"_sessionTransitionStatus":"loading"');
 			const fallback = text.indexOf("content ready", loading);
 			return (
 				loading >= 0 &&
 				fallback > loading &&
-				text.indexOf('"_sessionTransitionLoading":false', fallback) > fallback
+				text.indexOf('"_sessionTransitionStatus":"idle"', fallback) > fallback
 			);
 		});
-		const loading = beforeEnhancement.indexOf('"_sessionTransitionLoading":true');
+		const loading = beforeEnhancement.indexOf('"_sessionTransitionStatus":"loading"');
 		const fallback = beforeEnhancement.indexOf("content ready", loading);
 		const idle = beforeEnhancement.indexOf(
-			'"_sessionTransitionLoading":false',
+			'"_sessionTransitionStatus":"idle"',
 			loading + 1,
 		);
 		if (!(loading >= 0 && fallback > loading && idle > fallback)) {
@@ -639,8 +639,8 @@ test("nested state updates commit one fat morph and one signal patch", async () 
 
 		assertEqual(count(output, "event: datastar-patch-elements"), 1);
 		assertEqual(count(output, "event: datastar-patch-signals"), 1);
-		assertIncludes(output, '"_isBusy":true');
 		assertIncludes(output, '"_temporarySession":true');
+		assertNotIncludes(output, '"_isBusy"');
 		assertNotIncludes(output, '"thinkingLevel"');
 		assertNotIncludes(output, '"model"');
 	} finally {

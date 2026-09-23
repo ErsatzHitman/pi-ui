@@ -27,9 +27,22 @@ const ignoredDirectoryNames = new Set([
 
 export type WorkspaceEntryKind = "file" | "folder";
 
+export type WorkspaceFilePreview = {
+	kind: "audio" | "font" | "html" | "image" | "markdown" | "pdf" | "video";
+	mimeType: string;
+};
+
 export type WorkspaceFile = {
 	path: string;
 	contents: string;
+	revision: string;
+	size: number;
+	preview?: WorkspaceFilePreview;
+};
+
+export type WorkspacePreviewFile = {
+	path: string;
+	preview: WorkspaceFilePreview;
 	revision: string;
 	size: number;
 };
@@ -106,20 +119,32 @@ export async function removeWorkspaceEntry(
 export async function readWorkspaceFile(
 	workspacePath: string,
 	filePath: string,
-): Promise<WorkspaceFile | WorkspaceUnavailableFile> {
+): Promise<WorkspaceFile | WorkspacePreviewFile | WorkspaceUnavailableFile> {
 	const { path: resolved, size } = await resolveFile(workspacePath, filePath);
 	const path = normalizeRelativePath(filePath);
+	const file = Bun.file(resolved);
+	const preview = workspaceFilePreview(file.type);
+	const hasSource =
+		preview?.kind === "html" ||
+		preview?.kind === "markdown" ||
+		preview?.mimeType === "image/svg+xml";
+	const previewRevision = `${file.lastModified}:${size}`;
+	if (preview && !hasSource) return { path, preview, revision: previewRevision, size };
 	if (size > maximumWorkspaceFileBytes) {
-		return { message: "File is too large to view in pi-ui.", path, size };
+		return preview && preview.kind !== "markdown"
+			? { path, preview, revision: previewRevision, size }
+			: { message: "File is too large to view in pi-ui.", path, size };
 	}
-	const bytes = await Bun.file(resolved).bytes();
+	const bytes = await file.bytes();
 	let contents: string;
 	try {
 		contents = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 	} catch {
-		return { message: "Only text files can be viewed.", path, size };
+		return preview && preview.kind !== "markdown"
+			? { path, preview, revision: previewRevision, size }
+			: { message: "Only text files can be viewed.", path, size };
 	}
-	return { path, contents, revision: fileRevision(bytes), size };
+	return { path, contents, preview, revision: fileRevision(bytes), size };
 }
 
 export type WorkspaceUnavailableFile = {
@@ -134,7 +159,7 @@ export async function writeWorkspaceFile(
 	contents: string,
 	expectedRevision: string,
 ): Promise<WorkspaceFile> {
-	if (new TextEncoder().encode(contents).byteLength > maximumWorkspaceFileBytes) {
+	if (Buffer.byteLength(contents) > maximumWorkspaceFileBytes) {
 		throw new WorkspaceFileError(413, "File is too large to save in pi-ui.");
 	}
 	const { path: resolved, size } = await resolveFile(workspacePath, filePath);
@@ -150,7 +175,12 @@ export async function writeWorkspaceFile(
 	}
 	await Bun.write(resolved, contents);
 	const saved = await readWorkspaceFile(workspacePath, filePath);
-	if ("message" in saved) throw new WorkspaceFileError(500, saved.message);
+	if (!("contents" in saved)) {
+		throw new WorkspaceFileError(
+			500,
+			"message" in saved ? saved.message : "Could not read the saved file.",
+		);
+	}
 	return saved;
 }
 
@@ -250,19 +280,17 @@ async function resolveWorkspaceTarget(
 	};
 }
 
-export async function resolveFile(
+export async function resolvePath(
 	workspacePath: string,
 	filePath: string,
-): Promise<{ path: string; size: number }> {
+): Promise<{ path: string; info: Stats }> {
 	const normalized = normalizeRelativePath(filePath);
 	if (!normalized || normalized.includes("\0")) {
 		throw new WorkspaceFileError(400, "Invalid file path.");
 	}
 	try {
 		const resolved = await realpath(path.resolve(workspacePath, normalized));
-		const info = await stat(resolved);
-		if (!info.isFile()) throw new WorkspaceFileError(400, "Path is not a file.");
-		return { path: resolved, size: info.size };
+		return { path: resolved, info: await stat(resolved) };
 	} catch (error) {
 		if (isNotFound(error)) {
 			throw new WorkspaceFileError(404, "File not found.");
@@ -272,6 +300,15 @@ export async function resolveFile(
 		}
 		throw error;
 	}
+}
+
+export async function resolveFile(
+	workspacePath: string,
+	filePath: string,
+): Promise<{ path: string; size: number }> {
+	const { path, info } = await resolvePath(workspacePath, filePath);
+	if (!info.isFile()) throw new WorkspaceFileError(400, "Path is not a file.");
+	return { path, size: info.size };
 }
 
 function workspaceMutationError(error: ErrorOptions["cause"]): WorkspaceFileError {
@@ -299,6 +336,19 @@ function isWithinWorkspace(workspace: string, candidate: string): boolean {
 
 function normalizeRelativePath(filePath: string): string {
 	return filePath.replaceAll("\\", "/");
+}
+
+export function workspaceFilePreview(mimeType: string): WorkspaceFilePreview | undefined {
+	const normalized = mimeType.split(";", 1)[0]?.toLowerCase() ?? "";
+	if (normalized.startsWith("image/")) return { kind: "image", mimeType: normalized };
+	if (normalized.startsWith("audio/")) return { kind: "audio", mimeType: normalized };
+	if (normalized.startsWith("video/")) return { kind: "video", mimeType: normalized };
+	if (normalized.startsWith("font/")) return { kind: "font", mimeType: normalized };
+	if (normalized === "application/pdf") return { kind: "pdf", mimeType: normalized };
+	if (normalized === "text/html") return { kind: "html", mimeType: normalized };
+	if (normalized === "text/markdown" || normalized === "text/x-markdown")
+		return { kind: "markdown", mimeType: normalized };
+	return undefined;
 }
 
 function fileRevision(contents: Uint8Array): string {

@@ -10,6 +10,7 @@ import {
 	type SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 
+import { resolveModelScopeFromModels } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/model-resolver.js";
 import { sessionPerformance } from "../perf/session-performance.ts";
 import {
 	type AppSlashCommand,
@@ -36,14 +37,13 @@ import { detectCacheMiss, formatCacheMissNotice } from "./cache-miss.ts";
 import { ExtensionUiController } from "./extension-ui-controller.ts";
 import { LlamaController } from "./llama-controller.ts";
 import { llamaProviderExtension } from "./llama-provider-extension.ts";
-import { ModelController, resolveScopedModels } from "./model-controller.ts";
+import { ModelController } from "./model-controller.ts";
 import {
 	PromptLifecycle,
 	type PromptStreamingBehavior,
 	type RuntimePromptOptions,
 } from "./prompt-lifecycle.ts";
 import { createBunReadToolDefinition } from "./read-tool.ts";
-import { configureOpenCodeHeaders } from "./request-headers.ts";
 import {
 	type SessionCatalogWatch,
 	watchSessionCatalog,
@@ -286,10 +286,11 @@ export class RuntimeController {
 						resourceLoaderOptions: { extensionFactories },
 					}),
 			);
-			configureOpenCodeHeaders(
-				services.modelRuntime,
-				sessionManager.getSessionId(),
-			);
+			// pi-ui resizes images with Bun.Image because pi's Photon resizer is not
+			// bundled in compiled builds. Force pi's image auto-resize off for this
+			// manager (an override on the method, not the setting, so it survives
+			// settings saves) to avoid dropping prompt images when Photon is absent.
+			services.settingsManager.getImageAutoResize = () => false;
 			configureAgentHttpProxy(
 				services.modelRuntime,
 				services.settingsManager.getGlobalSettings().httpProxy,
@@ -300,10 +301,10 @@ export class RuntimeController {
 			const scopedModels = sessionPerformance.measureSync(
 				"scopedModelResolution",
 				() =>
-					resolveScopedModels(
+					resolveModelScopeFromModels(
 						services.settingsManager.getEnabledModels() ?? [],
 						availableModels,
-					),
+					).scopedModels,
 			);
 			const readIsOverridden = services.resourceLoader
 				.getExtensions()
@@ -417,7 +418,8 @@ export class RuntimeController {
 	async abort(): Promise<void> {
 		this.tree.cancelNavigation();
 		await this.runtime.session.abort();
-		this.prompts.clear(this.runtime);
+		const queued = this.prompts.restore(this.runtime);
+		const draft = this.state.promptEditorText;
 		this.foregroundObservedRunning = false;
 		this.state.setActivityText(undefined);
 		this.state.setQueuedMessages([], []);
@@ -425,6 +427,11 @@ export class RuntimeController {
 		this.usage.sync();
 		const path = this.runtime.session.sessionManager.getSessionFile();
 		if (path) await this.catalog.refreshPath(path);
+		if (queued) {
+			this.state.setPromptEditorText(
+				[queued, draft].filter((text) => text.trim()).join("\n\n"),
+			);
+		}
 	}
 
 	async abortBackgroundSession(sessionPath: string): Promise<boolean> {
@@ -1049,7 +1056,7 @@ export class RuntimeController {
 		this.prompts.dispose();
 
 		const results = await Promise.allSettled(
-			runtimes.map((runtime) => Promise.resolve().then(() => runtime.dispose())),
+			runtimes.map((runtime) => Promise.try(() => runtime.dispose())),
 		);
 		const errors = results.flatMap((result) =>
 			result.status === "rejected" ? [result.reason] : [],

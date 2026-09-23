@@ -41,9 +41,11 @@ export function renderPromptStatus(state: AppStateSnapshot): string {
 
 export function renderUsageIndicators(usage: AppUsage): string {
 	const contextPercent = usage.contextPercent ?? 0;
-	const limitPercent = usage.limits
-		? Math.max(0, ...usage.limits.windows.map((window) => window.usedPercent))
-		: 0;
+	const limitPercent =
+		usage.limits?.windows.reduce(
+			(maximum, window) => Math.max(maximum, window.usedPercent),
+			0,
+		) ?? 0;
 	return syncHtml(
 		<span class="usage-indicators">
 			<button

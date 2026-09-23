@@ -74,7 +74,7 @@ test("session request indicators lock controls without hiding the transcript", (
 	assertStringExcludes(messages, "$_sessionLoading || $_sessionTransitionVisible");
 	assertStringIncludes(messages, "data-class:messages-loading");
 	assertStringIncludes(messages, "$_sessionLoading");
-	assertStringIncludes(messages, "$_sessionTransitionLoading");
+	assertStringIncludes(messages, "$_sessionTransitionStatus === 'loading'");
 });
 
 test("empty chat shows login instead of recent sessions without auth", () => {
@@ -119,7 +119,7 @@ test("resume renderers share loading behavior and disable controls", () => {
 	for (const html of [recent, picker]) {
 		assertStringIncludes(html, "/sessions/resume");
 		assertStringIncludes(html, "_sessionLoading");
-		assertStringIncludes(html, "$_sessionTransitionLoading");
+		assertStringIncludes(html, "$_sessionTransitionStatus");
 	}
 	const shortcuts = renderSessionSidebar({
 		sessions: [session],

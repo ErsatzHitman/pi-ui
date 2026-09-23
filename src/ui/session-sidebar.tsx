@@ -98,7 +98,6 @@ export function renderSessionSidebar(
 					$_sessionSidebarWidth + 'px',
 				)`}
 				data-signals:_session-sidebar-pointer-x__ifmissing="0"
-				data-signals:session-delete-hover__ifmissing="''"
 				data-on:keydown__window={keybindActions(
 					[
 						"toggle-sessions",
@@ -274,7 +273,7 @@ function groupSessionsByDate(
 		}
 		group.sessions.push({ session, index });
 	}
-	return [...groups.values()];
+	return groups.values().toArray();
 }
 
 function sessionDate(dateTime: string | undefined): Date | undefined {
@@ -317,7 +316,7 @@ function renderSessionSidebarRow(
 				aria-current={current ? "true" : undefined}
 				aria-label={session.title}
 				data-indicator:_session-loading
-				data-attr:aria-disabled="$_sessionTransitionLoading ? 'true' : 'false'"
+				data-attr:aria-disabled="$_sessionTransitionStatus === 'loading' ? 'true' : 'false'"
 				data-on:click={current ? undefined : resumeSessionAction(session.path)}
 				data-on:keydown__window={
 					shortcut && !current

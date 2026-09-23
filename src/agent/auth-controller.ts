@@ -1,10 +1,10 @@
 import type { AuthEvent, AuthPrompt, AuthType } from "@earendil-works/pi-ai";
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
+import { openBrowser } from "../../node_modules/@earendil-works/pi-coding-agent/dist/utils/open-browser.js";
 import type { AppAuthDialog, AppAuthProvider, AppStore } from "../state/app-store.ts";
 import { errorMessage } from "../utils/errors.ts";
 import { withAgentHttpProxy } from "../utils/http-proxy.ts";
-import { openWithDefaultApp } from "../utils/open-with-default-app.ts";
 
 type AuthInputResolver = (value: string | undefined) => void;
 
@@ -278,18 +278,18 @@ export class AuthController {
 			error: undefined,
 		});
 
-		return new Promise<string>((resolve, reject) => {
-			const finish: AuthInputResolver = (value) => {
-				if (run.inputResolver !== finish) return;
-				run.inputResolver = undefined;
-				prompt.signal?.removeEventListener("abort", cancel);
-				if (value === undefined) reject(new Error("Login cancelled"));
-				else resolve(value);
-			};
-			const cancel = () => finish(undefined);
-			run.inputResolver = finish;
-			prompt.signal?.addEventListener("abort", cancel, { once: true });
-		});
+		const { promise, resolve, reject } = Promise.withResolvers<string>();
+		const finish: AuthInputResolver = (value) => {
+			if (run.inputResolver !== finish) return;
+			run.inputResolver = undefined;
+			prompt.signal?.removeEventListener("abort", cancel);
+			if (value === undefined) reject(new Error("Login cancelled"));
+			else resolve(value);
+		};
+		const cancel = () => finish(undefined);
+		run.inputResolver = finish;
+		prompt.signal?.addEventListener("abort", cancel, { once: true });
+		return promise;
 	}
 
 	private notifyAuthentication(run: AuthLoginRun, event: AuthEvent): void {
@@ -377,5 +377,5 @@ function compareAuthProviders(a: AppAuthProvider, b: AppAuthProvider): number {
 }
 
 function openExternalUrl(url: string): void {
-	void openWithDefaultApp(url).catch(() => {});
+	openBrowser(url);
 }

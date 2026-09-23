@@ -61,14 +61,10 @@ function scopedProxyFetch(
 }
 
 function fetchTargetUrl(input: RequestInfo | URL): URL | undefined {
-	try {
-		if (isString(input)) return new URL(input);
-		if (input instanceof URL) return input;
-		if (input instanceof Request) return new URL(input.url);
-		return undefined;
-	} catch {
-		return undefined;
-	}
+	if (isString(input)) return URL.parse(input) ?? undefined;
+	if (input instanceof URL) return input;
+	if (input instanceof Request) return URL.parse(input.url) ?? undefined;
+	return undefined;
 }
 
 function shouldProxy(url: URL): boolean {

@@ -118,9 +118,7 @@ export function createWorkspaceReviewCommentStore() {
 				(annotation) => annotation.metadata.id === id,
 			);
 			if (index < 0) continue;
-			const next = [...current];
-			next[index] = update(next[index]);
-			annotations.set(path, next);
+			annotations.set(path, current.with(index, update(current[index])));
 			return path;
 		}
 		return undefined;

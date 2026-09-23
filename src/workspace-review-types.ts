@@ -25,6 +25,18 @@ export function hasTrackedWorkspaceChanges(
 	return changes.some((change) => change.status !== "untracked");
 }
 
+export function workspaceChangeStats(changes: readonly WorkspaceFileChange[]) {
+	let additions = 0;
+	let deletions = 0;
+	let tracked = false;
+	for (const change of changes) {
+		additions += change.additions;
+		deletions += change.deletions;
+		if (change.status !== "untracked") tracked = true;
+	}
+	return { additions, deletions, tracked };
+}
+
 export type WorkspaceReviewPreferences = Readonly<{
 	changesRatio?: number;
 	gitPaneRatio?: number;

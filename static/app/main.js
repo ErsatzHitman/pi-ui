@@ -24,7 +24,7 @@ import {
 	syncPickerSelection,
 } from "./pickers.js";
 import { createPromptHistory } from "./prompt-history.js";
-import { bindPromptInteractions, focusPromptEnd, setPromptValue } from "./prompt.js";
+import { focusPromptEnd, setPromptValue } from "./prompt.js";
 import {
 	readTransitionState,
 	startSessionPerformanceMeasurement,
@@ -90,7 +90,6 @@ bindFileLinks();
 window.addEventListener("DOMContentLoaded", async () => {
 	bindControls();
 	focusPromptEnd();
-	bindPromptInteractions();
 	bindPickers({ fuzzyFilter });
 	bindMessageScroll();
 	bindCodeCopy();

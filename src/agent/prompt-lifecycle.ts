@@ -34,20 +34,13 @@ export class PromptLifecycle {
 		return (this.pending.get(runtime) ?? 0) > 0;
 	}
 
-	async submit(
+	submit(
 		runtime: AgentSessionRuntime,
 		text: string,
 		options: RuntimePromptOptions = {},
 	): Promise<boolean> {
-		let resolveAccepted: (accepted: boolean) => void = () => {};
-		let settled = false;
-		const accepted = new Promise<boolean>((resolve) => {
-			resolveAccepted = (value) => {
-				if (settled) return;
-				settled = true;
-				resolve(value);
-			};
-		});
+		const { promise: accepted, resolve: resolveAccepted } =
+			Promise.withResolvers<boolean>();
 
 		this.markPending(runtime);
 		runtime.session
@@ -64,7 +57,7 @@ export class PromptLifecycle {
 			})
 			.finally(() => this.markSettled(runtime));
 
-		return await accepted;
+		return accepted;
 	}
 
 	queueAfterCompaction(
@@ -83,16 +76,13 @@ export class PromptLifecycle {
 		const compactionQueued = this.compactionQueues.get(runtime) ?? [];
 		this.compactionQueues.delete(runtime);
 		const { steering, followUp } = runtime.session.clearQueue();
+		const compaction = queuedPromptText(compactionQueued);
 		this.stateFor(runtime)?.setQueuedMessages([], []);
 		return [
 			...steering,
-			...compactionQueued
-				.filter((prompt) => prompt.streamingBehavior === "steer")
-				.map((prompt) => prompt.text),
+			...compaction.steering,
 			...followUp,
-			...compactionQueued
-				.filter((prompt) => prompt.streamingBehavior === "followUp")
-				.map((prompt) => prompt.text),
+			...compaction.followUp,
 		].join("\n\n");
 	}
 
@@ -106,18 +96,14 @@ export class PromptLifecycle {
 				? runtime.session.getSteeringMessages()
 				: runtime.session.getFollowUpMessages();
 		const compactionQueued = this.compactionQueues.get(runtime) ?? [];
-		const matchingCompactionIndexes = compactionQueued.flatMap((prompt, index) =>
-			prompt.streamingBehavior === streamingBehavior ? [index] : [],
-		);
-		if (index >= runtimeQueued.length + matchingCompactionIndexes.length) {
-			return false;
-		}
-
 		if (index >= runtimeQueued.length) {
-			compactionQueued.splice(
-				matchingCompactionIndexes[index - runtimeQueued.length],
-				1,
+			let remaining = index - runtimeQueued.length;
+			const compactionIndex = compactionQueued.findIndex(
+				(prompt) =>
+					prompt.streamingBehavior === streamingBehavior && remaining-- === 0,
 			);
+			if (compactionIndex < 0) return false;
+			compactionQueued.splice(compactionIndex, 1);
 			if (compactionQueued.length === 0) this.compactionQueues.delete(runtime);
 			this.sync(runtime);
 			return true;
@@ -137,20 +123,10 @@ export class PromptLifecycle {
 	}
 
 	sync(runtime: AgentSessionRuntime): void {
-		const compactionQueued = this.compactionQueues.get(runtime) ?? [];
+		const compaction = queuedPromptText(this.compactionQueues.get(runtime) ?? []);
 		this.stateFor(runtime)?.setQueuedMessages(
-			[
-				...runtime.session.getSteeringMessages(),
-				...compactionQueued
-					.filter((prompt) => prompt.streamingBehavior === "steer")
-					.map((prompt) => prompt.text),
-			],
-			[
-				...runtime.session.getFollowUpMessages(),
-				...compactionQueued
-					.filter((prompt) => prompt.streamingBehavior === "followUp")
-					.map((prompt) => prompt.text),
-			],
+			[...runtime.session.getSteeringMessages(), ...compaction.steering],
+			[...runtime.session.getFollowUpMessages(), ...compaction.followUp],
 		);
 	}
 
@@ -201,4 +177,13 @@ export class PromptLifecycle {
 	): void {
 		this.stateFor(runtime)?.appendMessage("system", errorMessage(error));
 	}
+}
+
+function queuedPromptText(prompts: readonly CompactionQueuedPrompt[]) {
+	const steering: string[] = [];
+	const followUp: string[] = [];
+	for (const prompt of prompts) {
+		(prompt.streamingBehavior === "steer" ? steering : followUp).push(prompt.text);
+	}
+	return { steering, followUp };
 }

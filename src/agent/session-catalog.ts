@@ -264,10 +264,7 @@ export class SessionCatalog {
 		])[0];
 		if (!summary) return;
 		const sessions = this.state.getSessionCatalog();
-		if (sessions.some((session) => session.path === path)) {
-			this.state.updateSessionSummary(path, () => summary);
-			return;
-		}
+		if (this.state.updateSessionSummary(path, () => summary)) return;
 		this.applyOrdered([summary, ...sessions]);
 	}
 
@@ -329,7 +326,9 @@ export class SessionCatalog {
 	}
 
 	private applyOrdered(sessions: readonly AppSessionSummary[]): void {
-		const paths = new Set(sessions.map((session) => session.path));
+		const sessionsByPath = new Map(
+			sessions.map((session) => [session.path, session]),
+		);
 		const currentOrder = this.state
 			.getSessionCatalog()
 			.map((session) => session.path);
@@ -340,17 +339,9 @@ export class SessionCatalog {
 				.filter((session) => !knownPaths.has(session.path))
 				.map((session) => session.path)
 				.toArray(),
-			...currentOrder.filter((path) => paths.has(path)),
+			...currentOrder.filter((path) => sessionsByPath.has(path)),
 		];
-		const sessionsByPath = new Map(
-			sessions.map((session) => [session.path, session]),
-		);
-		this.state.setSessionCatalog(
-			order.flatMap((path) => {
-				const session = sessionsByPath.get(path);
-				return session ? [session] : [];
-			}),
-		);
+		this.state.setSessionCatalog(order.map((path) => sessionsByPath.get(path)!));
 	}
 }
 
@@ -464,12 +455,11 @@ async function sessionCandidates(sessionsRoot: string): Promise<SessionCandidate
 }
 
 export function recentSessionWorkspaces(sessions: SessionInfo[]): string[] {
-	const workspaces: string[] = [];
+	const workspaces = new Set<string>();
 	for (const session of sessions) {
-		if (!session.cwd || workspaces.includes(session.cwd)) continue;
-		workspaces.push(session.cwd);
+		if (session.cwd) workspaces.add(session.cwd);
 	}
-	return workspaces;
+	return [...workspaces];
 }
 
 export function formatSessionSummary(info: SessionInfo): AppSessionSummary {

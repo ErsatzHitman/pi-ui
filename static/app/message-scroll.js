@@ -216,9 +216,9 @@ export function trimOldMessages() {
 	const trigger = document.getElementById("messages-trim");
 	if (!(messages instanceof HTMLElement) || !(trigger instanceof HTMLButtonElement))
 		return;
-	const messageElements = [
-		...document.querySelectorAll("#message-list > [data-message-id]"),
-	];
+	const messageElements = document.querySelectorAll(
+		"#message-list > [data-message-id]",
+	);
 	const excess = messageElements.length - 100;
 	const lastCandidate = messageElements[excess - 1];
 	if (
@@ -254,9 +254,10 @@ function messageAtViewportTop(messages, viewport) {
 				return message;
 		}
 	}
-	return [...messages.querySelectorAll("[data-message-id]")].find(
-		(message) => message.getBoundingClientRect().bottom > viewport.top,
-	);
+	return messages
+		.querySelectorAll("[data-message-id]")
+		.values()
+		.find((message) => message.getBoundingClientRect().bottom > viewport.top);
 }
 
 export function hasPointerDragIntent(startX, startY, currentX, currentY) {

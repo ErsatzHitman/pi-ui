@@ -1,13 +1,12 @@
 import { mkdir, open } from "node:fs/promises";
-import os from "node:os";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 
 import { Compile } from "typebox/compile";
 
 import { appConfigSchemaUrl } from "../config-schema.ts";
+import { appConfigPath } from "../utils/app-dirs.ts";
 import { isAlreadyExists, isNotFound } from "../utils/fs-errors.ts";
 import { type JsonObject, JsonObjectSchema } from "../utils/json-types.ts";
-import { operatingSystem } from "../utils/platform.ts";
 
 export type AppConfig = JsonObject;
 
@@ -58,20 +57,4 @@ export async function updateAppConfig(
 
 function serializeAppConfig(config: AppConfig): string {
 	return `${JSON.stringify(config, null, "\t")}\n`;
-}
-
-function appConfigPath(): string {
-	const home = os.homedir();
-	if (operatingSystem === "windows") {
-		return join(
-			process.env.APPDATA ?? join(home, "AppData", "Roaming"),
-			"pi-ui",
-			"config.json",
-		);
-	}
-	return join(
-		process.env.XDG_CONFIG_HOME ?? join(home, ".config"),
-		"pi-ui",
-		"config.json",
-	);
 }

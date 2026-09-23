@@ -6,6 +6,7 @@ import {
 	type WorkspaceCommit,
 	type WorkspaceCommitDetail,
 	type WorkspaceFileChange,
+	workspaceChangeStats,
 } from "../workspace-review-types.ts";
 import type { Selection } from "./workspace-review-state.ts";
 
@@ -110,14 +111,15 @@ export function showWorkspaceReviewDetailHeader(
 	const subject = document.createElement("div");
 	subject.className = "review-detail-subject";
 	subject.textContent = detail.commit.subject || "Untitled commit";
+	const stats = workspaceChangeStats(detail.changes);
 	const totals = document.createElement("span");
 	totals.className = "review-detail-totals";
 	const additions = document.createElement("span");
 	additions.className = "review-additions";
-	additions.textContent = `+${sumChanges(detail.changes, "additions")}`;
+	additions.textContent = `+${stats.additions}`;
 	const deletions = document.createElement("span");
 	deletions.className = "review-deletions";
-	deletions.textContent = `-${sumChanges(detail.changes, "deletions")}`;
+	deletions.textContent = `-${stats.deletions}`;
 	totals.append(additions, deletions);
 	heading.append(subject, totals);
 	const metadata = document.createElement("div");
@@ -191,13 +193,6 @@ export function formatCommitDate(
 	locale?: string,
 ): string {
 	return formatAdaptiveDateTime(new Date(value), now, locale);
-}
-
-function sumChanges(
-	changes: readonly WorkspaceFileChange[],
-	key: "additions" | "deletions",
-): number {
-	return changes.reduce((total, change) => total + change[key], 0);
 }
 
 function statusLetter(status: WorkspaceFileChange["status"]): string {

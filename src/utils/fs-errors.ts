@@ -1,5 +1,5 @@
 function hasFileSystemCode(cause: unknown, code: string): boolean {
-	return cause instanceof Error && "code" in cause && cause.code === code;
+	return Error.isError(cause) && "code" in cause && cause.code === code;
 }
 
 export function isAlreadyExists(cause: unknown): boolean {

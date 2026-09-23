@@ -3,6 +3,16 @@ import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 import type { AppStore, AppThinkingLevel } from "../state/app-store.ts";
 
+const thinkingLevels: ReadonlySet<string> = new Set([
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+]);
+
 export type ScopedModelCandidate = { id: string; provider: string; name?: string };
 
 export class ModelController {
@@ -46,9 +56,10 @@ export class ModelController {
 		);
 		if (scoped.length === session.scopedModels.length) scoped.push({ model });
 		const modelRuntime = runtime.services.modelRuntime;
-		const configuredCount = modelRuntime
-			.getModels()
-			.filter((item) => modelRuntime.hasConfiguredAuth(item.provider)).length;
+		let configuredCount = 0;
+		for (const item of modelRuntime.getModels()) {
+			if (modelRuntime.hasConfiguredAuth(item.provider)) configuredCount += 1;
+		}
 		const enabled =
 			scoped.length === 0 || scoped.length === configuredCount
 				? undefined
@@ -154,59 +165,6 @@ export function compareModelPickerOrder(
 	return providerOrder || a.id.localeCompare(b.id);
 }
 
-export function resolveScopedModels<T extends ScopedModelCandidate>(
-	patterns: string[],
-	models: readonly T[],
-): Array<{ model: T; thinkingLevel?: AppThinkingLevel }> {
-	const scoped: Array<{ model: T; thinkingLevel?: AppThinkingLevel }> = [];
-	const seen = new Set<string>();
-	for (const pattern of patterns) {
-		const parsed = parseScopedModelPattern(pattern);
-		if (!parsed.modelPattern) continue;
-		for (const model of models.filter((candidate) =>
-			modelMatchesPattern(candidate, parsed.modelPattern),
-		)) {
-			const key = `${model.provider}/${model.id}`;
-			if (seen.has(key)) continue;
-			seen.add(key);
-			scoped.push({ model, thinkingLevel: parsed.thinkingLevel });
-		}
-	}
-	return scoped;
-}
-
-export type ScopedModelPattern = {
-	modelPattern: string;
-	thinkingLevel?: AppThinkingLevel;
-};
-
-export function parseScopedModelPattern(pattern: string): ScopedModelPattern {
-	const trimmed = pattern.trim();
-	const colon = trimmed.lastIndexOf(":");
-	if (colon === -1) return { modelPattern: trimmed };
-	const thinkingLevel = trimmed.slice(colon + 1);
-	if (!isThinkingLevel(thinkingLevel)) return { modelPattern: trimmed };
-	return {
-		modelPattern: trimmed.slice(0, colon),
-		thinkingLevel,
-	};
-}
-
-export function modelMatchesPattern(
-	model: ScopedModelCandidate,
-	pattern: string,
-): boolean {
-	const normalized = pattern.toLowerCase();
-	const refs = [model.id, model.name ?? "", `${model.provider}/${model.id}`].map(
-		(value) => value.toLowerCase(),
-	);
-	if (!normalized.includes("*"))
-		return refs.some((value) => value === normalized || value.includes(normalized));
-	const escaped = normalized.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-	const regex = new RegExp(`^${escaped.replaceAll("*", ".*")}$`, "i");
-	return refs.some((value) => regex.test(value));
-}
-
 function isThinkingLevel(level: string): level is AppThinkingLevel {
-	return ["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(level);
+	return thinkingLevels.has(level);
 }

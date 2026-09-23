@@ -3,14 +3,40 @@ import { Parse } from "typebox/value";
 
 import { responseErrorMessage } from "../utils/errors.ts";
 
+const workspaceFilePreviewSchema = Type.Union([
+	Type.Object({
+		kind: Type.Union([
+			Type.Literal("audio"),
+			Type.Literal("font"),
+			Type.Literal("html"),
+			Type.Literal("image"),
+			Type.Literal("pdf"),
+			Type.Literal("video"),
+		]),
+		mimeType: Type.String(),
+		url: Type.String(),
+	}),
+	Type.Object({
+		html: Type.String(),
+		kind: Type.Literal("markdown"),
+		mimeType: Type.String(),
+	}),
+]);
 const workspaceFileSchema = Type.Object({
 	path: Type.String(),
 	contents: Type.String(),
+	preview: Type.Optional(workspaceFilePreviewSchema),
 	revision: Type.String(),
 	size: Type.Number(),
 });
 const workspaceFileViewSchema = Type.Union([
 	workspaceFileSchema,
+	Type.Object({
+		path: Type.String(),
+		preview: workspaceFilePreviewSchema,
+		revision: Type.String(),
+		size: Type.Number(),
+	}),
 	Type.Object({
 		message: Type.String(),
 		path: Type.String(),
@@ -24,6 +50,7 @@ const workspaceFilesSchema = Type.Object({
 const workspaceEntrySchema = Type.Object({ path: Type.String() });
 
 export type WorkspaceFileData = Static<typeof workspaceFileSchema>;
+export type WorkspaceFilePreviewData = Static<typeof workspaceFilePreviewSchema>;
 type WorkspaceFilesData = Static<typeof workspaceFilesSchema>;
 
 export function createWorkspaceFilesApi(endpoint: string) {

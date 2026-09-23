@@ -418,25 +418,22 @@ export function parseCommitLog(
 	output: string,
 	unpushed?: ReadonlySet<string>,
 ): WorkspaceCommit[] {
-	return output
-		.split("\x1e")
-		.map((record) => record.replace(/^\n+|\n+$/g, ""))
-		.filter(Boolean)
-		.flatMap((record) => {
-			const [hash, shortHash, author, authoredAt, subject] = record.split("\x1f");
-			return hash && shortHash && authoredAt
-				? [
-						{
-							author,
-							authoredAt,
-							hash,
-							pushed: unpushed ? !unpushed.has(hash) : null,
-							shortHash,
-							subject,
-						},
-					]
-				: [];
+	const commits: WorkspaceCommit[] = [];
+	for (const rawRecord of output.split("\x1e")) {
+		const record = rawRecord.replace(/^\n+|\n+$/g, "");
+		if (!record) continue;
+		const [hash, shortHash, author, authoredAt, subject] = record.split("\x1f");
+		if (!hash || !shortHash || !authoredAt) continue;
+		commits.push({
+			author,
+			authoredAt,
+			hash,
+			pushed: unpushed ? !unpushed.has(hash) : null,
+			shortHash,
+			subject,
 		});
+	}
+	return commits;
 }
 
 export function parsePorcelainStatus(output: string): WorkspaceFileChange[] {
@@ -518,10 +515,13 @@ function addStats(
 	const stats = new Map<string, { additions: number; deletions: number }>();
 	for (const parsed of parsePatchFiles(patch)) {
 		for (const file of parsed.files) {
-			stats.set(file.name, {
-				additions: file.hunks.reduce((sum, hunk) => sum + hunk.additionLines, 0),
-				deletions: file.hunks.reduce((sum, hunk) => sum + hunk.deletionLines, 0),
-			});
+			let additions = 0;
+			let deletions = 0;
+			for (const hunk of file.hunks) {
+				additions += hunk.additionLines;
+				deletions += hunk.deletionLines;
+			}
+			stats.set(file.name, { additions, deletions });
 		}
 	}
 	return changes.map((change) => ({ ...change, ...stats.get(change.path) }));
@@ -537,9 +537,7 @@ function statusFromCode(code: string): WorkspaceFileStatus {
 
 async function hash(value: string): Promise<string> {
 	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-	return Array.from(new Uint8Array(digest), (byte) =>
-		byte.toString(16).padStart(2, "0"),
-	).join("");
+	return new Uint8Array(digest).toHex();
 }
 
 function commitPushSet(result: GitResult, hash: string): ReadonlySet<string> | undefined {
@@ -549,9 +547,10 @@ function commitPushSet(result: GitResult, hash: string): ReadonlySet<string> | u
 }
 
 function unpushedHashes(result: GitResult): ReadonlySet<string> | undefined {
-	return result.code === 0
-		? new Set(result.stdout.split("\n").filter(Boolean))
-		: undefined;
+	if (result.code !== 0) return undefined;
+	const hashes = new Set(result.stdout.split("\n"));
+	hashes.delete("");
+	return hashes;
 }
 
 function assertGit(result: GitResult, action: string): void {

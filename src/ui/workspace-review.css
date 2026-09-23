@@ -505,10 +505,74 @@
 		color: var(--status-danger);
 	}
 
+	.workspace-file-preview {
+		position: absolute;
+		inset: 0;
+		display: grid;
+		overflow: auto;
+		place-items: center;
+		container-type: inline-size;
+		overscroll-behavior: contain;
+		background: var(--surface-canvas);
+		outline: 0;
+	}
+	.workspace-file-preview:has(> :is(img, audio, video)) {
+		box-sizing: border-box;
+		padding: 0.75rem;
+	}
+	.workspace-file-preview :where(img, video) {
+		display: block;
+		max-inline-size: 100%;
+		max-block-size: 100%;
+		object-fit: contain;
+	}
+	.workspace-file-preview audio {
+		inline-size: min(100%, 40rem);
+	}
+	.workspace-file-preview iframe {
+		inline-size: 100%;
+		block-size: 100%;
+		border: 0;
+		background: white;
+	}
+	.workspace-file-markdown {
+		box-sizing: border-box;
+		inline-size: 100%;
+		min-block-size: 100%;
+		place-self: start stretch;
+		padding: 0.75rem;
+	}
+	.workspace-font-preview {
+		box-sizing: border-box;
+		inline-size: 100%;
+		min-block-size: 100%;
+		place-self: start stretch;
+		padding: 0.75rem;
+	}
+	.workspace-font-loading {
+		color: var(--text-muted);
+		font-size: var(--text-sm);
+	}
+	.workspace-font-specimen {
+		font-size-adjust: from-font;
+		overflow-wrap: anywhere;
+	}
+	.workspace-font-display {
+		margin-block: 0;
+		border-block-end: 1px solid var(--border);
+		padding-block: 0.5em;
+		font-size: clamp(3rem, 10cqi, 7rem);
+		line-height: 1;
+	}
+	.workspace-font-sample {
+		margin-block: 1.5rem;
+		font-size: clamp(1.25rem, 4cqi, 2.5rem);
+		line-height: 1.35;
+	}
+
 	#workspace-file-view > diffs-container {
 		display: block;
 		min-width: 100%;
-		min-height: 100%;
 		background: var(--surface-code);
 		--diffs-bg: var(--surface-code);
 		--diffs-bg-caret-override: var(--text);

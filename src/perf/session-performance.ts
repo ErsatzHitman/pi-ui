@@ -2,8 +2,6 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 import { appendSessionPerformanceRecord } from "./session-performance-log.ts";
 
-const utf8Encoder = new TextEncoder();
-
 // SDK 0.80.6 loads entries once for the header and again for manager state.
 const sdkInternalReadsPerSessionOpenEstimate = 2;
 
@@ -295,22 +293,14 @@ class SessionPerformanceCollector {
 		if (!this.enabled) return;
 		transitionId ??= this.currentTransitionId();
 		this.incrementCounter("fatMorphCount", 1, transitionId);
-		this.incrementCounter(
-			"bytesRendered",
-			utf8Encoder.encode(html).byteLength,
-			transitionId,
-		);
+		this.incrementCounter("bytesRendered", Buffer.byteLength(html), transitionId);
 	}
 
 	recordTargetedMessagePatch(html: string, transitionId?: number): void {
 		if (!this.enabled) return;
 		transitionId ??= this.currentTransitionId();
 		this.incrementCounter("targetedMessagePatchCount", 1, transitionId);
-		this.incrementCounter(
-			"bytesRendered",
-			utf8Encoder.encode(html).byteLength,
-			transitionId,
-		);
+		this.incrementCounter("bytesRendered", Buffer.byteLength(html), transitionId);
 	}
 
 	private currentTransitionId(): number | undefined {

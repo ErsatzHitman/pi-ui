@@ -157,7 +157,7 @@ function orderActiveFirst(
 	nodes: SessionTreeNode[],
 	containsActive: Map<SessionTreeNode, boolean>,
 ): SessionTreeNode[] {
-	return [...nodes].sort(
+	return nodes.toSorted(
 		(a, b) => Number(containsActive.get(b)) - Number(containsActive.get(a)),
 	);
 }
@@ -208,9 +208,11 @@ function shouldDisplayTreeNode(node: SessionTreeNode, activeId: string | null): 
 	if (
 		entry.type === "label" ||
 		entry.type === "custom" ||
+		entry.type === "context_edit" ||
 		entry.type === "model_change" ||
 		entry.type === "thinking_level_change" ||
-		entry.type === "session_info"
+		entry.type === "session_info" ||
+		entry.type === "usage"
 	)
 		return false;
 	if (
@@ -321,6 +323,22 @@ function formatTreeEntry(
 			kind: "other",
 			role: "label",
 			text: entry.label ?? "(cleared)",
+			...metadata,
+		};
+	}
+	if (entry.type === "usage") {
+		return {
+			kind: "other",
+			role: "usage",
+			text: entry.note ?? entry.kind,
+			...metadata,
+		};
+	}
+	if (entry.type === "context_edit") {
+		return {
+			kind: "other",
+			role: "context",
+			text: `${entry.replacement === null ? "omit" : "replace"} ${entry.targetId}`,
 			...metadata,
 		};
 	}

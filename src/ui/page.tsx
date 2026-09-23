@@ -501,13 +501,12 @@ export function renderPage(
 									type="button"
 									class="btn"
 									data-variant="destructive"
+									commandfor="session-delete-dialog"
+									command="close"
 									data-attr:disabled="$sessionDeletePath === ''"
-									data-on:click={`
-										evt.target.closest('dialog').close();
-										@post('${endpoints.sessionsDelete}', {
-									payload: { sessionDeletePath: $sessionDeletePath },
-								});
-									`}
+									data-on:click={`@post('${endpoints.sessionsDelete}', {
+										payload: { sessionDeletePath: $sessionDeletePath },
+									})`}
 								>
 									Delete session
 								</button>

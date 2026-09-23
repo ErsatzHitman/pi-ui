@@ -9,12 +9,7 @@ import { makeTempDir } from "#testing/temp";
 
 import { AppStore } from "../state/app-store.ts";
 import { formatTokens } from "../utils/format.ts";
-import {
-	compareModelPickerOrder,
-	modelMatchesPattern,
-	parseScopedModelPattern,
-	resolveScopedModels,
-} from "./model-controller.ts";
+import { compareModelPickerOrder } from "./model-controller.ts";
 import {
 	formatSessionSummary,
 	listCachedSessions,
@@ -215,22 +210,6 @@ test("model picker keeps scoped models above the current model", () => {
 	);
 });
 
-test("model patterns preserve wildcards, thinking suffixes, and first-match ordering", () => {
-	const models = [
-		{ provider: "openai", id: "gpt-5", name: "GPT Five" },
-		{ provider: "anthropic", id: "claude-sonnet", name: "Sonnet" },
-	];
-	assertEquals(parseScopedModelPattern("openai/*:high"), {
-		modelPattern: "openai/*",
-		thinkingLevel: "high",
-	});
-	assertEquals(modelMatchesPattern(models[1], "*sonnet"), true);
-	assertEquals(resolveScopedModels(["*sonnet:medium", "openai/*", "*sonnet"], models), [
-		{ model: models[1], thinkingLevel: "medium" },
-		{ model: models[0], thinkingLevel: undefined },
-	]);
-});
-
 test("tree projection orders the active branch first", () => {
 	const entry = (id: string, parentId: string | null, text: string) =>
 		sessionEntryStub({
@@ -310,6 +289,34 @@ test("tree projection shows tool call details and hides tool-only assistants", (
 	assertEquals(
 		{ kind: rows[0]?.kind, role: rows[0]?.role, text: rows[0]?.text },
 		{ kind: "tool", role: "read", text: "src/ui/page.tsx:10-14" },
+	);
+});
+
+test("tree projection hides context edit bookkeeping", () => {
+	const message = sessionEntryStub({
+		id: "message",
+		parentId: null,
+		timestamp: "2026-01-01T00:00:00.000Z",
+		type: "message",
+		message: { role: "user", content: "hello" },
+	});
+	const edit = sessionEntryStub({
+		id: "edit",
+		parentId: "message",
+		timestamp: "2026-01-01T00:00:01.000Z",
+		type: "context_edit",
+		targetId: "message",
+		replacement: null,
+	});
+	const rows = flattenTree(
+		[{ entry: message, children: [{ entry: edit, children: [] }] }],
+		"message",
+		new Set(["message", "edit"]),
+	);
+
+	assertEquals(
+		rows.map((row) => row.id),
+		["message"],
 	);
 });
 

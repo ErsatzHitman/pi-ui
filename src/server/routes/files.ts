@@ -2,7 +2,8 @@ import { isAbsolute, relative } from "node:path";
 
 import { detectSupportedImageMimeTypeFromFile } from "@earendil-works/pi-coding-agent";
 
-import { fileUriToPath, isHtmlFileUri } from "../../../static/file-uri.js";
+import { openBrowser } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/utils/open-browser.js";
+import { fileUriToPath } from "../../../static/file-uri.js";
 import { renderFilePickerResults } from "../../ui/pickers.tsx";
 import { readActionSignals, requiredString, stringField } from "../action-input.ts";
 import { datastarResponse } from "../datastar.ts";
@@ -14,9 +15,9 @@ import {
 	validateTransferContentLength,
 	validateTransferredFiles,
 } from "../transferred-files.ts";
-import { resolveFile } from "../workspace-files.ts";
+import { resolveFile, resolvePath } from "../workspace-files.ts";
 import type { RouteContext } from "./context.ts";
-import { endpoints, filesPreviewBase, filePreviewUrl } from "./endpoints.ts";
+import { endpoints, filesPreviewBase } from "./endpoints.ts";
 
 export const fileRoutes = {
 	[endpoints.filesSearch]: {
@@ -39,7 +40,6 @@ export const fileRoutes = {
 		POST: importTransferredFiles,
 	},
 	[endpoints.filesOpen]: {
-		GET: openLinkedFile,
 		POST: openLinkedFile,
 	},
 	[endpoints.filesPreview]: {
@@ -51,10 +51,7 @@ async function openLinkedFile(
 	request: Request,
 	context: RouteContext,
 ): Promise<Response> {
-	const uri =
-		request.method === "GET"
-			? (new URL(request.url).searchParams.get("uri") ?? "")
-			: requiredString(await readActionSignals(request), "uri");
+	const uri = requiredString(await readActionSignals(request), "uri");
 	const path = fileUriToPath(uri);
 	if (!path) throw new RouteError(400, "Invalid file link.");
 
@@ -66,24 +63,20 @@ async function openLinkedFile(
 		isAbsolute(relativePath)
 			? path
 			: relativePath;
-	await resolveFile(workspacePath, filePath);
-	if (request.method === "GET") {
-		if (!isHtmlFileUri(uri))
-			throw new RouteError(400, "Only HTML files can be previewed.");
-		const source = new URL(uri);
-		return new Response(null, {
-			status: 302,
-			headers: {
-				location: filePreviewUrl(path) + source.search + source.hash,
-				"cache-control": "no-store",
-			},
-		});
+	const target = await resolvePath(workspacePath, filePath);
+	if (target.info.isDirectory()) {
+		openBrowser(target.path);
+		return Response.json({ opened: true });
 	}
+	if (!target.info.isFile()) throw new RouteError(400, "Path is not a file.");
 	return Response.json({ path: filePath, workspacePath });
 }
 
-async function previewFile(request: Request, context: RouteContext): Promise<Response> {
-	const url = new URL(request.url);
+async function previewFile(
+	_request: Request,
+	context: RouteContext,
+	url: URL,
+): Promise<Response> {
 	let filePath: string;
 	try {
 		filePath = decodeURIComponent(url.pathname.slice(filesPreviewBase.length));
@@ -110,7 +103,7 @@ async function previewFile(request: Request, context: RouteContext): Promise<Res
 				"connect-src 'none'",
 				"base-uri 'none'",
 				"form-action 'none'",
-				"frame-ancestors 'none'",
+				"frame-ancestors 'self'",
 			].join("; "),
 		},
 	});

@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 
 import {
 	getFiletypeFromFileName,
@@ -56,13 +57,14 @@ const markdownHtmlRewriter = new HTMLRewriter()
 	.on("a", {
 		element(element) {
 			const href = element.getAttribute("href");
-			if (!href || !safeUrl(href, { allowDataImage: false })) {
+			const url = href ? safeUrl(href, { allowDataImage: false }) : undefined;
+			if (!href || !url) {
 				element.before("<span>", { html: true });
 				element.after("</span>", { html: true });
 				element.removeAndKeepContent();
 				return;
 			}
-			if (new URL(href, "http://pi-ui.local").protocol === "file:") {
+			if (url.protocol === "file:") {
 				// Keep the local URI out of href so the browser cannot attempt a
 				// forbidden file:// navigation when client-side handling is unavailable.
 				element.setAttribute("href", "#");
@@ -157,13 +159,16 @@ export function markdownCacheStatsForTest(): MarkdownCacheStats {
 	};
 }
 
-export async function renderMarkdownFinal(markdown: string): Promise<string> {
-	const cacheKey = `${getActiveCodeThemeId()}\0${markdown}`;
+export async function renderMarkdownFinal(
+	markdown: string,
+	options: { localImageBase?: string } = {},
+): Promise<string> {
+	const localImageBase = options.localImageBase ?? "";
+	const cacheKey = `${getActiveCodeThemeId()}\0${localImageBase}\0${markdown}`;
 	const cached = highlightedCache.get(cacheKey);
-	if (cached) {
-		return cached;
-	}
-	const html = await highlightCodeBlocksFinal(compileMarkdown(markdown));
+	if (cached) return cached;
+	let html = await highlightCodeBlocksFinal(compileMarkdown(markdown));
+	if (localImageBase) html = rewriteRelativeImageSources(html, localImageBase);
 	highlightedCache.set(cacheKey, html);
 	return html;
 }
@@ -409,6 +414,30 @@ function loadedCodeLanguage(language: string): string | undefined {
 }
 
 const localImagePattern = /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)$/i;
+const safeUrlProtocols = new Set(["http:", "https:", "mailto:", "file:"]);
+
+function rewriteRelativeImageSources(html: string, basePath: string): string {
+	return new HTMLRewriter()
+		.on("img", {
+			element(element) {
+				const source = element.getAttribute("src");
+				if (!source) return;
+				const url = URL.parse(source, "http://pi-ui.local");
+				if (!url || url.origin !== "http://pi-ui.local" || source.startsWith("/"))
+					return;
+				try {
+					const relativePath = decodeURIComponent(
+						source.split(/[?#]/, 1)[0] ?? "",
+					);
+					const local = localImageUrl(resolve(basePath, relativePath));
+					if (local) element.setAttribute("src", local);
+				} catch {
+					// Leave malformed and missing sources untouched so alt text remains visible.
+				}
+			},
+		})
+		.transform(html);
+}
 
 // The browser cannot load local files, so route existing image files through the
 // server's preview endpoint.
@@ -424,19 +453,16 @@ function localImageUrl(source: string): string | undefined {
 	return filePreviewUrl(path);
 }
 
-function safeUrl(value: string, options: { allowDataImage: boolean }): boolean {
-	try {
-		const url = new URL(value, "http://pi-ui.local");
-		if (url.protocol === "data:") {
-			return (
-				options.allowDataImage &&
-				/^data:image\/(png|jpeg|gif|webp);base64,/i.test(value)
-			);
-		}
-		return ["http:", "https:", "mailto:", "file:"].includes(url.protocol);
-	} catch {
-		return false;
+function safeUrl(value: string, options: { allowDataImage: boolean }): URL | undefined {
+	const url = URL.parse(value, "http://pi-ui.local");
+	if (!url) return undefined;
+	if (url.protocol === "data:") {
+		return options.allowDataImage &&
+			/^data:image\/(png|jpeg|gif|webp);base64,/i.test(value)
+			? url
+			: undefined;
 	}
+	return safeUrlProtocols.has(url.protocol) ? url : undefined;
 }
 
 function decodeHtml(value: string): string {

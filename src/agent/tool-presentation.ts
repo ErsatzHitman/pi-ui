@@ -1,3 +1,4 @@
+import { stripAnsi } from "../../node_modules/@earendil-works/pi-coding-agent/dist/utils/ansi.js";
 import type { TranscriptMessageTitlePart } from "../state/transcript-state.ts";
 import type { JsonValue } from "../utils/json-types.ts";
 import { asRecord, isNumber, isRecord, isString } from "../utils/type-guards.ts";
@@ -31,12 +32,11 @@ export function toolTitleParts(
 	}
 
 	const target = toolTarget(toolName, args);
+	const range = toolRange(args);
 	return [
 		{ text: toolName },
 		...(target ? [{ text: target, tone: "accent", mono: true } as const] : []),
-		...(toolRange(args)
-			? [{ text: toolRange(args), tone: "muted", mono: true } as const]
-			: []),
+		...(range ? [{ text: range, tone: "muted", mono: true } as const] : []),
 	];
 }
 
@@ -151,14 +151,6 @@ export function formatToolResult<Result>(
 	return { text, format: "output" };
 }
 
-// oxlint-disable-next-line no-unused-vars -- Retained while narrowing the accidental API.
-function compactReadOutput(text: string): string {
-	return text
-		.replace(/\n\n\[[^\]]*more lines in file[\s\S]*?\]$/i, "")
-		.replace(/\n\n\[Showing lines [^\]]+\]$/i, "")
-		.trimEnd();
-}
-
 function shouldHideBashOutput(args: JsonValue | undefined): boolean {
 	const command = stringValue(asRecord(args)?.command).trimStart();
 	const executable = command.match(
@@ -195,7 +187,7 @@ function extractToolText<Result>(result: Result): string {
 	if (record?.text !== undefined) {
 		return stripAnsi(String(record.text));
 	}
-	if (result instanceof Error) {
+	if (Error.isError(result)) {
 		return result.message;
 	}
 	if (isString(result)) {
@@ -235,14 +227,7 @@ export function contentToText<Content>(content: Content): string {
 		.join("\n");
 }
 
-const ansiPattern = new RegExp(
-	String.raw`[\u001B\u009B][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[a-zA-Z\d]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))`,
-	"g",
-);
-
-export function stripAnsi(value: string): string {
-	return value.replace(ansiPattern, "");
-}
+export { stripAnsi };
 
 export function summarizeValue<Value>(value: Value): string {
 	if (isString(value)) {

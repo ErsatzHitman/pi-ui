@@ -2,7 +2,6 @@ import { focusPromptEnd, promptInput, setPromptValue } from "./prompt.js";
 
 let activeFilePrefix;
 let filePickerSuppressUntilInput = false;
-let searchTimer;
 let slashCommandFilter;
 
 export function extractFilePrefix(value, cursor) {
@@ -36,7 +35,6 @@ export function isOpen() {
 export function bindPickers(options) {
 	slashCommandFilter = options.fuzzyFilter;
 	document.addEventListener("input", syncFromPrompt);
-	document.addEventListener("selectionchange", syncFromPrompt);
 	document.addEventListener("click", handleClick);
 	document.addEventListener("keydown", handleKeydown);
 	// Keep suggestion clicks from blurring the editor without blocking touch scrolling.
@@ -55,14 +53,8 @@ export function bindPickers(options) {
 }
 
 function syncFromPrompt(event) {
-	if (
-		!(event.target instanceof HTMLTextAreaElement) ||
-		event.target.id !== "prompt-input"
-	) {
-		return;
-	}
-	if (event.isComposing) return;
-	if (event.type === "input") filePickerSuppressUntilInput = false;
+	if (event.target !== promptInput() || event.isComposing) return;
+	filePickerSuppressUntilInput = false;
 	queueFileSearch(event.target);
 }
 
@@ -80,16 +72,12 @@ function queueFileSearch(input) {
 	)
 		return;
 	activeFilePrefix = match;
-	clearTimeout(searchTimer);
-	searchTimer = setTimeout(() => {
-		if (activeFilePrefix !== match) return;
-		input.dispatchEvent(
-			new CustomEvent("pi-ui-file-query", {
-				bubbles: true,
-				detail: { query: match.query },
-			}),
-		);
-	}, 50);
+	input.dispatchEvent(
+		new CustomEvent("pi-ui-file-query", {
+			bubbles: true,
+			detail: { query: match.query },
+		}),
+	);
 }
 
 function handleClick(event) {
@@ -174,10 +162,11 @@ export function closePickers(suppressUntilInput = false) {
 }
 
 function closeFilePicker(suppressUntilInput = false) {
-	clearTimeout(searchTimer);
 	if (suppressUntilInput) filePickerSuppressUntilInput = true;
 	activeFilePrefix = undefined;
-	promptInput()?.dispatchEvent(new CustomEvent("pi-ui-file-close", { bubbles: true }));
+	const input = promptInput();
+	input?.dispatchEvent(new CustomEvent("pi-ui-file-query", { bubbles: true }));
+	input?.dispatchEvent(new CustomEvent("pi-ui-file-close", { bubbles: true }));
 }
 
 function isSlashOpen() {
@@ -190,9 +179,11 @@ function isPopoverVisible(id) {
 }
 
 function visibleRows(selector) {
-	return [...document.querySelectorAll(selector)].filter(
-		(row) => row instanceof HTMLElement && row.checkVisibility(),
-	);
+	return document
+		.querySelectorAll(selector)
+		.values()
+		.filter((row) => row instanceof HTMLElement && row.checkVisibility())
+		.toArray();
 }
 
 function selectedPickerRow(selector) {

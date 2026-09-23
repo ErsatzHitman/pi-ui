@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 
+import { comparePackageVersions } from "../node_modules/@earendil-works/pi-coding-agent/dist/utils/version-check.js";
 import { asRecord, isString } from "./utils/type-guards.ts";
 import { version as currentVersion } from "./version.ts";
 
@@ -23,7 +24,7 @@ export async function checkForUpdate(
 ): Promise<AvailableUpdate | undefined> {
 	const latestVersion = await fetchLatestVersion(fetcher);
 	if (!latestVersion) return undefined;
-	if (compareVersions(latestVersion, runningVersion) <= 0) return undefined;
+	if (comparePackageVersions(latestVersion, runningVersion) !== 1) return undefined;
 	return {
 		currentVersion: runningVersion,
 		latestVersion,
@@ -46,41 +47,6 @@ async function fetchLatestVersion(fetcher: UpdateFetcher): Promise<string | unde
 		// Update checks are best-effort; offline and transient failures are ignored.
 		return undefined;
 	}
-}
-
-/** Compare two dotted versions, returning -1, 0, or 1. Non-semver values compare equal. */
-export function compareVersions(left: string, right: string): number {
-	const a = parseVersion(left);
-	const b = parseVersion(right);
-	if (!a || !b) return 0;
-	if (a.major !== b.major) return a.major < b.major ? -1 : 1;
-	if (a.minor !== b.minor) return a.minor < b.minor ? -1 : 1;
-	if (a.patch !== b.patch) return a.patch < b.patch ? -1 : 1;
-	if (a.prerelease === b.prerelease) return 0;
-	if (a.prerelease === undefined) return 1;
-	if (b.prerelease === undefined) return -1;
-	return a.prerelease < b.prerelease ? -1 : 1;
-}
-
-type ParsedVersion = {
-	major: number;
-	minor: number;
-	patch: number;
-	prerelease: string | undefined;
-};
-
-function parseVersion(value: string): ParsedVersion | undefined {
-	const match =
-		/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(
-			value.trim(),
-		);
-	if (!match) return undefined;
-	return {
-		major: Number(match[1]),
-		minor: Number(match[2]),
-		patch: Number(match[3]),
-		prerelease: match[4],
-	};
 }
 
 /** Pick the command that upgrades the current installation channel. */
