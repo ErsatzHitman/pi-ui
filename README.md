@@ -22,6 +22,8 @@ keyboard-first minimal gui for [`pi`](https://pi.dev)
 - git review with commit history and inline comments
 - markdown, syntax highlighting, and rich diffs
 - file attachments with image previews
+- a Live Workspace pane for turn state, sub-agents, usage, and extension activity
+- full extension UI compatibility, including terminal-style `custom()` overlays
 
 ## built with
 
@@ -229,6 +231,7 @@ all options with their defaults:
 | <kbd>ctrl/⌘</kbd> <kbd>b</kbd>                             | toggle session sidebar      |
 | <kbd>ctrl/⌘</kbd> <kbd>/</kbd>                             | workspace picker            |
 | <kbd>ctrl/⌘</kbd> <kbd>g</kbd>                             | toggle workspace            |
+| <kbd>alt</kbd> <kbd>l</kbd>                                | toggle Live Workspace       |
 | <kbd>ctrl/⌘</kbd> <kbd>l</kbd>                             | model picker                |
 | <kbd>ctrl/⌘</kbd> <kbd>p</kbd>                             | cycle favorite model        |
 | <kbd>ctrl/⌘</kbd> <kbd>shift</kbd> <kbd>p</kbd>            | cycle favorite model back   |
@@ -241,6 +244,68 @@ all options with their defaults:
 | <kbd>@</kbd>                                               | file picker                 |
 | <kbd>alt</kbd> <kbd>enter</kbd>                            | queue follow-up             |
 | <kbd>alt</kbd> <kbd>↑</kbd>                                | restore queued text         |
+
+## live workspace
+
+The Live Workspace pane (<kbd>alt</kbd> <kbd>l</kbd>, or the toolbar's activity icon) shows what
+the agent is doing without leaving the chat: it docks as a resizable column on wide screens,
+collapses to a right-side drawer on tablets, and becomes a bottom sheet on phones. Five tabs:
+
+- **Now** — the current turn's phase (running, retrying with a countdown, compacting, or waiting
+  on an extension's UI), active tools with live elapsed time and output previews, and any queued
+  steering or follow-up messages.
+- **Agents** — sub-agents, background shell jobs, and background sessions in one roster, plus
+  on-demand read-only views into a `workflows` run journal and the delegate ledger, when present.
+- **Usage** — session tokens, cost, cache-hit rate, the context-window meter, and any per-window
+  provider quota limits.
+- **Activity** — a bounded log of execution events (tool calls, turn boundaries, compaction,
+  session changes) you can export as JSON or clear.
+- **Extensions** — every PIUI element (widgets, rosters, progress, panels) and raw channel
+  payload an extension has published, for extensions that don't render their own widget.
+
+An opt-in bell toggle asks for permission to show a browser notification when a turn finishes or
+starts waiting for input while the tab is hidden.
+
+## extension compatibility
+
+pi-ui hosts pi extensions in `rpc` mode and renders their UI natively instead of a terminal:
+
+- Extensions that speak the **PIUI bridge protocol** (`ctx.ui.notify("PIUI …")`) render as
+  widgets, rosters, progress bars, markdown/diff panels, and native `<dialog>` sheets or forms,
+  reusing pi-ui's own components — no per-extension code.
+- Extensions that call `custom()`, `setWidget`, `setFooter`/`setHeader`, or read keyboard input
+  through `onTerminalInput` get a **terminal surface**: a headless TUI host renders their ANSI
+  output as themed HTML (light and dark) inside a dialog or an inline panel below the editor, and
+  forwards browser keys (including modifiers, arrows, and paste) back to the extension.
+- Slash commands — every built-in plus every extension-registered command — get argument
+  completions and native handling (pickers, dialogs, or notices) instead of being sent to the
+  model as chat text.
+- Extensions gated on `ctx.mode === "tui"` (checking for a real terminal rather than feature
+  support) still degrade to their text fallback; this is a known, documented gap rather than a
+  crash — nothing in the RPC contract throws.
+
+## mobile and Capacitor wrapping
+
+pi-ui's shell is built to drop into a Capacitor WebView with no code changes:
+
+- `viewport-fit=cover` plus `env(safe-area-inset-*)` padding on the toolbar, prompt box, dialogs,
+  the session sidebar, and the Live Workspace sheet/drawer keep content clear of notches and home
+  indicators.
+- Every interactive control reaches a real 44px hit area under `(pointer: coarse)`, dismissible
+  surfaces don't rely on hover, and the prompt doesn't steal focus (and the keyboard) on a cold
+  start on a coarse pointer.
+- Opening a dialog, the session sidebar drawer, or the Live Workspace sheet pushes a browser
+  history entry (`static/app/history-stack.js`); closing it (Escape, a Cancel button, the
+  backdrop, or a hardware/gesture back press) pops exactly that entry. Capacitor's `App` plugin
+  falls back to `window.history.back()` for the Android back button, so this makes it close the
+  top-most surface instead of leaving the app on the first press — with no Capacitor-specific code.
+- `static/manifest.webmanifest` ships maskable + any-purpose icons and `"orientation": "any"` for
+  an installable/wrapped shell.
+- The SSE `/stream` connection sends a periodic heartbeat and the client forces a reconnect on
+  `visibilitychange`, `pageshow`, and `online`, so backgrounding the WebView and returning doesn't
+  leave the UI stale.
+- To reach pi-ui from a Capacitor shell talking to a separate host process (rather than bundling
+  the server), bind non-loopback with `--auth-token` — see [server options](#server-options).
 
 ## license
 
