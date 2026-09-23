@@ -56,7 +56,8 @@ export async function createApp() {
 	store.setWorkspaceReviewPreferences(workspaceReviewPreferences);
 	store.setLiveWorkspacePreferences(liveWorkspacePreferences);
 	const sessionImages = new SessionImageStore();
-	const renderer = new UiRenderer(store, new DatastarClientHub(), {
+	const hub = new DatastarClientHub();
+	const renderer = new UiRenderer(store, hub, {
 		registerImage: (image) => sessionImages.register(image),
 		clearImages: () => sessionImages.clear(),
 	});
@@ -101,6 +102,8 @@ export async function createApp() {
 		dispose: () => {
 			disposal ??= (async () => {
 				workspaceReview.dispose();
+				// Stops the SSE heartbeat timer.
+				hub.dispose();
 				await Promise.allSettled([
 					transferredFiles.dispose(),
 					resources.host?.dispose(),
