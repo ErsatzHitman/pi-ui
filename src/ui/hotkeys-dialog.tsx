@@ -7,6 +7,7 @@ import { appCommandCatalog } from "../commands/catalog.ts";
 import { activeKeybind, type FocusKeybindId } from "../keybinds.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppExtensionShortcut, AppStateSnapshot } from "../state/app-store.ts";
+import { formatExtensionName } from "../utils/format.ts";
 import { formatKeyId, formatShortcut, shortcutParts } from "../utils/keyboard.ts";
 import { operatingSystem } from "../utils/platform.ts";
 import { shortcutGlyph } from "./keyboard.tsx";
@@ -81,11 +82,16 @@ function ExtensionShortcutsSection(props: {
 				>
 					<span class="hotkeys-row-content command-item-content">
 						<span class="command-item-title" safe>
-							{shortcut.description ?? shortcut.extensionPath}
+							{shortcut.description ??
+								formatExtensionName(shortcut.extensionPath)}
 						</span>
 						{shortcut.description && (
-							<span class="command-item-description" safe>
-								{shortcut.extensionPath}
+							<span
+								class="command-item-description"
+								title={shortcut.extensionPath}
+								safe
+							>
+								{formatExtensionName(shortcut.extensionPath)}
 							</span>
 						)}
 					</span>

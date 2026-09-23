@@ -3,6 +3,7 @@ import { appCommandCatalog, type AppCommandMetadata } from "../commands/catalog.
 import { activeKeybind } from "../keybinds.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppExtensionShortcut, AppStateSnapshot } from "../state/app-store.ts";
+import { formatExtensionName } from "../utils/format.ts";
 import { formatKeyId } from "../utils/keyboard.ts";
 import { ShortcutKbd } from "./keyboard.tsx";
 import { syncHtml } from "./sync-html.ts";
@@ -110,7 +111,7 @@ function renderCommandRow(item: AppCommandMetadata): string {
  * than hidden, so the row still shows what key the extension itself uses.
  */
 function renderExtensionShortcutRow(item: AppExtensionShortcut): string {
-	const title = item.description ?? item.extensionPath;
+	const title = item.description ?? formatExtensionName(item.extensionPath);
 	const searchText = `${title} ${item.extensionPath}`.toLowerCase();
 	return syncHtml(
 		<div
@@ -124,8 +125,12 @@ function renderExtensionShortcutRow(item: AppExtensionShortcut): string {
 					{title}
 				</span>
 				{item.description && (
-					<span class="command-item-description" safe>
-						{item.extensionPath}
+					<span
+						class="command-item-description"
+						title={item.extensionPath}
+						safe
+					>
+						{formatExtensionName(item.extensionPath)}
 					</span>
 				)}
 			</span>
