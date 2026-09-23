@@ -1,4 +1,9 @@
-import { toggleLiveWorkspaceAction } from "../commands/actions.ts";
+import type { DelegateLedgerEntry } from "../agent/delegate-ledger-reader.ts";
+import type { WorkflowJournalSummary } from "../agent/workflow-journal-reader.ts";
+import {
+	closeLiveWorkspaceAction,
+	toggleLiveWorkspaceAction,
+} from "../commands/actions.ts";
 import {
 	isPiUiSheetElement,
 	type PiUiElement,
@@ -6,6 +11,7 @@ import {
 } from "../extension-surface-types.ts";
 import { activeKeybind, keybindAction, keybindAria } from "../keybinds.ts";
 import {
+	formatRetryCountdown,
 	liveWorkspaceRatioDefault,
 	liveWorkspaceRatioMax,
 	liveWorkspaceRatioMin,
@@ -20,7 +26,7 @@ import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppStateSnapshot, AppUsage } from "../state/app-store.ts";
 import { formatTokens } from "../utils/format.ts";
 import { Icon } from "./icon.tsx";
-import { Activity, Bot, Gauge, List, X } from "./icons.ts";
+import { Activity, Bell, Bot, Download, Gauge, List, X } from "./icons.ts";
 import { ShortcutKbd, ShortcutTooltip } from "./keyboard.tsx";
 import { renderPiUiElement } from "./pi-ui-elements.tsx";
 import { resumeSessionAction } from "./session-transition.tsx";
@@ -138,73 +144,118 @@ export function renderLiveWorkspace(
 	extensions: LiveWorkspaceExtensions = noExtensions,
 ): string {
 	return syncHtml(
-		<section
-			id="live-workspace"
-			aria-label="Live Workspace"
-			aria-keyshortcuts={keybindAria("toggle-live-workspace")}
-			aria-hidden="true"
-			inert
-			data-attr:aria-hidden="$_liveWorkspaceOpen ? 'false' : 'true'"
-			data-attr:inert="!$_liveWorkspaceOpen"
-			data-on:keydown={`if (evt.code === 'Escape') { $_liveWorkspaceOpen = false; }`}
-		>
+		<>
 			<div
-				id="live-workspace-separator"
-				class="resize-handle"
-				role="separator"
-				tabindex="0"
-				aria-label="Resize Live Workspace"
-				aria-orientation="vertical"
-				aria-valuemin={liveWorkspaceRatioMin * 100}
-				aria-valuemax={liveWorkspaceRatioMax * 100}
-				data-attr:aria-valuenow={`Math.round(($liveWorkspacePreferences.ratio || ${liveWorkspaceRatioDefault}) * 100)`}
-				attrs={ratioResizeHandleAttributes()}
-			/>
-			<div
-				id="live-workspace-drag-handle"
-				class="live-workspace-drag-handle"
+				id="live-workspace-backdrop"
 				aria-hidden="true"
+				hidden
+				data-attr:hidden="!$_liveWorkspaceOpen"
+				data-on:click={closeLiveWorkspaceAction()}
 			/>
-			<header class="live-workspace-header">
+			<section
+				id="live-workspace"
+				aria-label="Live Workspace"
+				aria-keyshortcuts={keybindAria("toggle-live-workspace")}
+				aria-hidden="true"
+				inert
+				data-attr:aria-hidden="$_liveWorkspaceOpen ? 'false' : 'true'"
+				data-attr:inert="!$_liveWorkspaceOpen"
+				data-on:keydown={`if (evt.code === 'Escape') { ${closeLiveWorkspaceAction()} }`}
+			>
 				<div
-					class="segmented-control live-workspace-tabs"
-					aria-label="Live Workspace tabs"
-				>
-					{liveWorkspaceTabs.map((tab) => (
-						<button
-							type="button"
-							class="live-workspace-tab-button"
-							aria-pressed={tab === "now" ? "true" : "false"}
-							data-attr:aria-pressed={`$liveWorkspacePreferences.tab === '${tab}' || (!$liveWorkspacePreferences.tab && '${tab}' === 'now') ? 'true' : 'false'`}
-							data-on:click={`
+					id="live-workspace-separator"
+					class="resize-handle"
+					role="separator"
+					tabindex="0"
+					aria-label="Resize Live Workspace"
+					aria-orientation="vertical"
+					aria-valuemin={liveWorkspaceRatioMin * 100}
+					aria-valuemax={liveWorkspaceRatioMax * 100}
+					data-attr:aria-valuenow={`Math.round(($liveWorkspacePreferences.ratio || ${liveWorkspaceRatioDefault}) * 100)`}
+					attrs={ratioResizeHandleAttributes()}
+				/>
+				<div
+					id="live-workspace-drag-handle"
+					class="live-workspace-drag-handle"
+					aria-hidden="true"
+				/>
+				<header class="live-workspace-header">
+					<div
+						class="segmented-control live-workspace-tabs"
+						aria-label="Live Workspace tabs"
+					>
+						{liveWorkspaceTabs.map((tab) => (
+							<button
+								type="button"
+								class="live-workspace-tab-button"
+								aria-pressed={tab === "now" ? "true" : "false"}
+								aria-label={tabLabels[tab]}
+								data-tooltip={tabLabels[tab]}
+								data-tooltip-delay
+								data-attr:aria-pressed={`$liveWorkspacePreferences.tab === '${tab}' || (!$liveWorkspacePreferences.tab && '${tab}' === 'now') ? 'true' : 'false'`}
+								data-on:click={`
 								$liveWorkspacePreferences.tab = '${tab}';
 								document.body.dispatchEvent(new CustomEvent(
 									'pi-ui-live-workspace-preferences',
 									{ detail: { tab: '${tab}' } },
 								));
 							`}
+							>
+								<Icon icon={tabIcons[tab]} />
+								{/* A#26: the label stays for assistive tech and the tooltip, but visually
+							    the tabs are icon-only so 5 of them never wrap at the drawer's 26rem width. */}
+								<span class="sr-only">{tabLabels[tab]}</span>
+								<ShortcutTooltip label={tabLabels[tab]} />
+							</button>
+						))}
+					</div>
+					<div class="live-workspace-header-actions">
+						<button
+							type="button"
+							id="live-workspace-notifications-toggle"
+							class="btn"
+							data-variant="ghost"
+							data-attr:data-variant="$liveWorkspacePreferences.notifications ? 'secondary' : 'ghost'"
+							data-size="icon-xs"
+							aria-pressed="false"
+							data-attr:aria-pressed="$liveWorkspacePreferences.notifications ? 'true' : 'false'"
+							aria-label="Notify me when a turn finishes or needs input"
+							data-tooltip="Notify on completion"
+							data-tooltip-delay
+							data-on:click={`
+							$liveWorkspacePreferences.notifications = !$liveWorkspacePreferences.notifications;
+							document.body.dispatchEvent(new CustomEvent(
+								'pi-ui-live-workspace-preferences',
+								{ detail: { notifications: $liveWorkspacePreferences.notifications } },
+							));
+							if ($liveWorkspacePreferences.notifications) {
+								window.piUi.liveWorkspace.requestNotificationPermission();
+							}
+						`}
 						>
-							<Icon icon={tabIcons[tab]} />
-							<span>{tabLabels[tab]}</span>
+							<Icon icon={Bell} />
+							<ShortcutTooltip label="Notify on completion" />
 						</button>
-					))}
+						<button
+							type="button"
+							class="btn live-workspace-close"
+							data-variant="ghost"
+							data-size="icon-xs"
+							data-on:click={closeLiveWorkspaceAction()}
+							aria-label="Hide Live Workspace"
+						>
+							<Icon icon={X} />
+							<ShortcutKbd
+								shortcut={activeKeybind("toggle-live-workspace")}
+							/>
+						</button>
+					</div>
+				</header>
+				<div class="live-workspace-body raised-surface">
+					{renderLiveWorkspaceData(snapshot, preferences, usage, extensions)}
 				</div>
-				<button
-					type="button"
-					class="btn live-workspace-close"
-					data-variant="ghost"
-					data-size="icon-xs"
-					data-on:click="$_liveWorkspaceOpen = false"
-					aria-label="Hide Live Workspace"
-				>
-					<Icon icon={X} />
-					<ShortcutKbd shortcut={activeKeybind("toggle-live-workspace")} />
-				</button>
-			</header>
-			<div class="live-workspace-body raised-surface">
-				{renderLiveWorkspaceData(snapshot, preferences, usage, extensions)}
-			</div>
-		</section>,
+			</section>
+		</>,
 	);
 }
 
@@ -316,12 +367,21 @@ function renderTurnBanner(turn: LiveWorkspaceTurnState | undefined): string {
 			<p class="fine-print live-workspace-empty">No turn in progress.</p>,
 		);
 	}
-	const label = turnLabel(turn);
 	const canAbort = turn.phase === "running" || turn.phase === "retrying";
 	return syncHtml(
 		<div class="live-workspace-turn-banner" data-turn-phase={turn.phase}>
-			<span class="live-workspace-turn-label" safe>
-				{label}
+			<span class="live-workspace-turn-text">
+				<span class="live-workspace-turn-label" safe>
+					{turnLabelPrefix(turn)}
+				</span>
+				{turn.phase === "retrying" && turn.retryAt !== undefined && (
+					<span
+						class="fine-print live-workspace-turn-countdown"
+						data-live-workspace-retry-at={turn.retryAt}
+					>
+						{formatRetryCountdown(Math.max(0, turn.retryAt - Date.now()))}
+					</span>
+				)}
 			</span>
 			{canAbort && (
 				<button
@@ -338,7 +398,8 @@ function renderTurnBanner(turn: LiveWorkspaceTurnState | undefined): string {
 	);
 }
 
-function turnLabel(turn: LiveWorkspaceTurnState): string {
+/** The phase label, minus the retry countdown (that part is client-ticked; A#26). */
+function turnLabelPrefix(turn: LiveWorkspaceTurnState): string {
 	if (turn.phase === "waiting-for-extension") {
 		return `Waiting for extension UI${turn.waitingTitle ? `: ${turn.waitingTitle}` : ` (${turn.waitingKind})`}`;
 	}
@@ -346,31 +407,138 @@ function turnLabel(turn: LiveWorkspaceTurnState): string {
 		return `Compacting context (${turn.compactionReason})`;
 	}
 	if (turn.phase === "retrying") {
-		const countdown =
-			turn.retryAt !== undefined
-				? Math.max(0, turn.retryAt - Date.now())
-				: undefined;
 		const attempts =
 			turn.retryAttempt !== undefined && turn.retryMaxAttempts !== undefined
 				? ` ${turn.retryAttempt}/${turn.retryMaxAttempts}`
 				: "";
-		return `Retrying${attempts}${countdown ? ` in ${Math.ceil(countdown / 1000)}s` : ""}`;
+		return `Retrying${attempts}`;
 	}
 	return "Running";
 }
 
 function renderAgentsTab(snapshot: LiveWorkspaceSnapshot): string {
-	if (snapshot.agents.length === 0) {
-		return syncHtml(
-			<p class="fine-print live-workspace-empty">
-				No subagents, background jobs, or background sessions.
-			</p>,
-		);
-	}
 	return syncHtml(
-		<ul class="live-workspace-agent-list">
-			{snapshot.agents.map((agent) => renderAgentRow(agent))}
-		</ul>,
+		<div class="live-workspace-panel">
+			{/* Read-only views onto other extensions' own on-disk state (R2-C): the `workflows`
+			    extension's run journal and the `pi-herdr-delegate` ledger. Loaded on demand
+			    rather than polled, since both are read from disk on every request. */}
+			<div class="live-workspace-agents-extra-actions">
+				<button
+					type="button"
+					class="btn"
+					data-variant="outline"
+					data-size="xs"
+					data-on:click={`@get('${endpoints.liveWorkspaceWorkflowJournal}', { payload: {} })`}
+				>
+					Workflow status
+				</button>
+				<button
+					type="button"
+					class="btn"
+					data-variant="outline"
+					data-size="xs"
+					data-on:click={`@get('${endpoints.liveWorkspaceDelegateLedger}', { payload: {} })`}
+				>
+					Delegations
+				</button>
+			</div>
+			<div
+				id="live-workspace-workflow-journal"
+				class="live-workspace-extra-panel"
+			/>
+			<div id="live-workspace-delegate-ledger" class="live-workspace-extra-panel" />
+			{snapshot.agents.length === 0 ? (
+				<p class="fine-print live-workspace-empty">
+					No subagents, background jobs, or background sessions.
+				</p>
+			) : (
+				<ul class="live-workspace-agent-list">
+					{snapshot.agents.map((agent) => renderAgentRow(agent))}
+				</ul>
+			)}
+		</div>,
+	);
+}
+
+/** Patched into `#live-workspace-workflow-journal` on demand (Agents tab, "Workflow status"). */
+export function renderWorkflowJournalPanel(
+	summary: WorkflowJournalSummary | undefined,
+): string {
+	return syncHtml(
+		<div id="live-workspace-workflow-journal" class="live-workspace-extra-panel">
+			{summary ? (
+				<div class="live-workspace-panel">
+					<h3 class="live-workspace-section-heading" safe>
+						{summary.workflowName}
+					</h3>
+					<p class="fine-print" safe>
+						{summary.status}
+						{summary.phases.length > 0
+							? ` · ${summary.phases.join(" → ")}`
+							: ""}
+					</p>
+					{summary.agents.length > 0 && (
+						<ul class="live-workspace-agent-list">
+							{summary.agents.map((agent) => (
+								<li class="live-workspace-agent-row">
+									<span class="live-workspace-agent-label" safe>
+										{agent.label}
+									</span>
+									<span
+										class="fine-print live-workspace-agent-status"
+										safe
+									>
+										{agent.status}
+										{agent.model ? ` · ${agent.model}` : ""}
+										{agent.error ? ` · ${agent.error}` : ""}
+									</span>
+									{agent.tokens !== undefined && (
+										<span class="fine-print live-workspace-agent-tokens">
+											{formatTokens(agent.tokens)} tok
+										</span>
+									)}
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+			) : (
+				<p class="fine-print live-workspace-empty">
+					No workflow run found for this workspace.
+				</p>
+			)}
+		</div>,
+	);
+}
+
+/** Patched into `#live-workspace-delegate-ledger` on demand (Agents tab, "Delegations"). */
+export function renderDelegateLedgerPanel(
+	entries: readonly DelegateLedgerEntry[],
+): string {
+	return syncHtml(
+		<div id="live-workspace-delegate-ledger" class="live-workspace-extra-panel">
+			{entries.length > 0 ? (
+				<ul class="live-workspace-agent-list">
+					{entries.map((entry) => (
+						<li class="live-workspace-agent-row">
+							<span class="live-workspace-agent-label" safe>
+								{entry.childName ?? entry.prompt}
+							</span>
+							<span class="fine-print live-workspace-agent-status" safe>
+								{entry.status}
+								{entry.model ? ` · ${entry.model}` : ""}
+							</span>
+							<span
+								class="fine-print live-workspace-agent-tokens"
+								data-live-workspace-elapsed={entry.delegatedAt}
+							/>
+						</li>
+					))}
+				</ul>
+			) : (
+				<p class="fine-print live-workspace-empty">No delegations recorded.</p>
+			)}
+		</div>,
 	);
 }
 
@@ -385,6 +553,7 @@ function renderAgentRow(agent: LiveWorkspaceAgentRow): string {
 			</span>
 			<span class="fine-print live-workspace-agent-status" safe>
 				{agent.status}
+				{agent.detail ? ` · ${agent.detail}` : ""}
 			</span>
 			{agent.tokens !== undefined && (
 				<span class="fine-print live-workspace-agent-tokens">
@@ -480,16 +649,34 @@ function renderActivityTab(snapshot: LiveWorkspaceSnapshot): string {
 		<div class="live-workspace-panel">
 			<div class="live-workspace-activity-header">
 				<span class="fine-print">{snapshot.activity.length} events</span>
-				<button
-					type="button"
-					class="btn"
-					data-variant="ghost"
-					data-size="xs"
-					data-on:click={`@post('${endpoints.liveWorkspaceClearActivity}', { payload: {} })`}
-					disabled={snapshot.activity.length === 0}
-				>
-					Clear
-				</button>
+				<div class="live-workspace-activity-header-actions">
+					<a
+						class="btn"
+						data-variant="ghost"
+						data-size="icon-xs"
+						href={endpoints.liveWorkspaceActivityExport}
+						download=""
+						aria-disabled={
+							snapshot.activity.length === 0 ? "true" : undefined
+						}
+						aria-label="Export activity log as JSON"
+						data-tooltip="Export as JSON"
+						data-tooltip-delay
+					>
+						<Icon icon={Download} />
+						<ShortcutTooltip label="Export as JSON" />
+					</a>
+					<button
+						type="button"
+						class="btn"
+						data-variant="ghost"
+						data-size="xs"
+						data-on:click={`@post('${endpoints.liveWorkspaceClearActivity}', { payload: {} })`}
+						disabled={snapshot.activity.length === 0}
+					>
+						Clear
+					</button>
+				</div>
 			</div>
 			{snapshot.activity.length === 0 ? (
 				<p class="fine-print live-workspace-empty">No activity recorded yet.</p>

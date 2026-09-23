@@ -7,11 +7,14 @@ import {
 	type LiveWorkspacePreferences,
 	type LiveWorkspaceSnapshot,
 } from "../live-workspace-types.ts";
+import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppUsage } from "../state/app-store.ts";
 import {
+	renderDelegateLedgerPanel,
 	renderLiveWorkspace,
 	renderLiveWorkspaceData,
 	renderLiveWorkspaceToggle,
+	renderWorkflowJournalPanel,
 } from "./live-workspace.tsx";
 import { appRenderSnapshot } from "./test-fixtures.ts";
 
@@ -34,6 +37,39 @@ test("the pane shell starts hidden and inert until the open signal flips", () =>
 	assertStringIncludes(html, 'aria-hidden="true"');
 	assertStringIncludes(html, "$_liveWorkspaceOpen ? 'false' : 'true'");
 	assertStringIncludes(html, "!$_liveWorkspaceOpen");
+});
+
+test("an opt-in notifications toggle is rendered and reflects the saved preference", () => {
+	const html = renderLiveWorkspace(snapshot(), {}, emptyUsage);
+	assertStringIncludes(html, 'id="live-workspace-notifications-toggle"');
+	assertStringIncludes(
+		html,
+		"$liveWorkspacePreferences.notifications ? 'true' : 'false'",
+	);
+	assertStringIncludes(
+		html,
+		"window.piUi.liveWorkspace.requestNotificationPermission()",
+	);
+});
+
+test("a click-to-close backdrop is rendered alongside the pane, hidden until it opens (A#14)", () => {
+	const html = renderLiveWorkspace(snapshot(), {}, emptyUsage);
+	assertStringIncludes(html, 'id="live-workspace-backdrop"');
+	assertStringIncludes(html, 'data-attr:hidden="!$_liveWorkspaceOpen"');
+});
+
+test("closing the pane (Escape, close button, backdrop) persists the open preference (A#15)", () => {
+	const html = renderLiveWorkspace(snapshot(), {}, emptyUsage);
+	// All three close paths run the same persisted-close action.
+	const closeAction = "$_liveWorkspaceOpen = false;";
+	const occurrences = html.split(closeAction).length - 1;
+	assertStringIncludes(html, closeAction);
+	assertStringIncludes(html, "detail: { open: $_liveWorkspaceOpen } }");
+	if (occurrences < 3) {
+		throw new Error(
+			`expected the close action on Escape, the close button and the backdrop, got ${occurrences}`,
+		);
+	}
 });
 
 test("only the preference-selected tab renders visible; the rest are display:none", () => {
@@ -72,6 +108,25 @@ test("a compacting turn reports its reason and offers no abort action", () => {
 	);
 	assertStringIncludes(html, "Compacting context (threshold)");
 	assertFalse(html.includes("Abort"));
+});
+
+test("a retrying turn renders a client-tickable countdown element (A#26)", () => {
+	const retryAt = Date.now() + 4000;
+	const html = renderLiveWorkspaceData(
+		snapshot({
+			turn: {
+				phase: "retrying",
+				retryAttempt: 1,
+				retryMaxAttempts: 3,
+				retryAt,
+			},
+		}),
+		{},
+		emptyUsage,
+	);
+	assertStringIncludes(html, "Retrying 1/3");
+	assertStringIncludes(html, `data-live-workspace-retry-at="${retryAt}"`);
+	assertStringIncludes(html, "in 4s");
 });
 
 test("a waiting-for-extension turn names the prompt title", () => {
@@ -135,6 +190,48 @@ test("the agents tab reports an empty roster when nothing is tracked", () => {
 	assertStringIncludes(html, "No subagents, background jobs, or background sessions.");
 });
 
+test("the agents tab offers on-demand workflow journal and delegate ledger panels (R2-C)", () => {
+	const html = renderLiveWorkspaceData(snapshot(), { tab: "agents" }, emptyUsage);
+	assertStringIncludes(html, `@get('${endpoints.liveWorkspaceWorkflowJournal}'`);
+	assertStringIncludes(html, `@get('${endpoints.liveWorkspaceDelegateLedger}'`);
+	assertStringIncludes(html, 'id="live-workspace-workflow-journal"');
+	assertStringIncludes(html, 'id="live-workspace-delegate-ledger"');
+});
+
+test("renderWorkflowJournalPanel reports absence and summarizes a found run", () => {
+	assertStringIncludes(
+		renderWorkflowJournalPanel(undefined),
+		"No workflow run found for this workspace.",
+	);
+	const html = renderWorkflowJournalPanel({
+		runId: "run-1",
+		workflowName: "Refactor auth",
+		status: "running",
+		phases: ["plan", "implement"],
+		agents: [{ id: 1, label: "scout", status: "done", model: "gpt-5", tokens: 500 }],
+	});
+	assertStringIncludes(html, "Refactor auth");
+	assertStringIncludes(html, "plan → implement");
+	assertStringIncludes(html, "scout");
+	assertStringIncludes(html, "500 tok");
+});
+
+test("renderDelegateLedgerPanel reports absence and lists found delegations", () => {
+	assertStringIncludes(renderDelegateLedgerPanel([]), "No delegations recorded.");
+	const html = renderDelegateLedgerPanel([
+		{
+			delegationId: "dlg-aaaaaaaaaaaa",
+			childName: "scout",
+			prompt: "investigate",
+			status: "running",
+			delegatedAt: 1000,
+		},
+	]);
+	assertStringIncludes(html, "scout");
+	assertStringIncludes(html, "running");
+	assertStringIncludes(html, 'data-live-workspace-elapsed="1000"');
+});
+
 test("the usage tab renders a context meter and per-window quota limits", () => {
 	const usage: AppUsage = {
 		text: "$1.230 • 12,000 tokens",
@@ -185,6 +282,12 @@ test("the activity tab disables Clear once the log is empty", () => {
 	);
 	assertStringIncludes(populated, "Retrying (1/3)");
 	assertStringIncludes(populated, `@post('/live-workspace/clear-activity'`);
+});
+
+test("the activity tab offers an export-as-JSON download link (R2-C)", () => {
+	const html = renderLiveWorkspaceData(snapshot(), { tab: "activity" }, emptyUsage);
+	assertStringIncludes(html, `href="${endpoints.liveWorkspaceActivityExport}"`);
+	assertStringIncludes(html, "download");
 });
 
 test("the extensions tab falls back to raw JSON for an untyped channel payload", () => {

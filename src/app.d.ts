@@ -79,6 +79,7 @@ interface PiUiNamespace {
 	};
 	liveWorkspace: {
 		applyOpen(open: boolean): void;
+		requestNotificationPermission(): void;
 	};
 	shouldAbortOnEscape(event: KeyboardEvent): boolean;
 }

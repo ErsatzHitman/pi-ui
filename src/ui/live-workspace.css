@@ -6,6 +6,39 @@
 
 @layer components {
 	/*
+	 * A#14: click-to-close scrim behind the pane whenever it floats above the chat instead of
+	 * being grid-docked (mobile sheet, and the 48-64rem drawer). Docked mode (the `@container`
+	 * block below) hides it outright — the pane is part of the layout there, not an overlay.
+	 */
+	#live-workspace-backdrop {
+		position: absolute;
+		inset: 0;
+		z-index: 55;
+		display: block;
+		background: light-dark(oklch(0% 0 none / 25%), oklch(0% 0 none / 45%));
+		opacity: 0;
+		transition:
+			opacity 180ms var(--ease-out),
+			display 180ms allow-discrete;
+		transition-behavior: allow-discrete;
+	}
+
+	#live-workspace-backdrop[hidden] {
+		display: none;
+		opacity: 0;
+	}
+
+	#app.live-workspace-open #live-workspace-backdrop:not([hidden]) {
+		opacity: 1;
+	}
+
+	@starting-style {
+		#app.live-workspace-open #live-workspace-backdrop:not([hidden]) {
+			opacity: 0;
+		}
+	}
+
+	/*
 	 * Base (mobile) shape: a bottom sheet anchored to the viewport's bottom edge. Widened
 	 * breakpoints below progressively turn it into a right-side drawer, then (at the
 	 * `workspace` container's 64rem breakpoint, mirroring workspace-review.css's 88rem dock
@@ -19,7 +52,7 @@
 		bottom: 0;
 		z-index: 60;
 		display: none;
-		max-height: min(80vh, 34rem);
+		max-height: min(80dvh, 34rem);
 		grid-template-rows: auto minmax(0, 1fr);
 		border-start-start-radius: var(--radius-xl);
 		border-start-end-radius: var(--radius-xl);
@@ -69,23 +102,26 @@
 
 	.live-workspace-tabs {
 		display: flex;
-		flex-wrap: wrap;
+
+		/* A#26: icon-only buttons (see live-workspace.tsx) never need to wrap, even at the
+		   drawer's 26rem width with all 5 tabs — no-wrap keeps that a guarantee, not a hope. */
+		flex-wrap: nowrap;
 		gap: 0.125rem;
 	}
 
 	.live-workspace-tab-button {
 		display: flex;
 		align-items: center;
-		gap: 0.375rem;
+		justify-content: center;
+		width: 1.75rem;
+		height: 1.75rem;
 		border-radius: var(--radius-sm);
-		padding: 0.25rem 0.5rem;
 		color: var(--text-muted);
-		font-size: var(--text-xs);
 	}
 
 	.live-workspace-tab-button svg {
-		width: 0.875rem;
-		height: 0.875rem;
+		width: 0.9375rem;
+		height: 0.9375rem;
 	}
 
 	.live-workspace-tab-button[aria-pressed="true"] {
@@ -95,6 +131,21 @@
 
 	.live-workspace-tab-button:hover {
 		color: var(--text);
+	}
+
+	/* Matches styles/controls.css's systemic `.btn` touch-target floor; these aren't `.btn`. */
+	@media (pointer: coarse) {
+		.live-workspace-tab-button {
+			width: 2.75rem;
+			height: 2.75rem;
+		}
+	}
+
+	.live-workspace-header-actions {
+		display: flex;
+		flex-shrink: 0;
+		align-items: center;
+		gap: 0.125rem;
 	}
 
 	.live-workspace-close {
@@ -146,6 +197,18 @@
 	.live-workspace-turn-banner[data-turn-phase="retrying"],
 	.live-workspace-turn-banner[data-turn-phase="waiting-for-extension"] {
 		border-color: var(--status-warning, var(--border));
+	}
+
+	.live-workspace-turn-text {
+		display: flex;
+		align-items: baseline;
+		gap: 0.375rem;
+		min-width: 0;
+	}
+
+	.live-workspace-turn-countdown {
+		flex-shrink: 0;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.live-workspace-tool-list,
@@ -213,6 +276,22 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
+	}
+
+	.live-workspace-activity-header-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+	}
+
+	.live-workspace-agents-extra-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.375rem;
+	}
+
+	.live-workspace-extra-panel:empty {
+		display: none;
 	}
 
 	.live-workspace-activity-text {
@@ -297,6 +376,16 @@
 	@media (width > 48rem) {
 		#live-workspace {
 			position: absolute;
+
+			/*
+			 * A#14: an explicit grid area, not just `position: absolute`, so the containing
+			 * block this pane's `inset` resolves against is `#workspace-shell`'s second grid
+			 * row (below `.toolbar`, which owns row 1) instead of the shell's whole padding
+			 * box — otherwise the drawer starts at the very top and covers the toolbar's
+			 * Live Workspace and sessions buttons.
+			 */
+			grid-row: 2 / 3;
+			grid-column: 1 / -1;
 			inset: var(--workspace-inset);
 			left: auto;
 			width: min(26rem, calc(100% - 2 * var(--workspace-inset)));
@@ -311,7 +400,12 @@
 		}
 	}
 
+	/* Docked mode below folds the pane into the grid; it's no longer an overlay to dismiss. */
 	@container workspace (width >= 64rem) {
+		#app.live-workspace-open:not(.review-open) #live-workspace-backdrop {
+			display: none;
+		}
+
 		#app.live-workspace-open:not(.review-open) #live-workspace {
 			position: relative;
 			inset: auto;
