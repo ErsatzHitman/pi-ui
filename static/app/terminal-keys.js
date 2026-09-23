@@ -271,13 +271,15 @@ function availableHeight(grid, rect) {
  * viewport instead, adjusted for the box's own fixed chrome (padding/border, which stays the
  * same whatever the box's current width): a stable reference the percentage can converge
  * against without feeding on itself, mirroring `availableHeight`'s reasoning for the same
- * problem in the other dimension.
+ * problem in the other dimension. Never floored at the box's current width: after the window
+ * narrows, that box is still the old (too wide) size, and flooring at it kept the overlay
+ * wider than the new viewport.
  */
 function percentOverlayAvailableWidth(grid, bodyAvailable) {
 	const content = grid.closest(".terminal-surface-dialog-content");
 	if (!content) return bodyAvailable;
 	const chrome = content.getBoundingClientRect().width - bodyAvailable;
-	return Math.max(bodyAvailable, document.documentElement.clientWidth - chrome);
+	return Math.max(0, document.documentElement.clientWidth - chrome);
 }
 
 function sendResize(surfaceId, grid) {

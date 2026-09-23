@@ -81,7 +81,10 @@ test("overlay anchor and offset project onto the dialog's data attribute and sty
 	assertStringIncludes(html, 'data-anchor="top-right"');
 	assertStringIncludes(html, "--terminal-overlay-offset-x:2ch");
 	assertStringIncludes(html, "--terminal-overlay-offset-y:-1lh");
-	assertStringIncludes(html, "--terminal-overlay-width:40ch");
+	assertStringIncludes(
+		html,
+		"--terminal-overlay-width:calc(40ch + var(--terminal-overlay-chrome))",
+	);
 	// Only a percentage width needs the viewport-based resize measurement (F4).
 	assertStringExcludes(html, "data-terminal-surface-percent-width");
 });
@@ -101,7 +104,10 @@ test("a percentage overlay width sizes the dialog to the already-resolved column
 			}),
 		],
 	});
-	assertStringIncludes(html, "--terminal-overlay-width:73ch");
+	assertStringIncludes(
+		html,
+		"--terminal-overlay-width:calc(73ch + var(--terminal-overlay-chrome))",
+	);
 	assertStringExcludes(html, "vw");
 	assertStringIncludes(html, "--terminal-overlay-max-height:85dvh");
 	// The client measures the viewport (not this now-exact-fit box) to re-resolve the

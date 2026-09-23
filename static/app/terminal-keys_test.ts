@@ -449,6 +449,43 @@ test("a percentage-width overlay measures against the viewport, not its own alre
 	}
 });
 
+test("a percentage-width overlay shrinks to a narrowed viewport instead of keeping its old box (F4)", async () => {
+	// After the window narrows, the box is still sized for the old, wider viewport: flooring
+	// the reference at that box kept the overlay wider than the new viewport.
+	const content = new FakeGridElement({ width: 1762, height: 130 });
+	const grid = new FakeGridElement({ width: 0, height: 96 });
+	grid.dataset.terminalSurfaceGrid = "s-narrowed";
+	grid.dataset.terminalSurfaceKind = "overlay";
+	grid.dataset.terminalSurfacePercentWidth = "true";
+	grid.setClosest(content);
+	const body = new FakeGridElement({ width: 0, height: 0 });
+	body.dataset.cols = "244";
+	body.dataset.rows = "24";
+	body.clientWidth = 1726;
+	grid.setQueryResult(body);
+	body.setClosest(grid);
+
+	const dom = installFakeDom({
+		probeRect: { width: 140, height: 20 },
+		grids: [],
+		documentElementWidth: 768,
+	});
+	try {
+		bindTerminalSurfaces();
+		dom.getMutationCallback()?.([
+			{ type: "attributes", target: body, addedNodes: [], removedNodes: [] },
+		]);
+		await waitForCondition(() => dom.calls.length > 0, {
+			timeoutMs: 1000,
+			message: "expected a resize POST for the narrowed percentage overlay",
+		});
+		// (768 viewport - 36 chrome) / 7px cells = 104 cols, not the old box's 246.
+		assertEquals(dom.calls[0]?.body, { surfaceId: "s-narrowed", cols: 104, rows: 4 });
+	} finally {
+		dom.restore();
+	}
+});
+
 test("a numeric-width overlay still measures its own box (only a percentage needs the viewport)", async () => {
 	const content = new FakeGridElement({ width: 700, height: 130 });
 	const grid = new FakeGridElement({ width: 0, height: 96 });

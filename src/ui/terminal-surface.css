@@ -57,6 +57,13 @@
 		margin: auto var(--terminal-overlay-margin, 1rem) auto auto;
 	}
 	.terminal-surface-dialog {
+		/* `terminal-surface.tsx` sizes the panel as `calc(Nch + var(--terminal-overlay-chrome))`
+		   (declared in this element's style attribute, so the chrome must be defined here): N
+		   cells plus, per side, everything between the panel's border box and the first cell —
+		   the panel's border and padding (`.dialog > *`), the grid's border and the body's
+		   inline padding (`.terminal-surface-body`). */
+		--terminal-overlay-chrome: calc(2 * (1px + 1rem + 1px + 0.625rem));
+
 		translate: var(--terminal-overlay-offset-x, 0) var(--terminal-overlay-offset-y, 0);
 	}
 
@@ -73,14 +80,8 @@
 		min-width: var(--terminal-overlay-min-width, min(20rem, calc(100vw - 2rem)));
 		max-height: var(--terminal-overlay-max-height, min(70dvh, 32rem));
 
-		/* `width`/`min-width` above are in `ch`/`lh` — CSS resolves those units against
-		   THIS element's own font, not its `.terminal-surface-body` descendant's. Left at the
-		   inherited `.dialog > *` font (proportional sans-serif, `--text-base`), a `147ch` box
-		   sized itself against a completely unrelated glyph width, so the monospace grid it
-		   wrapped no longer fit inside it (F4 follow-up: a residual horizontal scrollbar even
-		   after `overlayStyleVars` stopped double-applying a percentage). Matching
-		   `.terminal-surface-body`'s font here makes `ch` mean the same cell width the actual
-		   text renders at. */
+		/* `ch` in the width vars resolves against THIS element's font, so it uses the body's
+		   monospace font and size, not the inherited sans-serif `.dialog > *` one. */
 		font-family: var(--font-mono);
 		font-size: var(--text-sm);
 	}

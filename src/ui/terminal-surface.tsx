@@ -151,6 +151,16 @@ function sizeValue(
 }
 
 /**
+ * A panel width that fits `columns` cells exactly: the cells themselves (`ch`, resolved
+ * against the panel's monospace font) plus the fixed chrome between the panel's border box and
+ * the first cell (`--terminal-overlay-chrome`, `terminal-surface.css`). Without the chrome
+ * the panel came up ~56px short and every width-sized overlay grew a horizontal scrollbar.
+ */
+function cellsWidth(columns: number): string {
+	return `calc(${columns}ch + var(--terminal-overlay-chrome))`;
+}
+
+/**
  * Projects `OverlayOptions` (columns/rows/anchor/offsets) onto CSS custom
  * properties `terminal-surface.css` reads — a best-effort approximation of
  * pi-tui's cell-based overlay layout using the same `ch`/`lh` units the
@@ -175,10 +185,10 @@ function overlayStyleVars(
 	if (!options) return undefined;
 	const decls: string[] = [];
 	if (options.width !== undefined) {
-		decls.push(`--terminal-overlay-width:${resolvedWidth}ch`);
+		decls.push(`--terminal-overlay-width:${cellsWidth(resolvedWidth)}`);
 	}
 	if (options.minWidth !== undefined) {
-		decls.push(`--terminal-overlay-min-width:${options.minWidth}ch`);
+		decls.push(`--terminal-overlay-min-width:${cellsWidth(options.minWidth)}`);
 	}
 	const maxHeight = sizeValue(options.maxHeight, "lh", "dvh");
 	if (maxHeight) decls.push(`--terminal-overlay-max-height:${maxHeight}`);
