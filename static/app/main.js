@@ -4,7 +4,11 @@ import { bindCodeCopy } from "./code-copy.js";
 import { activateCommandItem, bindControls, refreshControls } from "./controls.js";
 import { hydrateDateTime } from "./date-time.js";
 import { bindDisplayRefreshMeasurement } from "./display-refresh.js";
-import { bindExtensionKeys, promptLevelInputActive } from "./extension-keys.js";
+import {
+	bindExtensionKeys,
+	promptInputBusy,
+	promptLevelInputActive,
+} from "./extension-keys.js";
 import { bindFileLinks } from "./file-links.js";
 import * as fileTransfer from "./file-transfer.js";
 import { bindDismissibleHistory } from "./history-stack.js";
@@ -45,7 +49,7 @@ window.piUi = {
 	controls: { refresh: refreshControls, activate: activateCommandItem },
 	codeTheme: { loadPreviews() {} },
 	dateTime: { hydrate: hydrateDateTime },
-	extensionKeys: { promptLevelInputActive },
+	extensionKeys: { promptInputBusy, promptLevelInputActive },
 	fonts: { apply() {} },
 	fileTransfer,
 	messageScroll: {

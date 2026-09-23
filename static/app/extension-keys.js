@@ -34,9 +34,11 @@ import { encodeKeyEvent } from "./terminal-keys.js";
  * Escape-blurs-the-prompt convenience, since that handler runs on the
  * textarea itself and always fires before this module's `document`-level
  * listener ever sees the event (see `promptLevelInputActive`'s doc comment).
- * A consumed key never reaches the textarea; an unconsumed one is inserted
- * (or, for Escape, blurs the prompt via `blurPromptIfIdle`) exactly as if
- * this module had never intercepted it.
+ * A consumed key never reaches the textarea; an unconsumed one is played back
+ * at the caret (or, for Escape, blurs the prompt via `blurPromptIfIdle`)
+ * exactly as if this module had never intercepted it. While a forward is in
+ * flight, later editing keys queue behind it (see `handlePromptLevelKeydown`)
+ * so fast typing is never reordered or dropped.
  */
 
 const dataIslandId = "extension-shortcuts-data";
@@ -211,6 +213,14 @@ function invokeShortcut(keyId) {
 	});
 }
 
+/** Keys preventDefault()'d at dispatch and waiting to be forwarded or played
+ * back, oldest first. Serialized so two keys typed within one round trip can
+ * never race: each one's forward decision and fallback runs against the
+ * prompt as every earlier key left it. */
+const pendingKeys = [];
+let draining = false;
+let replaying = false;
+
 let captureIndicatorTimer;
 
 function flashCaptureIndicator() {
@@ -223,16 +233,96 @@ function flashCaptureIndicator() {
 	}, captureIndicatorMs);
 }
 
-/** Inserts `text` at the caret the way native typing would, for a candidate
- * key this module preventDefault()'d but no listener consumed — the prompt is
- * always empty when this runs (see `isForwardCandidate`), so this is just
- * "set the value to the typed character" plus a real `input` event for
- * Datastar's `data-bind:prompt` to pick up. */
-function insertUnconsumedChar(input, text) {
-	input.value = text;
+/** Keys that, once a forward is in flight, must wait their turn behind it so
+ * they apply to the prompt in the order they were typed (see
+ * `handlePromptLevelKeydown`). Everything else — modifier chords, Tab,
+ * Home/End, IME composition — keeps its native, immediate behavior. */
+const orderedEditingKeys = new Set([
+	"Backspace",
+	"Delete",
+	"Enter",
+	"Escape",
+	"ArrowUp",
+	"ArrowDown",
+	"ArrowLeft",
+	"ArrowRight",
+]);
+
+function isOrderedKey(event) {
+	if (event.ctrlKey || event.metaKey || event.altKey) return false;
+	return event.key.length === 1 || orderedEditingKeys.has(event.key);
+}
+
+/** Replaces the prompt's current selection with `text` (`""` deletes it) and
+ * fires a real `input` event for Datastar's `data-bind:prompt`, the way native
+ * editing would. Relative to the live value and caret — never an overwrite —
+ * so keys applied after a round trip never clobber anything typed since. */
+function replaceSelection(input, text, start, end) {
+	input.setRangeText(text, start, end, "end");
 	input.dispatchEvent(new Event("input", { bubbles: true }));
-	input.selectionStart = input.value.length;
-	input.selectionEnd = input.value.length;
+}
+
+/** Plays a key this module preventDefault()'d (and no listener consumed) back
+ * into the prompt: the native default action for editing keys, and, for a
+ * plain Enter, `prompt-box.tsx`'s own submit handling via a non-bubbling
+ * synthetic keydown (non-bubbling so window-level keybinds, which already saw
+ * the original event, don't fire twice). */
+function applyKeyLocally(input, event) {
+	const start = input.selectionStart;
+	const end = input.selectionEnd;
+	const collapsed = start === end;
+	switch (event.key) {
+		case "Enter": {
+			if (!event.shiftKey) {
+				const replay = new KeyboardEvent("keydown", {
+					key: "Enter",
+					code: event.code,
+					bubbles: false,
+					cancelable: true,
+				});
+				replaying = true;
+				try {
+					input.dispatchEvent(replay);
+				} finally {
+					replaying = false;
+				}
+				if (replay.defaultPrevented) return;
+			}
+			replaceSelection(input, "\n", start, end);
+			return;
+		}
+		case "Backspace":
+			if (!collapsed) replaceSelection(input, "", start, end);
+			else if (start > 0) replaceSelection(input, "", start - 1, start);
+			return;
+		case "Delete":
+			if (!collapsed) replaceSelection(input, "", start, end);
+			else if (end < input.value.length) replaceSelection(input, "", end, end + 1);
+			return;
+		case "ArrowLeft":
+		case "ArrowUp": {
+			const caret = collapsed
+				? event.key === "ArrowUp"
+					? 0
+					: Math.max(0, start - 1)
+				: start;
+			input.setSelectionRange(caret, caret);
+			return;
+		}
+		case "ArrowRight":
+		case "ArrowDown": {
+			const length = input.value.length;
+			const caret = collapsed
+				? event.key === "ArrowDown"
+					? length
+					: Math.min(length, end + 1)
+				: end;
+			input.setSelectionRange(caret, caret);
+			return;
+		}
+		default:
+			if (event.key.length === 1) replaceSelection(input, event.key, start, end);
+	}
 }
 
 /** Replicates `prompt-box.tsx`'s own inline Escape-blurs-the-prompt handling,
@@ -252,36 +342,81 @@ function blurPromptIfIdle(input, event) {
 	input?.blur();
 }
 
-async function handlePromptLevelKeydown(event) {
-	if (event.defaultPrevented || event.isComposing) return;
-	if (!promptLevelInputActive() || !focusInScope()) return;
-	const input = promptInput();
-	const promptEmpty = !input || input.value.length === 0;
-	if (!isForwardCandidate(event, promptEmpty)) return;
-	const encoded = encodeKeyEvent(event);
-	if (encoded === null) return;
-	event.preventDefault();
-	let consumed = false;
+async function forwardToListeners(encoded) {
 	try {
 		const response = await postJson(endpoints.extensionPromptInput, {
 			data: encoded,
 		});
-		consumed = Boolean((await response.json()).consumed);
+		return Boolean((await response.json()).consumed);
 	} catch {
-		// Best-effort: treat a dropped request as "not consumed" below, the
-		// same as an extension that declined the key.
+		// Best-effort: treat a dropped request as "not consumed", the same as
+		// an extension that declined the key.
+		return false;
 	}
-	if (consumed) {
-		flashCaptureIndicator();
-		return;
+}
+
+/** Whether typed keys are still queued behind a forward round trip. Exposed
+ * on `window.piUi.extensionKeys` so `prompt-box.tsx`'s inline Enter-to-send
+ * stands down (and lets this module queue the Enter) instead of submitting
+ * a prompt the queued keys haven't reached yet. */
+export function promptInputBusy() {
+	return !replaying && (draining || pendingKeys.length > 0);
+}
+
+async function processPendingKey({ event, fromPrompt }) {
+	const input = promptInput();
+	const promptEmpty = !input || input.value.length === 0;
+	if (promptLevelInputActive() && isForwardCandidate(event, promptEmpty)) {
+		const encoded = encodeKeyEvent(event);
+		if (encoded !== null && (await forwardToListeners(encoded))) {
+			flashCaptureIndicator();
+			return;
+		}
 	}
 	if (event.key === "Escape") {
 		blurPromptIfIdle(input, event);
 		return;
 	}
-	if (promptEmpty && event.key.length === 1 && input) {
-		insertUnconsumedChar(input, event.key);
+	// A key typed with focus on <body> had no native effect to play back.
+	if (fromPrompt && input) applyKeyLocally(input, event);
+}
+
+async function drainPendingKeys() {
+	draining = true;
+	try {
+		while (pendingKeys.length > 0) {
+			const next = pendingKeys.shift();
+			if (next) await processPendingKey(next);
+		}
+	} finally {
+		draining = false;
 	}
+}
+
+/**
+ * Prompt-level `onTerminalInput` forwarding (F1 §2). Returns whether it took
+ * the key. A forward candidate is preventDefault()'d synchronously and queued;
+ * while anything is queued, every ordinary editing key is queued behind it
+ * too, so fast typing (two keydowns inside one round trip) is applied in
+ * order rather than the later round trip overwriting the earlier key.
+ */
+function handlePromptLevelKeydown(event) {
+	if (event.defaultPrevented || event.isComposing) return false;
+	if (!focusInScope()) return false;
+	const input = promptInput();
+	const fromPrompt = input !== undefined && event.target === input;
+	if (pendingKeys.length > 0 || draining) {
+		if (!fromPrompt || !isOrderedKey(event)) return false;
+	} else {
+		if (!promptLevelInputActive()) return false;
+		const promptEmpty = !input || input.value.length === 0;
+		if (!isForwardCandidate(event, promptEmpty)) return false;
+		if (encodeKeyEvent(event) === null) return false;
+	}
+	event.preventDefault();
+	pendingKeys.push({ event, fromPrompt });
+	if (!draining) void drainPendingKeys();
+	return true;
 }
 
 function handleShortcutKeydown(event) {
@@ -295,16 +430,14 @@ function handleShortcutKeydown(event) {
 }
 
 export function bindExtensionKeys() {
-	document.addEventListener("keydown", async (event) => {
+	document.addEventListener("keydown", (event) => {
 		// Prompt-level `onTerminalInput` forwarding goes first, mirroring the
 		// real TUI's raw `inputListeners`, which see every keystroke before any
 		// focused-component dispatch (including `registerShortcut`'s own
 		// editor-level `onExtensionShortcut` check) — see this module's doc
-		// comment. In practice this ordering costs nothing for the vast
-		// majority of shortcuts (anything with a modifier held fails
-		// `isForwardCandidate`'s very first check and returns before ever
-		// awaiting a request).
-		await handlePromptLevelKeydown(event);
-		if (!event.defaultPrevented) handleShortcutKeydown(event);
+		// comment. Both decisions are synchronous, so `preventDefault()` always
+		// lands while the event is still being dispatched.
+		if (handlePromptLevelKeydown(event)) return;
+		handleShortcutKeydown(event);
 	});
 }

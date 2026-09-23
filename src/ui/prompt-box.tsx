@@ -195,6 +195,7 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 							evt.key === 'Enter' &&
 							!evt.shiftKey &&
 							!evt.isComposing &&
+							!window.piUi.extensionKeys.promptInputBusy() &&
 							window.piUi.fileTransfer.canSubmit($prompt) &&
 							!window.piUi.pickers.isOpen()
 						) {
