@@ -4,7 +4,40 @@ import { CombinedAutocompleteProvider } from "@earendil-works/pi-tui";
 
 import { assertEquals } from "#testing/assertions";
 
-import { completeFileValue, extractFilePrefix, nextPickerIndex } from "./pickers.js";
+import {
+	completeFileValue,
+	extractArgumentQuery,
+	extractFilePrefix,
+	nextPickerIndex,
+} from "./pickers.js";
+
+test("extractArgumentQuery reads the command name and trailing argument text", () => {
+	assertEquals(extractArgumentQuery("/model op", 9), {
+		command: "model",
+		prefix: "op",
+	});
+	assertEquals(extractArgumentQuery("/Thinking ", 10), {
+		command: "thinking",
+		prefix: "",
+	});
+	assertEquals(extractArgumentQuery("/export /tmp/out.html", 21), {
+		command: "export",
+		prefix: "/tmp/out.html",
+	});
+});
+
+test("extractArgumentQuery matches only up to the caret, not the whole line", () => {
+	assertEquals(extractArgumentQuery("/model opus and more", 11), {
+		command: "model",
+		prefix: "opus",
+	});
+});
+
+test("extractArgumentQuery returns undefined before the command name has a trailing space", () => {
+	assertEquals(extractArgumentQuery("/model", 6), undefined);
+	assertEquals(extractArgumentQuery("plain text", 10), undefined);
+	assertEquals(extractArgumentQuery("", 0), undefined);
+});
 
 test("extractFilePrefix finds the @ token at the caret", () => {
 	assertEquals(extractFilePrefix("open @src/ui after", 12), {
