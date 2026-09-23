@@ -204,6 +204,7 @@ export function renderLiveWorkspace(
 								data-tooltip-delay
 								data-attr:aria-pressed={`$liveWorkspacePreferences.tab === '${tab}' || (!$liveWorkspacePreferences.tab && '${tab}' === 'now') ? 'true' : 'false'`}
 								data-on:click={`
+								el.focus();
 								$liveWorkspacePreferences.tab = '${tab}';
 								document.body.dispatchEvent(new CustomEvent(
 									'pi-ui-live-workspace-preferences',
@@ -659,7 +660,24 @@ function renderAgentRow(agent: LiveWorkspaceAgentRow): string {
 	);
 }
 
+/** No turn has streamed anything to spend on yet (the store's zero-usage default). */
+function isUsageEmpty(usage: AppUsage): boolean {
+	return (
+		usage.contextTokens === undefined &&
+		usage.cacheHitPercent === undefined &&
+		!usage.limits &&
+		usage.text === "$0.000 • 0 tokens"
+	);
+}
+
 function renderUsageTab(usage: AppUsage): string {
+	if (isUsageEmpty(usage)) {
+		return syncHtml(
+			<p class="fine-print live-workspace-empty">
+				No usage recorded yet. Token and cost totals appear once a turn runs.
+			</p>,
+		);
+	}
 	const contextPercent = usage.contextPercent ?? 0;
 	return syncHtml(
 		<div class="live-workspace-panel">
