@@ -187,6 +187,23 @@ test("transcript projection marks a persisted dedicated-stopReason abort as stop
 	]);
 });
 
+test("transcript projection marks a reply stopped during thinking on its thought", () => {
+	const message = assistantMessageStub({
+		role: "assistant",
+		content: [{ type: "thinking", thinking: "still thinking" }],
+		stopReason: "aborted",
+	});
+
+	assertEquals(new TranscriptProjector().message(message, new Date(0)), [
+		{
+			role: "thought",
+			text: "still thinking",
+			timestamp: new Date(0),
+			meta: "Stopped",
+		},
+	]);
+});
+
 test("transcript projection hides persisted canonical abort errors", () => {
 	const message = assistantMessageStub({
 		role: "assistant",

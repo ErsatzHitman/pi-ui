@@ -288,6 +288,21 @@ test("marks a dedicated-stopReason abort as stopped (round-4 O6)", () => {
 	assertEquals(state.updates, [{ id: "assistant-active", patch: { meta: "Stopped" } }]);
 });
 
+test("marks the thinking block stopped when an abort lands before any reply text", () => {
+	const { state, context } = fixture();
+	state.appendThoughtDelta("still thinking");
+	reduceSessionEvent(
+		event({
+			type: "message_end",
+			message: { role: "assistant", content: [], stopReason: "aborted" },
+		}),
+		context,
+	);
+
+	assertEquals(state.appended, []);
+	assertEquals(state.updates, [{ id: "thought-active", patch: { meta: "Stopped" } }]);
+});
+
 test("does not mark anything stopped when an abort lands before any assistant text streamed", () => {
 	const { state, context } = fixture();
 	reduceSessionEvent(

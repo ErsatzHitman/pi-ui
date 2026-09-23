@@ -556,6 +556,11 @@ function renderNarrativeMessage(message: AppMessage): string {
 				<div data-show="!$_thinkingHidden && !$_minimalMode">
 					<div class="markdown-content">{content}</div>
 				</div>
+				{message.meta && (
+					<p class="message-stopped-note" safe>
+						{message.meta}
+					</p>
+				)}
 			</article>,
 		);
 	}

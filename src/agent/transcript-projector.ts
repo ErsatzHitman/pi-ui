@@ -166,8 +166,10 @@ export class TranscriptProjector {
 					// silent for it), but the reply it cut off still deserves a visible,
 					// muted marker instead of just trailing off (round-4 O6). Mirrors
 					// `session-event-reducer.ts`'s live-streaming equivalent.
+					// A stop during thinking leaves only the thought to carry the marker.
 					const last = messages.at(-1);
-					if (last?.role === "assistant") last.meta = "Stopped";
+					if (last?.role === "assistant" || last?.role === "thought")
+						last.meta = "Stopped";
 				}
 				return messages;
 			}

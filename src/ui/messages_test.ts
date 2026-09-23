@@ -318,3 +318,29 @@ test("partial recent sessions stay visible during full catalog loading", () => {
 	assertStringIncludes(loading, "Recent session");
 	assertStringExcludes(loading, 'aria-label="Loading recent sessions"');
 });
+
+test("stopped replies and thinking blocks show the muted Stopped note", () => {
+	for (const role of ["assistant", "thought"] as const) {
+		const html = renderMessage({
+			id: `${role}-stopped`,
+			presentationState: "final",
+			presentationVersion: 1,
+			role,
+			text: "partial",
+			meta: "Stopped",
+			timestamp: new Date(0),
+		});
+		assertStringIncludes(html, '<p class="message-stopped-note">Stopped</p>');
+	}
+	assertStringExcludes(
+		renderMessage({
+			id: "thought-plain",
+			presentationState: "final",
+			presentationVersion: 1,
+			role: "thought",
+			text: "done thinking",
+			timestamp: new Date(0),
+		}),
+		"message-stopped-note",
+	);
+});

@@ -263,11 +263,14 @@ export function reduceSessionEvent(
 						formatProviderErrorMessage(event.message.errorMessage),
 						{ state: "error" },
 					);
-				} else if (aborted && finished.assistantId) {
+				} else if (aborted) {
 					// A canonical abort isn't a provider error (the branch above stays
 					// silent for it), but it still deserves a visible marker instead of
-					// the reply just trailing off with no explanation (round-4 O6).
-					state.updateMessage(finished.assistantId, { meta: "Stopped" });
+					// the reply just trailing off with no explanation (round-4 O6). A stop
+					// that lands while the model is still thinking has no reply text yet, so
+					// the marker goes on the thinking block instead.
+					const stoppedId = finished.assistantId ?? finished.thoughtId;
+					if (stoppedId) state.updateMessage(stoppedId, { meta: "Stopped" });
 				}
 				const cacheMissNotice = context.cacheMissNotice?.(event.message);
 				if (cacheMissNotice)
