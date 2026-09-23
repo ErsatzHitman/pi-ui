@@ -312,7 +312,10 @@ export class LiveWorkspaceController {
 	 */
 	recordChannel(channel: string, payload: JsonValue): void {
 		const value = asDisplayableJson(payload);
-		if (!this.channels.has(channel) && this.channels.size >= liveWorkspaceChannelLimit) {
+		if (
+			!this.channels.has(channel) &&
+			this.channels.size >= liveWorkspaceChannelLimit
+		) {
 			// An extension keying channels by job/request id must not grow this map (and the
 			// Extensions tab it renders into) forever: evict the oldest-published channel —
 			// `Map` keeps insertion order — along with the agent rows derived from it.

@@ -24,31 +24,34 @@ import {
 // rather than fail on an OS capability the test isn't meant to exercise.
 const testFileSymlink = test.skipIf(!hasFileSymlinkSupport());
 
-testFileSymlink("workspace files list source files without dependencies or symlinks", async () => {
-	const workspace = await makeTempDir();
-	const outside = await makeTempFile();
-	try {
-		await mkdir(`${workspace}/src`, { recursive: true });
-		await mkdir(`${workspace}/node_modules/package`, { recursive: true });
-		await mkdir(`${workspace}/.github`, { recursive: true });
-		await Bun.write(`${workspace}/src/main.ts`, "main");
-		await Bun.write(`${workspace}/.gitignore`, "dist");
-		await Bun.write(`${workspace}/.github/workflow.yml`, "jobs: {}");
-		await Bun.write(`${workspace}/node_modules/package/index.js`, "ignored");
-		await symlink(outside, `${workspace}/outside.txt`);
+testFileSymlink(
+	"workspace files list source files without dependencies or symlinks",
+	async () => {
+		const workspace = await makeTempDir();
+		const outside = await makeTempFile();
+		try {
+			await mkdir(`${workspace}/src`, { recursive: true });
+			await mkdir(`${workspace}/node_modules/package`, { recursive: true });
+			await mkdir(`${workspace}/.github`, { recursive: true });
+			await Bun.write(`${workspace}/src/main.ts`, "main");
+			await Bun.write(`${workspace}/.gitignore`, "dist");
+			await Bun.write(`${workspace}/.github/workflow.yml`, "jobs: {}");
+			await Bun.write(`${workspace}/node_modules/package/index.js`, "ignored");
+			await symlink(outside, `${workspace}/outside.txt`);
 
-		assertEquals(await listWorkspaceFiles(workspace), [
-			".github/",
-			".github/workflow.yml",
-			".gitignore",
-			"src/",
-			"src/main.ts",
-		]);
-	} finally {
-		await rm(workspace, { recursive: true });
-		await rm(outside);
-	}
-});
+			assertEquals(await listWorkspaceFiles(workspace), [
+				".github/",
+				".github/workflow.yml",
+				".gitignore",
+				"src/",
+				"src/main.ts",
+			]);
+		} finally {
+			await rm(workspace, { recursive: true });
+			await rm(outside);
+		}
+	},
+);
 
 test("workspace files can omit hidden directories outside Git repositories", async () => {
 	const workspace = await makeTempDir();
@@ -114,35 +117,38 @@ test("workspace files read and save with revision conflict protection", async ()
 	}
 });
 
-testFileSymlink("linked files outside the workspace read and save through absolute paths, relative paths and symlinks", async () => {
-	const workspace = await makeTempDir();
-	const outside = await makeTempFile();
-	try {
-		await symlink(outside, `${workspace}/linked`);
-		for (const filePath of [outside, relative(workspace, outside), "linked"]) {
-			await Bun.write(outside, "original");
-			const file = await readWorkspaceFile(workspace, filePath);
-			if (!("contents" in file)) throw new Error("Could not read text file");
-			assertEquals(file.contents, "original");
-			const saved = await writeWorkspaceFile(
-				workspace,
-				filePath,
-				"edited",
-				file.revision,
-			);
-			assertEquals(saved.contents, "edited");
-			assertEquals(await Bun.file(outside).text(), "edited");
-			await assertRejects(
-				() => writeWorkspaceFile(workspace, filePath, "stale", file.revision),
-				WorkspaceFileError,
-				"changed on disk",
-			);
+testFileSymlink(
+	"linked files outside the workspace read and save through absolute paths, relative paths and symlinks",
+	async () => {
+		const workspace = await makeTempDir();
+		const outside = await makeTempFile();
+		try {
+			await symlink(outside, `${workspace}/linked`);
+			for (const filePath of [outside, relative(workspace, outside), "linked"]) {
+				await Bun.write(outside, "original");
+				const file = await readWorkspaceFile(workspace, filePath);
+				if (!("contents" in file)) throw new Error("Could not read text file");
+				assertEquals(file.contents, "original");
+				const saved = await writeWorkspaceFile(
+					workspace,
+					filePath,
+					"edited",
+					file.revision,
+				);
+				assertEquals(saved.contents, "edited");
+				assertEquals(await Bun.file(outside).text(), "edited");
+				await assertRejects(
+					() => writeWorkspaceFile(workspace, filePath, "stale", file.revision),
+					WorkspaceFileError,
+					"changed on disk",
+				);
+			}
+		} finally {
+			await rm(workspace, { recursive: true });
+			await rm(outside);
 		}
-	} finally {
-		await rm(workspace, { recursive: true });
-		await rm(outside);
-	}
-});
+	},
+);
 
 test("workspace files describe native previews and preserve editable source", async () => {
 	const workspace = await makeTempDir();
@@ -182,46 +188,49 @@ test("workspace files describe native previews and preserve editable source", as
 	}
 });
 
-testFileSymlink("workspace files handle unsupported files and keep tree mutations workspace-scoped", async () => {
-	const workspace = await makeTempDir();
-	const outside = await makeTempFile();
-	try {
-		await Bun.write(`${workspace}/binary`, new Uint8Array([0xff, 0xfe]));
-		await Bun.write(
-			`${workspace}/large`,
-			new Uint8Array(maximumWorkspaceFileBytes + 1),
-		);
-		await symlink(outside, `${workspace}/outside`);
+testFileSymlink(
+	"workspace files handle unsupported files and keep tree mutations workspace-scoped",
+	async () => {
+		const workspace = await makeTempDir();
+		const outside = await makeTempFile();
+		try {
+			await Bun.write(`${workspace}/binary`, new Uint8Array([0xff, 0xfe]));
+			await Bun.write(
+				`${workspace}/large`,
+				new Uint8Array(maximumWorkspaceFileBytes + 1),
+			);
+			await symlink(outside, `${workspace}/outside`);
 
-		await assertRejects(
-			() => createWorkspaceEntry(workspace, "../created", "file"),
-			WorkspaceFileError,
-			"outside the workspace",
-		);
-		await assertRejects(
-			() => removeWorkspaceEntry(workspace, "outside"),
-			WorkspaceFileError,
-			"Symbolic links",
-		);
+			await assertRejects(
+				() => createWorkspaceEntry(workspace, "../created", "file"),
+				WorkspaceFileError,
+				"outside the workspace",
+			);
+			await assertRejects(
+				() => removeWorkspaceEntry(workspace, "outside"),
+				WorkspaceFileError,
+				"Symbolic links",
+			);
 
-		assertEquals(await readWorkspaceFile(workspace, "binary"), {
-			message: "Only text files can be viewed.",
-			path: "binary",
-			size: 2,
-		});
-		assertEquals(await readWorkspaceFile(workspace, "large"), {
-			message: "File is too large to view in pi-ui.",
-			path: "large",
-			size: maximumWorkspaceFileBytes + 1,
-		});
+			assertEquals(await readWorkspaceFile(workspace, "binary"), {
+				message: "Only text files can be viewed.",
+				path: "binary",
+				size: 2,
+			});
+			assertEquals(await readWorkspaceFile(workspace, "large"), {
+				message: "File is too large to view in pi-ui.",
+				path: "large",
+				size: maximumWorkspaceFileBytes + 1,
+			});
 
-		await assertRejects(
-			() => readWorkspaceFile(workspace, "missing"),
-			WorkspaceFileError,
-			"File not found",
-		);
-	} finally {
-		await rm(workspace, { recursive: true });
-		await rm(outside);
-	}
-});
+			await assertRejects(
+				() => readWorkspaceFile(workspace, "missing"),
+				WorkspaceFileError,
+				"File not found",
+			);
+		} finally {
+			await rm(workspace, { recursive: true });
+			await rm(outside);
+		}
+	},
+);

@@ -174,6 +174,7 @@ function isStylePlain(state: SgrState): boolean {
 }
 
 const escapeSequence =
+	// oxlint-disable-next-line no-control-regex -- ANSI escapes are control characters by definition.
 	/\x1b(?:\[([0-9;]*)([A-Za-z@])|\]8;[^;]*;([^\x07\x1b]*)(?:\x07|\x1b\\)|[^[\]])/g;
 
 export type AnsiRenderedLine = {
@@ -271,6 +272,7 @@ export function ansiLineToHtml(line: string): AnsiRenderedLine {
 function visibleColumnAt(line: string, index: number): number {
 	let column = 0;
 	let cursor = 0;
+	// oxlint-disable-next-line no-control-regex -- ANSI escapes are control characters by definition.
 	const pattern = /\x1b(?:\[[0-9;]*[A-Za-z@]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[^[\]])/g;
 	while (cursor < index) {
 		pattern.lastIndex = cursor;

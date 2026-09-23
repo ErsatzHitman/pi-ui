@@ -86,7 +86,8 @@ export class WorkspaceReviewController {
 			const relative = filename?.replaceAll("\\", "/");
 			if (gitPaths && relative) {
 				const metadataPrefix = watchPath === gitPaths[0] ? ".git/" : "";
-				const isRootMetadataPath = metadataPrefix === ".git/" && relative === ".git";
+				const isRootMetadataPath =
+					metadataPrefix === ".git/" && relative === ".git";
 				const metadataPath = isRootMetadataPath
 					? ""
 					: relative.startsWith(metadataPrefix)

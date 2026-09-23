@@ -6,7 +6,14 @@
 const csi = "\u001b[";
 
 /** @type {Record<string, string>} */
-const cursorKeys = { ArrowUp: "A", ArrowDown: "B", ArrowRight: "C", ArrowLeft: "D", Home: "H", End: "F" };
+const cursorKeys = {
+	ArrowUp: "A",
+	ArrowDown: "B",
+	ArrowRight: "C",
+	ArrowLeft: "D",
+	Home: "H",
+	End: "F",
+};
 /** @type {Record<string, string>} */
 const tildeKeys = { Insert: "2", Delete: "3", PageUp: "5", PageDown: "6" };
 
@@ -15,7 +22,9 @@ const tildeKeys = { Insert: "2", Delete: "3", PageUp: "5", PageDown: "6" };
  * @param {{ shiftKey: boolean, altKey: boolean, ctrlKey: boolean }} event
  */
 function modifierParameter(event) {
-	return 1 + (event.shiftKey ? 1 : 0) + (event.altKey ? 2 : 0) + (event.ctrlKey ? 4 : 0);
+	return (
+		1 + (event.shiftKey ? 1 : 0) + (event.altKey ? 2 : 0) + (event.ctrlKey ? 4 : 0)
+	);
 }
 
 /**
