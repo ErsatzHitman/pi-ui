@@ -17,6 +17,7 @@ import { renderCommandMenu, resetCommandDialogOnOpen } from "./command-menu.tsx"
 import { renderDebugOverlay } from "./debug.tsx";
 import { renderExtensionDialog } from "./extension-dialog.tsx";
 import { renderFontDialog } from "./font-dialog.tsx";
+import { renderHotkeysDialog } from "./hotkeys-dialog.tsx";
 import { Icon } from "./icon.tsx";
 import { FileUp, FolderOpen, PanelRight, Search } from "./icons.ts";
 import { ShortcutTooltip } from "./keyboard.tsx";
@@ -330,6 +331,7 @@ export function renderPage(
 					{renderCommandMenu()}
 					{renderCodeThemeDialog()}
 					{renderFontDialog()}
+					{renderHotkeysDialog()}
 					{renderAuthDialog(state.authDialog)}
 					{renderExtensionDialog(state.extensionDialog)}
 					{renderLlamaDialog(state.llamaDialog)}

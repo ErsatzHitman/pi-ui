@@ -167,6 +167,7 @@ export type AppKeybindHint = { keys: string; description: string };
 
 export type UiCommitEffect =
 	| { type: "restore-model-picker" }
+	| { type: "open-model-picker" }
 	| {
 			type: "dialog";
 			// `(string & {})` keeps literal autocomplete for the fixed dialog ids
@@ -175,6 +176,7 @@ export type UiCommitEffect =
 				| "auth-dialog"
 				| "command-dialog"
 				| "extension-dialog"
+				| "hotkeys-dialog"
 				| "llama-dialog"
 				| "session-dialog"
 				| "tree-dialog"
@@ -572,6 +574,14 @@ export class AppStore {
 		this.presentation?.pickersChanged();
 		this.commit(options.restorePicker ? { type: "restore-model-picker" } : undefined);
 	}
+	// Native `/model` (no arguments) and `/scoped-models` handling: opens the same model
+	// picker the toolbar/keybind use, instead of printing a plain-text model list — the
+	// picker already has a per-row scope-toggle star (prompt-pickers.tsx), which doubles
+	// as `/scoped-models`' picker.
+	requestOpenModelPicker(): void {
+		this.presentation?.pickersChanged();
+		this.commit({ type: "open-model-picker" });
+	}
 	setThinking(level: AppThinkingLevel, levels: AppThinkingLevel[]): void {
 		this.thinkingLevel = level;
 		this.thinkingLevels = levels.length > 0 ? levels : ["off"];
@@ -790,14 +800,27 @@ export class AppStore {
 		this.presentation?.pickersChanged();
 		this.commit({ type: "dialog", id: "tree-dialog", open: true });
 	}
-	// Native `/settings` and `/hotkeys` handling: pi-ui has no separate settings or
-	// hotkeys screen, so both open the existing command palette, which already lists
-	// every command alongside its shortcut (see src/ui/command-menu.tsx).
+	// Native `/settings` handling: pi-ui has no separate settings screen, so it opens the
+	// existing command palette, which lists every command alongside its shortcut (see
+	// src/ui/command-menu.tsx).
 	openCommandDialog(): void {
+		// pickersChanged() is what makes patchDirtyRegions() actually turn this "dialog"
+		// effect into the showModal() script the client runs — see openTreeDialog() below
+		// and requestOpenModelPicker() above. Without it the commit still reaches the
+		// client (as a no-op signals patch) but the dialog never opens.
+		this.presentation?.pickersChanged();
 		this.commit({ type: "dialog", id: "command-dialog", open: true });
+	}
+	// Native `/hotkeys` handling: a dedicated, always-visible reference of every shortcut
+	// (see src/ui/hotkeys-dialog.tsx) — unlike the command palette, it also covers the
+	// focus-only keybinds that have no command-catalog entry to launch.
+	openHotkeysDialog(): void {
+		this.presentation?.pickersChanged();
+		this.commit({ type: "dialog", id: "hotkeys-dialog", open: true });
 	}
 	// Native `/resume` handling: opens the same session picker the toolbar/keybind use.
 	openSessionDialog(): void {
+		this.presentation?.pickersChanged();
 		this.commit({ type: "dialog", id: "session-dialog", open: true });
 	}
 	setUsage(value: AppUsage): void {
