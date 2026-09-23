@@ -425,6 +425,10 @@ export function bindTerminalSurfaces() {
 	for (const root of [
 		document.getElementById("terminal-surface-overlays"),
 		document.getElementById("terminal-surface-persistent"),
+		// Footer and `belowEditor` widget surfaces live in this sibling container
+		// (after the prompt editor); without observing it, a surface mounted there
+		// after page load is never ResizeObserver-fitted and stays at the default grid.
+		document.getElementById("terminal-surface-persistent-below"),
 	]) {
 		if (root) mutationObserver.observe(root, { childList: true, subtree: true });
 	}

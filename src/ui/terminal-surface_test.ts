@@ -144,6 +144,23 @@ test("surfaces render a hidden input proxy, soft-key bar, and size overlays by t
 		"aboveEditor",
 	);
 	assertStringIncludes(inline, 'data-terminal-surface-kind="inline"');
+	assertStringIncludes(inline, 'data-terminal-surface-keys="inline-1"');
+});
+
+test("widget, header and footer surfaces never render a soft-key bar", () => {
+	const state = {
+		terminalSurfaces: [
+			surface({ id: "w1", kind: "widget" }),
+			surface({ id: "h1", kind: "header" }),
+			surface({ id: "f1", kind: "footer", belowEditor: true }),
+		],
+	};
+	const html =
+		renderTerminalSurfacePersistent(state, "aboveEditor") +
+		renderTerminalSurfacePersistent(state, "belowEditor");
+	assertStringIncludes(html, 'data-terminal-surface-grid="w1"');
+	assertStringIncludes(html, 'data-terminal-surface-grid="f1"');
+	assertStringExcludes(html, "data-terminal-surface-keys");
 });
 
 test("persistent surfaces drop blank edge rows and skip surfaces with nothing visible", () => {

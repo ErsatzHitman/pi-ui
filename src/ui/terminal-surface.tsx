@@ -24,6 +24,12 @@ import { syncHtml } from "./sync-html.ts";
 
 // Non-overlay `custom()` surfaces ("inline") take the TUI editor's place there; in the browser they
 // render with the other persistent surfaces just above the prompt editor.
+/**
+ * Only `custom()` surfaces (overlay + inline) take keyboard focus in pi-tui; widget, header
+ * and footer components never do, so they get no touch soft-key bar (several persistent
+ * surfaces would otherwise stack one bar each above and below the editor on mobile).
+ */
+const interactiveKinds = new Set<TerminalSurface["kind"]>(["overlay", "inline"]);
 const persistentKinds = new Set<TerminalSurface["kind"]>([
 	"inline",
 	"widget",
@@ -254,7 +260,7 @@ function renderTerminalSurfaceBody(surface: TerminalSurface): string {
 					autocapitalize: "off",
 				}}
 			/>
-			{renderSoftKeyBar(surface.id)}
+			{interactiveKinds.has(surface.kind) && renderSoftKeyBar(surface.id)}
 		</div>,
 	);
 }
