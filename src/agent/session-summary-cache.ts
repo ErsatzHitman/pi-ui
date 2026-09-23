@@ -12,6 +12,7 @@ import {
 } from "../utils/attachment-references.ts";
 import { isNotFound } from "../utils/fs-errors.ts";
 import type { JsonValue } from "../utils/json-types.ts";
+import { operatingSystem } from "../utils/platform.ts";
 import { isNumber, isRecord, isString } from "../utils/type-guards.ts";
 
 const cacheVersion = 2;
@@ -156,6 +157,32 @@ function emptyCache(): SessionSummaryCache {
 	return { version: cacheVersion, sessions: {} };
 }
 
+/** Windows' historical `MAX_PATH`; a path at or beyond this length needs the `\\?\` prefix below. */
+const windowsMaxPath = 260;
+const windowsExtendedLengthPrefix = "\\\\?\\";
+
+/**
+ * Bun's (and, without the registry's `LongPathsEnabled`, Node's) file APIs on Windows treat a
+ * path at or beyond `MAX_PATH` (260 chars) as missing rather than opening it, instead of
+ * raising a clear error — this cache is exactly where that surfaced (round-3 merge report): a
+ * session nested under a long workspace/session-id combination silently dropped out of the
+ * sidebar, with `parseSessionFile`'s catch swallowing the resulting failure. The `\\?\`
+ * extended-length prefix bypasses `MAX_PATH` entirely; the win32 API requires it on an
+ * absolute, backslash-separated path with no `.`/`..` segments, which every session file path
+ * already is (session files are read by their `SessionManager`-resolved absolute path, never a
+ * relative or dot-segmented one). A `\\server\share\...` UNC path needs `UNC` spliced in after
+ * the prefix instead of the leading `\\` repeated (`\\?\UNC\server\share\...`).
+ */
+export function openableSessionPath(path: string): string {
+	if (operatingSystem !== "windows") return path;
+	if (path.startsWith(windowsExtendedLengthPrefix)) return path;
+	if (path.length < windowsMaxPath) return path;
+	const normalized = path.replaceAll("/", "\\");
+	return normalized.startsWith("\\\\")
+		? `${windowsExtendedLengthPrefix}UNC\\${normalized.slice(2)}`
+		: `${windowsExtendedLengthPrefix}${normalized}`;
+}
+
 async function parseSessionFile(
 	candidate: SessionSummaryCandidate,
 	cached?: SessionSummaryCacheEntry,
@@ -174,7 +201,10 @@ async function parseSessionFile(
 			};
 	const start = cached?.indexedBytes ?? 0;
 	try {
-		const reader = Bun.file(candidate.path).slice(start).stream().getReader();
+		const reader = Bun.file(openableSessionPath(candidate.path))
+			.slice(start)
+			.stream()
+			.getReader();
 		const pending: Uint8Array[] = [];
 		let pendingBytes = 0;
 		let consumedBytes = 0;
