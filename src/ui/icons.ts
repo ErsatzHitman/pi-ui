@@ -2,8 +2,10 @@ import { icons } from "@iconify-json/lucide";
 
 export type IconData = (typeof icons.icons)[string];
 
+export const Activity = icons.icons.activity;
 export const ArrowDown = icons.icons["arrow-down"];
 export const ArrowUp = icons.icons["arrow-up"];
+export const Bot = icons.icons.bot;
 export const Brain = icons.icons.brain;
 export const Check = icons.icons.check;
 export const ChevronRight = icons.icons["chevron-right"];
@@ -13,6 +15,8 @@ export const FileDiff = icons.icons["file-diff"];
 export const FileUp = icons.icons["file-up"];
 export const Folder = icons.icons.folder;
 export const FolderOpen = icons.icons["folder-open"];
+export const Gauge = icons.icons.gauge;
+export const List = icons.icons.list;
 export const Loader = icons.icons.loader;
 export const MessageCircleDashed = icons.icons["message-circle-dashed"];
 export const MessageCirclePlus = icons.icons["message-circle-plus"];

@@ -52,6 +52,8 @@ function normalizedRatio(value: JsonRecord[string]): number | undefined {
 }
 
 function isLiveWorkspaceTab(value: unknown): value is LiveWorkspaceTab {
+	// SAFETY: `includes` only ever compares `value` against the known tab strings; the
+	// cast just widens the readonly tuple's element type so an arbitrary `value` type-checks.
 	return (liveWorkspaceTabs as readonly unknown[]).includes(value);
 }
 

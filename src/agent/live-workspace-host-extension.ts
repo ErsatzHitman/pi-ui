@@ -1,5 +1,6 @@
 import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
 
+import type { JsonValue } from "../utils/json-types.ts";
 import type { LiveWorkspaceController } from "./live-workspace-controller.ts";
 
 const liveWorkspaceHostId = "pi-ui.live-workspace-host";
@@ -33,10 +34,16 @@ export function createLiveWorkspaceHostExtension(
 	};
 }
 
-function registerLiveWorkspaceHost(api: ExtensionAPI, controller: LiveWorkspaceController): void {
+function registerLiveWorkspaceHost(
+	api: ExtensionAPI,
+	controller: LiveWorkspaceController,
+): void {
 	for (const channel of tappedChannels) {
-		api.events.on(channel, (payload: unknown) => {
-			guard(() => controller.recordChannel(channel, payload));
+		api.events.on(channel, (payload) => {
+			// SAFETY: `pi.events` payloads are genuinely unstructured extension output.
+			// `recordChannel` re-serializes through `asDisplayableJson` regardless of this
+			// claimed shape, so a value that isn't really JSON-safe still degrades safely.
+			guard(() => controller.recordChannel(channel, payload as JsonValue));
 		});
 	}
 	api.on("ui_prompt_start", (event) => {

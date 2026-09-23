@@ -1,6 +1,11 @@
 import type { SessionTransitionState } from "../agent/session-transition-controller.ts";
 import { appCommandCatalog } from "../commands/catalog.ts";
 import { activeKeybind } from "../keybinds.ts";
+import {
+	emptyLiveWorkspaceSnapshot,
+	type LiveWorkspacePreferences,
+	type LiveWorkspaceSnapshot,
+} from "../live-workspace-types.ts";
 import { sessionPerformance } from "../perf/session-performance.ts";
 import type { AvailableUpdate } from "../update-check.ts";
 import { formatMessageCount } from "../utils/format.ts";
@@ -165,6 +170,7 @@ export interface AppStorePresentation {
 	sessionsChanged(): void;
 	sessionSidebarChanged(): void;
 	workspaceReviewChanged(): void;
+	liveWorkspaceChanged(): void;
 	streamingMessageStarted(id: string): void;
 	streamingMessageChanged(): void;
 	sessionTransitionChanged(scrollToBottom: boolean): void;
@@ -208,6 +214,8 @@ export type AppStateSnapshot = Readonly<{
 	workspaceTreeRevision: number;
 	workspaceReview: WorkspaceReviewSnapshot;
 	workspaceReviewPreferences: WorkspaceReviewPreferences;
+	liveWorkspace: LiveWorkspaceSnapshot;
+	liveWorkspacePreferences: LiveWorkspacePreferences;
 	recentWorkspaces: readonly string[];
 	sessionTransition: SessionTransitionState;
 	debugUi: boolean;
@@ -290,6 +298,8 @@ export class AppStore {
 	workspaceTreeRevision = 0;
 	workspaceReview = unloadedWorkspaceReviewSnapshot;
 	workspaceReviewPreferences: WorkspaceReviewPreferences = {};
+	liveWorkspace: LiveWorkspaceSnapshot = emptyLiveWorkspaceSnapshot;
+	liveWorkspacePreferences: LiveWorkspacePreferences = {};
 	recentWorkspaces: string[] = [];
 	private workspacePathListener: ((path: string) => void) | undefined;
 	sessionTransition: SessionTransitionState = { status: "idle", generation: 0 };
@@ -390,6 +400,8 @@ export class AppStore {
 			workspaceTreeRevision: this.workspaceTreeRevision,
 			workspaceReview: structuredClone(this.workspaceReview),
 			workspaceReviewPreferences: { ...this.workspaceReviewPreferences },
+			liveWorkspace: structuredClone(this.liveWorkspace),
+			liveWorkspacePreferences: { ...this.liveWorkspacePreferences },
 			recentWorkspaces: [...this.recentWorkspaces],
 			sessionTransition: { ...this.sessionTransition },
 			debugUi: this.debugUi,
@@ -705,6 +717,9 @@ export class AppStore {
 	}
 	setUsage(value: AppUsage): void {
 		this.usage = value;
+		// The Live Workspace pane's Usage tab reads this snapshot too, so it must be
+		// re-patched even when nothing else about the pane changed.
+		this.presentation?.liveWorkspaceChanged();
 		this.commit();
 	}
 	setActivityText(value: string | undefined): void {
@@ -764,6 +779,17 @@ export class AppStore {
 	setWorkspaceReviewPreferences(value: WorkspaceReviewPreferences): void {
 		this.workspaceReviewPreferences = value;
 		this.presentation?.workspaceReviewChanged();
+		this.commit();
+	}
+	setLiveWorkspace(value: LiveWorkspaceSnapshot): void {
+		if (this.liveWorkspace.revision === value.revision) return;
+		this.liveWorkspace = value;
+		this.presentation?.liveWorkspaceChanged();
+		this.commit();
+	}
+	setLiveWorkspacePreferences(value: LiveWorkspacePreferences): void {
+		this.liveWorkspacePreferences = value;
+		this.presentation?.liveWorkspaceChanged();
 		this.commit();
 	}
 	setSessionTransition(value: SessionTransitionState): void {

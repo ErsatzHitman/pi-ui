@@ -64,7 +64,8 @@ export class LiveWorkspaceController {
 	/** Feeds one raw session event. Never throws — a malformed event is logged, not fatal. */
 	recordEvent(event: AgentSessionEvent, context: LiveWorkspaceEventContext): void {
 		try {
-			if (context.background) this.recordBackgroundEvent(event, context.sessionPath);
+			if (context.background)
+				this.recordBackgroundEvent(event, context.sessionPath);
 			else this.recordForegroundEvent(event);
 		} catch (error) {
 			this.pushActivity(
@@ -113,7 +114,11 @@ export class LiveWorkspaceController {
 				break;
 			case "compaction_start":
 				this.compaction = { reason: event.reason };
-				this.pushActivity("compaction", `Compacting context (${event.reason})`, false);
+				this.pushActivity(
+					"compaction",
+					`Compacting context (${event.reason})`,
+					false,
+				);
 				break;
 			case "compaction_end":
 				this.compaction = undefined;
@@ -128,7 +133,11 @@ export class LiveWorkspaceController {
 				break;
 			case "session_info_changed":
 				if (event.name) {
-					this.pushActivity("session", `Session renamed to "${event.name}"`, false);
+					this.pushActivity(
+						"session",
+						`Session renamed to "${event.name}"`,
+						false,
+					);
 				}
 				break;
 			case "thinking_level_changed":
@@ -159,7 +168,13 @@ export class LiveWorkspaceController {
 				this.activeTools.set(event.toolCallId, {
 					toolName: event.toolName,
 					startedAt: Date.now(),
-					summary: toolTitle("running", event.toolName, (event.args ?? null) as JsonValue),
+					// SAFETY: `toolTitle` only reads plain JSON-shaped fields off `args` (via
+					// `asRecord`) and tolerates any other shape, so the SDK's `any` is safe here.
+					summary: toolTitle(
+						"running",
+						event.toolName,
+						(event.args ?? null) as JsonValue,
+					),
 				});
 				break;
 			case "tool_execution_update": {
@@ -219,6 +234,29 @@ export class LiveWorkspaceController {
 		this.revision += 1;
 	}
 
+	/** Marks a tracked background session row as finished, leaving its other fields intact. */
+	markBackgroundSessionCompleted(sessionPath: string): void {
+		const agent = this.agents.get(sessionPath);
+		if (!agent || agent.kind !== "background-session") return;
+		this.agents.set(sessionPath, { ...agent, status: "completed" });
+		this.revision += 1;
+	}
+
+	/**
+	 * Clears the Now tab's turn phase and active-tool list when a different session becomes
+	 * the foreground session, so the previous session's state never bleeds into the new one.
+	 * Background rosters, extension channels, and the activity log are cross-session state and
+	 * are intentionally left alone.
+	 */
+	resetForegroundSession(): void {
+		this.running = false;
+		this.retry = undefined;
+		this.compaction = undefined;
+		this.waiting = undefined;
+		this.activeTools.clear();
+		this.revision += 1;
+	}
+
 	recordUiPromptStart(kind: string, title: string | undefined): void {
 		this.waiting = { kind, title };
 		this.revision += 1;
@@ -247,7 +285,7 @@ export class LiveWorkspaceController {
 	 * untrusted extension output: it is defensively coerced to JSON and size-capped before it is
 	 * ever handed to a renderer (AGENTS.md non-negotiable).
 	 */
-	recordChannel(channel: string, payload: unknown): void {
+	recordChannel(channel: string, payload: JsonValue): void {
 		const value = asDisplayableJson(payload);
 		this.channels.set(channel, { channel, payload: value, updatedAt: Date.now() });
 		const rows = deriveAgentRows(channel, value);
@@ -265,15 +303,15 @@ export class LiveWorkspaceController {
 	}
 
 	snapshot(input: LiveWorkspaceSnapshotInput): LiveWorkspaceSnapshot {
-		const activeTools: LiveWorkspaceActiveTool[] = [...this.activeTools.entries()].map(
-			([toolCallId, tool]) => ({
-				toolCallId,
-				toolName: tool.toolName,
-				summary: tool.summary,
-				startedAt: tool.startedAt,
-				preview: tool.preview,
-			}),
-		);
+		const activeTools: LiveWorkspaceActiveTool[] = [
+			...this.activeTools.entries(),
+		].map(([toolCallId, tool]) => ({
+			toolCallId,
+			toolName: tool.toolName,
+			summary: tool.summary,
+			startedAt: tool.startedAt,
+			preview: tool.preview,
+		}));
 		const agents = [...this.agents.values()].map((agent) =>
 			agent.kind === "background-session"
 				? { ...agent, activeToolCount: this.backgroundToolCounts.get(agent.id) }
@@ -330,7 +368,7 @@ export class LiveWorkspaceController {
 	}
 }
 
-function summarizePartialResult(value: unknown): string | undefined {
+function summarizePartialResult(value: JsonValue | undefined): string | undefined {
 	if (value === undefined || value === null) return undefined;
 	if (isString(value)) return truncateForDisplay(value, liveWorkspaceToolPreviewLimit);
 	try {
@@ -340,7 +378,7 @@ function summarizePartialResult(value: unknown): string | undefined {
 	}
 }
 
-function asDisplayableJson(payload: unknown): JsonValue {
+function asDisplayableJson(payload: JsonValue): JsonValue {
 	try {
 		const json = JSON.stringify(payload) ?? "null";
 		if (json.length > liveWorkspaceChannelJsonLimit) {
@@ -349,6 +387,8 @@ function asDisplayableJson(payload: unknown): JsonValue {
 				preview: `${json.slice(0, liveWorkspaceChannelJsonLimit)}…`,
 			};
 		}
+		// SAFETY: `json` was just produced by `JSON.stringify`, so parsing it back always
+		// yields a JSON-shaped value.
 		return JSON.parse(json) as JsonValue;
 	} catch {
 		return { unrepresentable: true };
@@ -416,6 +456,6 @@ function deriveAgentRows(channel: string, value: JsonValue): LiveWorkspaceAgentR
 	return [];
 }
 
-function errorText(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
+function errorText(cause: unknown): string {
+	return cause instanceof Error ? cause.message : String(cause);
 }

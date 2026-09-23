@@ -1,11 +1,8 @@
 import { test } from "bun:test";
 
-import {
-	assertEquals,
-	assertExists,
-	assertStringIncludes,
-} from "#testing/assertions";
+import { assertEquals, assertExists, assertStringIncludes } from "#testing/assertions";
 
+import type { JsonValue } from "../utils/json-types.ts";
 import { LiveWorkspaceController } from "./live-workspace-controller.ts";
 import { agentSessionEventStub } from "./test-fixtures.ts";
 
@@ -170,7 +167,13 @@ test("derives a subagent fleet roster from a channel payload and clears stale ro
 
 	controller.recordChannel("subagents:fleet", {
 		entries: [
-			{ key: "worker-1", name: "Worker 1", state: "running", depth: 1, tokens: 120 },
+			{
+				key: "worker-1",
+				name: "Worker 1",
+				state: "running",
+				depth: 1,
+				tokens: 120,
+			},
 			{ key: "worker-2", name: "Worker 2", state: "idle", depth: 1 },
 		],
 	});
@@ -235,9 +238,10 @@ test("never throws on a malformed extension channel payload", () => {
 	controller.recordChannel("subagents:fleet", { entries: "not-an-array" });
 	assertEquals(controller.snapshot(input).agents, []);
 
-	const circular: Record<string, unknown> = {};
+	type CircularHolder = { self?: CircularHolder };
+	const circular: CircularHolder = {};
 	circular.self = circular;
-	controller.recordChannel("subagents:fleet", circular);
+	controller.recordChannel("subagents:fleet", circular as unknown as JsonValue);
 	assertEquals(controller.snapshot(input).channels.at(-1)?.payload, {
 		unrepresentable: true,
 	});
