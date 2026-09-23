@@ -1709,7 +1709,8 @@ test("RuntimeController starts a new session for /new without prompting the mode
 	await new Promise((resolve) => setTimeout(resolve, 0));
 
 	assertEquals(fake.promptInputs, []);
-	assertEquals(state.messages.at(-1)?.text, "Started a new session.");
+	// The new session's welcome empty state is the confirmation; no notice hides it.
+	assertEquals(state.messages.length, 0);
 	await controller.dispose();
 });
 

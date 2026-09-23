@@ -594,7 +594,10 @@ export class RuntimeController {
 				this.openLogout();
 				return;
 			case "new":
-				void this.dispatchNewCommand();
+				// No confirmation notice (unlike /clone): a new session renders the welcome
+				// empty state with recent sessions, which is the confirmation — a notice
+				// would replace it with a lone message.
+				void this.newSession();
 				return;
 			case "compact":
 				void this.compact(args || undefined);
@@ -692,13 +695,6 @@ export class RuntimeController {
 	private async dispatchCloneCommand(): Promise<void> {
 		if ((await this.cloneSession()).status === "success") {
 			this.state.appendMessage("system", "Session cloned.");
-		}
-	}
-
-	/** `/new`'s confirmation; see `dispatchCloneCommand` (round-4 O5). */
-	private async dispatchNewCommand(): Promise<void> {
-		if ((await this.newSession()).status === "success") {
-			this.state.appendMessage("system", "Started a new session.");
 		}
 	}
 
