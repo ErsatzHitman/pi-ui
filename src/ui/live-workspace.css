@@ -124,10 +124,14 @@
 		width: 1.75rem;
 		height: 1.75rem;
 		border-radius: var(--radius-sm);
+
+		/* A fixed-size icon button: the generic button padding would squeeze the icon. */
+		padding: 0;
 		color: var(--text-muted);
 	}
 
 	.live-workspace-tab-button svg {
+		flex-shrink: 0;
 		width: 0.9375rem;
 		height: 0.9375rem;
 	}
