@@ -433,12 +433,23 @@ function toolTitlePartClass(part: TranscriptMessageTitlePart, index: number): st
 	return classes.join(" ");
 }
 
+// Beyond bare http(s) URLs, also auto-links the workspace file download endpoint
+// specifically — not paths in general (tool output routinely contains absolute paths that
+// must never become clickable app links) — so /export's system-message notice can offer a
+// same-origin "Download" link without a bespoke rich-text message type.
+const downloadLinkPattern = new RegExp(
+	`(https?://\\S+|${endpoints.workspaceFileContent.replaceAll("/", "\\/")}\\?\\S+)`,
+	"gu",
+);
+
 function renderPlainTextLinks(text: string): string {
-	const parts = text.split(/(https?:\/\/\S+)/gu);
+	const parts = text.split(downloadLinkPattern);
 	return syncHtml(
 		<>
 			{parts.filter(Boolean).map((part) =>
-				part.startsWith("http://") || part.startsWith("https://") ? (
+				part.startsWith("http://") ||
+				part.startsWith("https://") ||
+				part.startsWith(endpoints.workspaceFileContent) ? (
 					<a
 						class="message-link"
 						href={part}
@@ -446,7 +457,9 @@ function renderPlainTextLinks(text: string): string {
 						rel="noreferrer"
 						safe
 					>
-						{part}
+						{part.startsWith(endpoints.workspaceFileContent)
+							? "Download"
+							: part}
 					</a>
 				) : (
 					<span safe>{part}</span>
@@ -467,7 +480,8 @@ export function renderMessage(message: AppMessage): string {
 	if (
 		message.role === "compaction" ||
 		message.role === "summary" ||
-		message.role === "skill"
+		message.role === "skill" ||
+		message.role === "custom"
 	) {
 		return renderContextMessage(message);
 	}
@@ -640,8 +654,10 @@ function renderErrorMessage(message: AppMessage): string {
 }
 
 function renderContextMessage(message: AppMessage): string {
-	const label =
-		message.role === "compaction"
+	const isCustom = message.role === "custom";
+	const label = isCustom
+		? message.meta || "custom"
+		: message.role === "compaction"
 			? "compaction"
 			: message.role === "summary"
 				? "summarize"
@@ -652,7 +668,7 @@ function renderContextMessage(message: AppMessage): string {
 				"message message-context tool-timeline-item",
 				message.role === "compaction"
 					? "message-compaction"
-					: message.role === "skill"
+					: message.role === "skill" || isCustom
 						? "message-skill"
 						: undefined,
 			]}
@@ -665,7 +681,7 @@ function renderContextMessage(message: AppMessage): string {
 					</span>
 					<span class="context-title">
 						<span safe>{label}</span>
-						{message.meta && (
+						{!isCustom && message.meta && (
 							<span class="context-meta" safe>
 								{message.meta}
 							</span>
@@ -682,6 +698,20 @@ function renderContextMessage(message: AppMessage): string {
 								renderMarkdownStreaming(message.text)}
 						</div>
 					</div>
+					{isCustom && message.details && (
+						<details class="context-details context-details-nested">
+							<summary class="context-summary context-summary-nested">
+								<span class="context-title">Details</span>
+								<span class="context-chevron">
+									<Icon
+										icon={ChevronRight}
+										class="context-chevron-icon"
+									/>
+								</span>
+							</summary>
+							{renderPreOutput(message.details)}
+						</details>
+					)}
 				</div>
 			</details>
 		</article>,

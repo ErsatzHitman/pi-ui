@@ -7,7 +7,8 @@ export type TranscriptMessageRole =
 	| "thought"
 	| "compaction"
 	| "summary"
-	| "skill";
+	| "skill"
+	| "custom";
 
 export type TranscriptMessageTitlePart = {
 	text: string;
@@ -34,11 +35,17 @@ export type TranscriptMessage = {
 	meta?: string;
 	state?: "running" | "success" | "error";
 	format?: "pre" | "diff" | "code" | "output";
+	/**
+	 * Generic collapsible payload for `role: "custom"` messages (an extension's
+	 * `pi.sendMessage`/`pi.appendEntry` `details`/`data`), pre-formatted as text by the
+	 * caller (see `tool-presentation.ts`'s `summarizeValue`). Never LLM context.
+	 */
+	details?: string;
 };
 
 export type TranscriptMessageOptions = Pick<
 	TranscriptMessage,
-	"title" | "titleParts" | "meta" | "state" | "format" | "attachments"
+	"title" | "titleParts" | "meta" | "state" | "format" | "attachments" | "details"
 >;
 
 export type TranscriptMessageInput = Omit<TranscriptMessage, "id">;

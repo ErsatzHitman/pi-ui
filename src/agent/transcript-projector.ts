@@ -25,11 +25,26 @@ import {
 	contentToText,
 	formatToolResult,
 	stripAnsi,
+	summarizeValue,
 	toolTitle,
 	toolTitleParts,
 } from "./tool-presentation.ts";
 
 export type ProjectedTranscript = Pick<TranscriptState, "replaceMessages">;
+
+// `details`/`data` on a custom message or entry is an arbitrary, untrusted extension
+// payload (see pi-protocol.md §5.2/5.3) — format it defensively and cap its size so one
+// oversized object can't bloat a transcript patch.
+const customDetailsTextLimit = 4000;
+
+function detailsText<Details>(details: Details): string | undefined {
+	if (details === undefined) return undefined;
+	const text = summarizeValue(details);
+	if (!text.trim()) return undefined;
+	return text.length > customDetailsTextLimit
+		? `${text.slice(0, customDetailsTextLimit)}\n… (truncated)`
+		: text;
+}
 type AgentMessage = Extract<AgentSessionEvent, { type: "message_start" }>["message"];
 type UserContent = Extract<AgentMessage, { role: "user" }>["content"];
 type AssistantContent = Extract<AgentMessage, { role: "assistant" }>["content"];
@@ -82,7 +97,15 @@ export class TranscriptProjector {
 			return messages;
 		}
 		if (entry.type === "custom_message" && entry.display) {
-			return [{ role: "system", text: contentToText(entry.content), timestamp }];
+			return [
+				{
+					role: "custom",
+					text: contentToText(entry.content),
+					timestamp,
+					meta: entry.customType,
+					details: detailsText(entry.details),
+				},
+			];
 		}
 		if (entry.type === "compaction") {
 			return [
@@ -155,9 +178,11 @@ export class TranscriptProjector {
 				return message.display
 					? [
 							{
-								role: "system",
+								role: "custom",
 								text: contentToText(message.content),
 								timestamp,
+								meta: message.customType,
+								details: detailsText(message.details),
 							},
 						]
 					: [];
