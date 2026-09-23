@@ -76,6 +76,13 @@ test("nested form sections render their fields and actions once", () => {
 	assertStringExcludes(html, 'command="close"');
 });
 
+test("actions send the namespaced elementId lib/bridge.ts expects", () => {
+	const html = renderPiUiSheets({ extensionElements: [element({})] });
+	// `lib/bridge.ts` derives the namespace as `elementId.split(":")[0]`; a
+	// bare `element.id` would misroute the namespace-scoped `piui:<ns>` event.
+	assertStringIncludes(html, "elementId: &#34;ask-user:panel&#34;");
+});
+
 test("roster rows render detail and per-row actions replying with the row id", () => {
 	const html = renderPiUiElement(
 		element({
