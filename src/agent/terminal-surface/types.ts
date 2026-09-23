@@ -12,6 +12,8 @@ export type TerminalSurfaceOverlayOptions = {
 	readonly row?: number | string;
 	readonly col?: number | string;
 	readonly margin?: number;
+	/** Mirrors `OverlayOptions.nonCapturing` — when true, the client must not steal prompt focus. */
+	readonly nonCapturing?: boolean;
 };
 
 export type TerminalSurfaceCursor = { readonly row: number; readonly column: number };

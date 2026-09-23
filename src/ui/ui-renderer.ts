@@ -37,7 +37,7 @@ import { renderSessionTransition } from "./session-transition.tsx";
 import {
 	renderTerminalSurfaceOverlays,
 	renderTerminalSurfacePersistent,
-	terminalSurfaceOverlayIds,
+	terminalSurfaceOverlayEffects,
 } from "./terminal-surface.tsx";
 import { renderToolbar } from "./toolbar.tsx";
 import { renderTreePicker } from "./tree-picker.tsx";
@@ -460,7 +460,10 @@ export class UiRenderer implements AppStorePresentation {
 			if (effect.type === "dialog") {
 				scripts.add(
 					effect.open
-						? `{ const dialog = document.getElementById('${effect.id}'); if (dialog && !dialog.open) dialog.showModal(); }`
+						? terminalSurfaceOverlayOpenScript(
+								effect.id,
+								effect.modal !== false,
+							)
 						: `{ const dialog = document.getElementById('${effect.id}'); if (dialog?.open) dialog.close(); }`,
 				);
 			}
@@ -479,14 +482,30 @@ export class UiRenderer implements AppStorePresentation {
 			.filter((entry) => Boolean(entry[1]))
 			.map(([id]) => id)
 			.toArray();
-		const ids: readonly string[] = [
-			...staticIds,
-			...piUiSheetIds(snapshot),
-			...terminalSurfaceOverlayIds(snapshot),
-		];
-		return ids.map(
+		const modalIds: readonly string[] = [...staticIds, ...piUiSheetIds(snapshot)];
+		const scripts = modalIds.map(
 			(id) =>
 				`{ const dialog = document.getElementById('${id}'); if (dialog && !dialog.open) dialog.showModal(); }`,
 		);
+		for (const effect of terminalSurfaceOverlayEffects(snapshot)) {
+			scripts.push(terminalSurfaceOverlayOpenScript(effect.id, effect.modal));
+		}
+		return scripts;
 	}
+}
+
+/**
+ * A terminal-surface overlay opens non-modally (`.show()`, no focus trap,
+ * no backdrop) when its `OverlayOptions.nonCapturing` is set — matching
+ * pi-tui's own "don't capture keyboard focus" contract — and additionally
+ * moves focus into its hidden input proxy (`terminal-keys.js`) once modal,
+ * so a `SelectList`-style overlay is immediately keyboard-interactive
+ * without the user having to click into it first.
+ */
+function terminalSurfaceOverlayOpenScript(id: string, modal: boolean): string {
+	const open = modal ? "dialog.showModal()" : "dialog.show()";
+	const focus = modal
+		? " dialog.querySelector('[data-terminal-surface-input]')?.focus();"
+		: "";
+	return `{ const dialog = document.getElementById('${id}'); if (dialog && !dialog.open) { ${open};${focus} } }`;
 }

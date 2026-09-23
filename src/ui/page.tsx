@@ -30,6 +30,7 @@ import type { AppRenderSnapshot } from "./render-state.ts";
 import { renderSessionSidebar } from "./session-sidebar.tsx";
 import { previousSessionAction, renderSessionTransition } from "./session-transition.tsx";
 import { syncHtml } from "./sync-html.ts";
+import { renderTerminalSurfaceOverlays } from "./terminal-surface.tsx";
 import { renderThemeLab } from "./theme-lab.tsx";
 import { renderToolbar } from "./toolbar.tsx";
 import { renderTreePicker } from "./tree-picker.tsx";
@@ -334,6 +335,7 @@ export function renderPage(
 					{renderExtensionDialog(state.extensionDialog)}
 					{renderLlamaDialog(state.llamaDialog)}
 					{renderPiUiSheets(state)}
+					{renderTerminalSurfaceOverlays(state)}
 
 					<dialog
 						id="workspace-dialog"

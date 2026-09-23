@@ -437,5 +437,6 @@ function toTerminalSurfaceOverlayOptions(
 		margin: isNumber(options.margin)
 			? options.margin
 			: (options.margin?.top ?? options.margin?.left),
+		nonCapturing: options.nonCapturing,
 	};
 }

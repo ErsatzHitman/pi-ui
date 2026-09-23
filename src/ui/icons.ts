@@ -4,6 +4,8 @@ export type IconData = (typeof icons.icons)[string];
 
 export const Activity = icons.icons.activity;
 export const ArrowDown = icons.icons["arrow-down"];
+export const ArrowLeft = icons.icons["arrow-left"];
+export const ArrowRight = icons.icons["arrow-right"];
 export const ArrowUp = icons.icons["arrow-up"];
 export const Bot = icons.icons.bot;
 export const Brain = icons.icons.brain;
@@ -11,6 +13,8 @@ export const Check = icons.icons.check;
 export const ChevronRight = icons.icons["chevron-right"];
 export const Command = icons.icons.command;
 export const Copy = icons.icons.copy;
+export const CornerDownLeft = icons.icons["corner-down-left"];
+export const Delete = icons.icons.delete;
 export const FileDiff = icons.icons["file-diff"];
 export const FileUp = icons.icons["file-up"];
 export const Folder = icons.icons.folder;

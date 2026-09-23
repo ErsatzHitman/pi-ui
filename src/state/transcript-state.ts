@@ -46,13 +46,7 @@ export type TranscriptMessage = {
 
 export type TranscriptMessageOptions = Pick<
 	TranscriptMessage,
-	| "title"
-	| "titleParts"
-	| "meta"
-	| "state"
-	| "format"
-	| "attachments"
-	| "noticeTone"
+	"title" | "titleParts" | "meta" | "state" | "format" | "attachments" | "noticeTone"
 >;
 
 export type TranscriptMessageInput = Omit<TranscriptMessage, "id">;

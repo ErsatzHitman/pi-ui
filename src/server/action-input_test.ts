@@ -73,21 +73,18 @@ test("requiredString enforces an optional max length", () => {
 });
 
 test("jsonSizeField passes through small values and undefined", () => {
-	assertEquals(
-		jsonSizeField({ value: { a: 1 } }, "value", { maxBytes: 1024 }),
-		{ a: 1 },
-	);
+	assertEquals(jsonSizeField({ value: { a: 1 } }, "value", { maxBytes: 1024 }), {
+		a: 1,
+	});
 	assertEquals(jsonSizeField({}, "value", { maxBytes: 1024 }), undefined);
 });
 
 test("jsonSizeField rejects a payload over the byte cap", async () => {
 	await assertRejects(
 		async () =>
-			jsonSizeField(
-				{ value: { note: "x".repeat(2000) } },
-				"value",
-				{ maxBytes: 100 },
-			),
+			jsonSizeField({ value: { note: "x".repeat(2000) } }, "value", {
+				maxBytes: 100,
+			}),
 		ActionInputError,
 	);
 });
