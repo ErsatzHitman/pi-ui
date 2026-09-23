@@ -197,7 +197,19 @@ export interface AppStorePresentation {
 	sessionsChanged(): void;
 	sessionSidebarChanged(): void;
 	workspaceReviewChanged(): void;
-	liveWorkspaceChanged(): void;
+	/** The above-editor PIUI widget area and sheet host (`#piui-widgets`/`#piui-sheets`) —
+	 * distinct from the Live Workspace Extensions tab, which has its own flag below. */
+	extensionElementsChanged(): void;
+	/** Live Workspace "Now" tab: turn phase, active tools, queued steering/follow-up. */
+	liveWorkspaceNowChanged(): void;
+	/** Live Workspace "Agents" tab: the subagent/background-session/channel-entry roster. */
+	liveWorkspaceAgentsChanged(): void;
+	/** Live Workspace "Activity" tab: the bounded event log. */
+	liveWorkspaceActivityChanged(): void;
+	/** Live Workspace "Usage" tab. */
+	liveWorkspaceUsageChanged(): void;
+	/** Live Workspace "Extensions" tab: PIUI elements and channel payloads, rendered in full. */
+	liveWorkspaceExtensionsChanged(): void;
 	streamingMessageStarted(id: string): void;
 	streamingMessageChanged(): void;
 	sessionTransitionChanged(scrollToBottom: boolean): void;
@@ -289,6 +301,25 @@ function uniqueStrings(values: string[]): string[] {
 	const unique = new Set(values);
 	unique.delete("");
 	return [...unique];
+}
+/** The "Now" tab's slice of a `LiveWorkspaceSnapshot` — see `setLiveWorkspace`. */
+function nowWorkspaceSlice(
+	snapshot: LiveWorkspaceSnapshot,
+): Pick<
+	LiveWorkspaceSnapshot,
+	"turn" | "activeTools" | "queuedSteering" | "queuedFollowUp"
+> {
+	return {
+		turn: snapshot.turn,
+		activeTools: snapshot.activeTools,
+		queuedSteering: snapshot.queuedSteering,
+		queuedFollowUp: snapshot.queuedFollowUp,
+	};
+}
+/** Structural equality for the small, bounded JSON-shaped slices above — cheap next to
+ * re-rendering and patching a whole Live Workspace tab for an unrelated change. */
+function sameJson<Value>(a: Value, b: Value): boolean {
+	return JSON.stringify(a) === JSON.stringify(b);
 }
 
 /** Mutable authoritative application state. It has no renderer or transport dependency. */
@@ -414,12 +445,12 @@ export class AppStore {
 				...widget,
 				lines: [...widget.lines],
 			})),
-			extensionElements: this.extensionElements.map((element) =>
-				structuredClone(element),
-			),
-			extensionChannels: this.extensionChannels.map((channel) =>
-				structuredClone(channel),
-			),
+			// `setExtensionElements`/`setExtensionChannels` already clone their input on
+			// write (below), so the store's own arrays are private, immutable-by-convention
+			// copies no caller can alias into — handing them out here directly (instead of
+			// `structuredClone`-ing again on every read) drops a deep copy from every commit.
+			extensionElements: this.extensionElements,
+			extensionChannels: this.extensionChannels,
 			extensionWorkingIndicator: this.extensionWorkingIndicator
 				? {
 						...this.extensionWorkingIndicator,
@@ -445,7 +476,10 @@ export class AppStore {
 			workspaceTreeRevision: this.workspaceTreeRevision,
 			workspaceReview: this.workspaceReview,
 			workspaceReviewPreferences: { ...this.workspaceReviewPreferences },
-			liveWorkspace: structuredClone(this.liveWorkspace),
+			// `LiveWorkspaceController.snapshot()` (the only producer, see `setLiveWorkspace`)
+			// always builds a brand-new object graph, so this reference is never mutated
+			// after the fact either — safe to hand out without `structuredClone`-ing again.
+			liveWorkspace: this.liveWorkspace,
 			liveWorkspacePreferences: { ...this.liveWorkspacePreferences },
 			recentWorkspaces: [...this.recentWorkspaces],
 			sessionTransition: { ...this.sessionTransition },
@@ -729,8 +763,11 @@ export class AppStore {
 			this.extensionElements.filter(isPiUiSheetElement).map(piUiDialogId),
 		);
 		this.extensionElements = elements.map((element) => structuredClone(element));
-		// The Live Workspace Extensions tab renders these elements too.
-		this.presentation?.liveWorkspaceChanged();
+		// Two independent regions read this list: the above-editor widget/sheet area and
+		// the Live Workspace Extensions tab. Each gets its own dirty flag (see A#11/A#13 in
+		// the round-2 audit) so an element update never forces the other to re-render too.
+		this.presentation?.extensionElementsChanged();
+		this.presentation?.liveWorkspaceExtensionsChanged();
 		this.commit();
 		for (const element of elements.filter(isPiUiSheetElement)) {
 			const id = piUiDialogId(element);
@@ -746,7 +783,8 @@ export class AppStore {
 	}
 	setExtensionChannels(channels: ExtensionChannelSnapshot[]): void {
 		this.extensionChannels = channels.map((channel) => structuredClone(channel));
-		this.presentation?.liveWorkspaceChanged();
+		// Only the Live Workspace Extensions tab renders channel payloads today.
+		this.presentation?.liveWorkspaceExtensionsChanged();
 		this.commit();
 	}
 	setExtensionWorking(options: {
@@ -803,8 +841,10 @@ export class AppStore {
 	setUsage(value: AppUsage): void {
 		this.usage = value;
 		// The Live Workspace pane's Usage tab reads this snapshot too, so it must be
-		// re-patched even when nothing else about the pane changed.
-		this.presentation?.liveWorkspaceChanged();
+		// re-patched even when nothing else about the pane changed — but only its own
+		// region: usage updates roughly once per turn, far less often than active tools,
+		// agents or activity, and must not force those tabs to re-render too.
+		this.presentation?.liveWorkspaceUsageChanged();
 		this.commit();
 	}
 	setActivityText(value: string | undefined): void {
@@ -869,13 +909,35 @@ export class AppStore {
 	}
 	setLiveWorkspace(value: LiveWorkspaceSnapshot): void {
 		if (this.liveWorkspace.revision === value.revision) return;
+		const previous = this.liveWorkspace;
 		this.liveWorkspace = value;
-		this.presentation?.liveWorkspaceChanged();
+		// `LiveWorkspaceController.snapshot()` bundles the Now/Agents/Activity tabs' state
+		// into one object with one revision (see live-workspace-controller.ts), so a bump
+		// doesn't say which of the three actually changed — a tool-preview tick and an
+		// agent-roster update both land here. Diff the relevant slice against the previous
+		// snapshot (cheap: each is bounded — see live-workspace-types.ts's limits) so each
+		// tab keeps its own dirty flag and id instead of all three re-rendering together.
+		if (!sameJson(nowWorkspaceSlice(previous), nowWorkspaceSlice(value))) {
+			this.presentation?.liveWorkspaceNowChanged();
+		}
+		if (!sameJson(previous.agents, value.agents)) {
+			this.presentation?.liveWorkspaceAgentsChanged();
+		}
+		if (!sameJson(previous.activity, value.activity)) {
+			this.presentation?.liveWorkspaceActivityChanged();
+		}
 		this.commit();
 	}
 	setLiveWorkspacePreferences(value: LiveWorkspacePreferences): void {
 		this.liveWorkspacePreferences = value;
-		this.presentation?.liveWorkspaceChanged();
+		// A preference change (most commonly the active tab) can flip every section's
+		// static `display: none`, so — unlike the frequent per-tab updates above — all
+		// five regions need a fresh patch here; this path is user-driven and infrequent.
+		this.presentation?.liveWorkspaceNowChanged();
+		this.presentation?.liveWorkspaceAgentsChanged();
+		this.presentation?.liveWorkspaceUsageChanged();
+		this.presentation?.liveWorkspaceActivityChanged();
+		this.presentation?.liveWorkspaceExtensionsChanged();
 		this.commit();
 	}
 	setSessionTransition(value: SessionTransitionState): void {
