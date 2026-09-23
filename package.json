@@ -43,9 +43,9 @@
 		"audit": "bunx fallow audit"
 	},
 	"devDependencies": {
-		"@earendil-works/pi-ai": "^0.87.0",
-		"@earendil-works/pi-coding-agent": "^0.87.0",
-		"@earendil-works/pi-tui": "^0.87.0",
+		"@earendil-works/pi-ai": "^0.87.1",
+		"@earendil-works/pi-coding-agent": "^0.87.1",
+		"@earendil-works/pi-tui": "^0.87.1",
 		"@iconify-json/lucide": "^1.2.136",
 		"@kitajs/html": "5.0.0-next.1",
 		"@oxlint/plugins": "1.85.0",
