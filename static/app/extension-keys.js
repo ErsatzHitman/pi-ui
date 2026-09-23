@@ -25,10 +25,12 @@ import { encodeKeyEvent } from "./terminal-keys.js";
  * would matter.
  *
  * Prompt-level `onTerminalInput` forwarding only intercepts a bounded
- * "candidate" set — Escape unconditionally, any Alt/Ctrl chord that isn't a
- * platform editing shortcut, and arrows/a single unmodified character only
- * while the prompt is empty — so ordinary multi-line typing and cursor
- * movement never pay a round trip; see `isForwardCandidate`'s doc comment. Forwarding a candidate always preventDefault()s it up front (the
+ * "candidate" set — Escape unconditionally, an Alt/Ctrl + printable-character
+ * chord that isn't a platform editing or browser shortcut, and arrows/a single
+ * unmodified character only while the prompt is empty — so ordinary
+ * multi-line typing and cursor movement (Ctrl+Arrow word jumps and
+ * Ctrl+Home/End included) never pay a round trip; see `isForwardCandidate`'s
+ * doc comment. Forwarding a candidate always preventDefault()s it up front (the
  * round trip has to decide first), which also stands down prompt-box.tsx's
  * own target-phase handling for that same keypress — including its
  * Escape-blurs-the-prompt convenience, since that handler runs on the
@@ -135,6 +137,35 @@ function isNativeEditingChord(event) {
 	return nativeEditingChordKeys.has(event.key.toLowerCase());
 }
 
+/** Base keys (case-insensitive, Shift ignored) a Ctrl-chord already means
+ * something to the browser for that a page *can* cancel but a user still
+ * expects from the prompt — find/find-next, print, save, reload, the address
+ * and search bars, history, downloads, devtools, view-source, open, bookmark,
+ * and page zoom. Forwarding preventDefault()s a key before the round trip and
+ * none of these can be replayed afterwards, so forwarding them would break
+ * them for as long as any extension listener is registered (in practice the
+ * whole session). A `registerShortcut()` on one of these still fires: shortcut
+ * matching (`handleShortcutKeydown`) runs whenever forwarding declines. */
+const browserCtrlChordKeys = new Set([..."defghijklopqrsu", "=", "+", "-", "_", "0"]);
+
+/** Whether a Ctrl/Alt chord (IME, Meta and AltGraph already ruled out) is one
+ * to forward. The base must be a single printable ASCII character: a named
+ * key under a modifier is the textarea's own navigation or editing (Ctrl+Arrow
+ * word jump, Ctrl+Shift+Arrow word select, Ctrl+Home/End, Ctrl+Delete, macOS
+ * Alt+Arrow/Alt+Backspace) or browser chrome (Ctrl+Tab, F-keys), none of which
+ * `applyKeyLocally` could replay faithfully if unconsumed, and a non-ASCII
+ * base under Alt is macOS Option text input (Option+O types "ø"). Ctrl-only
+ * chords also skip the platform editing chords (`isNativeEditingChord`) and
+ * the browser's own (`browserCtrlChordKeys`). */
+function isForwardableChord(event) {
+	if (event.key.length !== 1 || event.key < " " || event.key > "~") return false;
+	if (event.ctrlKey && !event.altKey) {
+		if (isNativeEditingChord(event)) return false;
+		if (browserCtrlChordKeys.has(event.key.toLowerCase())) return false;
+	}
+	return true;
+}
+
 /**
  * Whether `event` is a candidate for prompt-level `onTerminalInput`
  * forwarding (F1 §2). Escape is always a candidate — extension state (a
@@ -163,18 +194,16 @@ function isNativeEditingChord(event) {
  * (`isNativeEditingChord`), IME composition, AltGraph (accented/special
  * characters on many non-US layouts arrive as `altKey: true` with
  * `getModifierState("AltGraph")`), Cmd/Meta chords (macOS/Chrome-OS reserved,
- * same as before), and a bare modifier keydown with no base key yet.
+ * same as before), a bare modifier keydown with no base key yet, and every
+ * chord `isForwardableChord` declines (modified navigation keys such as
+ * Ctrl+Arrow word jumps, macOS Option text, browser Ctrl chords).
  */
 export function isForwardCandidate(event, promptEmpty) {
 	if (event.key === "Escape") return true;
 	if (event.isComposing) return false;
 	if (event.metaKey) return false;
 	if (event.getModifierState?.("AltGraph")) return false;
-	if (event.ctrlKey || event.altKey) {
-		if (isNativeEditingChord(event)) return false;
-		if (["Control", "Alt", "Shift", "Meta"].includes(event.key)) return false;
-		return true;
-	}
+	if (event.ctrlKey || event.altKey) return isForwardableChord(event);
 	if (!promptEmpty) return false;
 	if (
 		event.key === "ArrowUp" ||

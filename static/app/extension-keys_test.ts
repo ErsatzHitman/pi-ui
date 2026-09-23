@@ -64,7 +64,61 @@ test("isForwardCandidate forwards an Alt or Ctrl chord regardless of prompt cont
 	// listener from the prompt, whether or not the prompt has text in it.
 	assertEquals(isForwardCandidate(key("o", { altKey: true }), true), true);
 	assertEquals(isForwardCandidate(key("o", { altKey: true }), false), true);
-	assertEquals(isForwardCandidate(key("k", { ctrlKey: true }), true), true);
+	assertEquals(isForwardCandidate(key("m", { ctrlKey: true }), true), true);
+	assertEquals(
+		isForwardCandidate(key("M", { ctrlKey: true, shiftKey: true }), false),
+		true,
+	);
+});
+
+test("isForwardCandidate never intercepts modified navigation or editing keys", () => {
+	// Ctrl+Arrow word jumps, Ctrl+Home/End, Ctrl+Shift+Arrow word selection,
+	// Ctrl+Delete, macOS Alt+Arrow/Alt+Backspace: native textarea behavior that
+	// an unconsumed forward could not replay.
+	for (const name of [
+		"ArrowLeft",
+		"ArrowRight",
+		"ArrowUp",
+		"ArrowDown",
+		"Home",
+		"End",
+	]) {
+		for (const promptEmpty of [true, false]) {
+			assertEquals(
+				isForwardCandidate(key(name, { ctrlKey: true }), promptEmpty),
+				false,
+			);
+			assertEquals(
+				isForwardCandidate(
+					key(name, { ctrlKey: true, shiftKey: true }),
+					promptEmpty,
+				),
+				false,
+			);
+			assertEquals(
+				isForwardCandidate(key(name, { altKey: true }), promptEmpty),
+				false,
+			);
+		}
+	}
+	assertEquals(isForwardCandidate(key("Delete", { ctrlKey: true }), false), false);
+	assertEquals(isForwardCandidate(key("Backspace", { altKey: true }), false), false);
+	assertEquals(isForwardCandidate(key("Enter", { ctrlKey: true }), false), false);
+	assertEquals(isForwardCandidate(key("Tab", { ctrlKey: true }), false), false);
+});
+
+test("isForwardCandidate leaves the browser's own Ctrl chords and macOS Option text alone", () => {
+	for (const base of ["f", "g", "p", "s", "r", "l", "k", "=", "-", "0"]) {
+		assertEquals(isForwardCandidate(key(base, { ctrlKey: true }), false), false);
+	}
+	// Devtools (Ctrl+Shift+I/J) is the same base key with Shift held.
+	assertEquals(
+		isForwardCandidate(key("I", { ctrlKey: true, shiftKey: true }), false),
+		false,
+	);
+	// Option+O on macOS types "ø": text input, not a chord.
+	assertEquals(isForwardCandidate(key("ø", { altKey: true }), false), false);
+	assertEquals(isForwardCandidate(key("Dead", { altKey: true }), false), false);
 });
 
 test("isForwardCandidate rejects Cmd/Meta chords and a bare modifier keydown", () => {
