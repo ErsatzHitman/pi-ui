@@ -3,7 +3,11 @@ import { test } from "bun:test";
 import { assertEquals, assertNotEquals, waitForCondition } from "#testing/assertions";
 
 import { endpoints } from "../../src/server/routes/endpoints.ts";
-import { bindTerminalSurfaces, encodeKeyEvent } from "./terminal-keys.js";
+import {
+	bindTerminalSurfaces,
+	encodeKeyEvent,
+	restoreFocusAfterSurfaceUnmount,
+} from "./terminal-keys.js";
 
 function key(
 	value: string,
@@ -254,5 +258,54 @@ test("a re-mounted persistent surface re-fits when the server resets its data-co
 		assertEquals(dom.calls[0]?.body, { surfaceId: "s-attrs", cols: 100, rows: 20 });
 	} finally {
 		dom.restore();
+	}
+});
+
+test("focus returns to the prompt when a focused overlay or inline surface unmounts", () => {
+	class FakeNode {
+		constructor(private readonly classes: string[]) {}
+		matches(selector: string) {
+			return selector
+				.split(",")
+				.some((part) => this.classes.includes(part.trim().replace(/^\./, "")));
+		}
+		querySelector() {
+			return null;
+		}
+	}
+	let focused = 0;
+	const body = {};
+	const fakeDocument = {
+		body,
+		activeElement: body as unknown,
+		getElementById: (id: string) =>
+			id === "prompt-input" ? { focus: () => (focused += 1) } : null,
+	};
+	const restores = [
+		patchGlobal("Element", FakeNode),
+		patchGlobal("document", fakeDocument),
+	];
+	try {
+		restoreFocusAfterSurfaceUnmount([
+			new FakeNode(["dialog", "terminal-surface-dialog"]),
+		]);
+		assertEquals(focused, 1);
+		restoreFocusAfterSurfaceUnmount([
+			new FakeNode(["terminal-surface", "terminal-surface-inline"]),
+		]);
+		assertEquals(focused, 2);
+		// A persistent widget unmounting must not pull focus (it never held it).
+		restoreFocusAfterSurfaceUnmount([
+			new FakeNode(["terminal-surface", "terminal-surface-widget"]),
+		]);
+		assertEquals(focused, 2);
+		// Focus that already moved somewhere real is left alone.
+		fakeDocument.activeElement = { id: "somewhere" };
+		restoreFocusAfterSurfaceUnmount([
+			new FakeNode(["dialog", "terminal-surface-dialog"]),
+		]);
+		assertEquals(focused, 2);
+	} finally {
+		for (const restore of restores) restore();
 	}
 });

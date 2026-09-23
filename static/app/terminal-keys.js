@@ -284,21 +284,26 @@ function observeNewGrids(root = document) {
 	}
 }
 
+/** Surfaces whose hidden input proxy holds keyboard focus while mounted. */
+const focusHoldingSurfaceSelector =
+	".terminal-surface-inline, .terminal-surface-overlay, .terminal-surface-dialog";
+
 /**
- * Restores focus to the prompt editor once an inline `custom()` surface unmounts (it
- * resolved/was replaced): the surface's hidden input proxy — which had focus — is gone,
- * so without this the browser drops focus to `<body>` and keyboard interaction stalls (m5).
+ * Restores focus to the prompt editor once an inline `custom()` surface or an overlay's
+ * dialog unmounts (it resolved/was replaced; an overlay closed with Esc is removed by the
+ * server while its input proxy still has focus): that proxy is gone, so without this the
+ * browser drops focus to `<body>` and keyboard interaction stalls (m5).
  */
-function restoreFocusAfterInlineUnmount(removedNodes) {
+export function restoreFocusAfterSurfaceUnmount(removedNodes) {
 	if (document.activeElement !== document.body && document.activeElement !== null)
 		return;
-	const unmountedInline = [...removedNodes].some(
+	const unmounted = [...removedNodes].some(
 		(node) =>
 			node instanceof Element &&
-			(node.matches(".terminal-surface-inline") ||
-				node.querySelector(".terminal-surface-inline")),
+			(node.matches(focusHoldingSurfaceSelector) ||
+				node.querySelector(focusHoldingSurfaceSelector)),
 	);
-	if (!unmountedInline) return;
+	if (!unmounted) return;
 	document.getElementById("prompt-input")?.focus({ preventScroll: true });
 }
 
@@ -441,7 +446,7 @@ export function bindTerminalSurfaces() {
 			}
 			if (mutation.addedNodes.length > 0) observeNewGrids(document);
 			if (mutation.removedNodes.length > 0) {
-				restoreFocusAfterInlineUnmount(mutation.removedNodes);
+				restoreFocusAfterSurfaceUnmount(mutation.removedNodes);
 			}
 		}
 	});
