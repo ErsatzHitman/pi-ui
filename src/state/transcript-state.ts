@@ -34,11 +34,25 @@ export type TranscriptMessage = {
 	meta?: string;
 	state?: "running" | "success" | "error";
 	format?: "pre" | "diff" | "code" | "output";
+	/**
+	 * Severity for a `role: "notice"` message (an extension's `ctx.ui.notify()`,
+	 * or a pi-ui system notice). Defaults to `"warning"` when omitted, matching
+	 * every notice appended before this field existed. `renderSystemMessage`
+	 * uses it to give each level its own status-dot color and prefix instead of
+	 * labelling every notice "Warning:" (see r1-audit #24).
+	 */
+	noticeTone?: "info" | "warning" | "error";
 };
 
 export type TranscriptMessageOptions = Pick<
 	TranscriptMessage,
-	"title" | "titleParts" | "meta" | "state" | "format" | "attachments"
+	| "title"
+	| "titleParts"
+	| "meta"
+	| "state"
+	| "format"
+	| "attachments"
+	| "noticeTone"
 >;
 
 export type TranscriptMessageInput = Omit<TranscriptMessage, "id">;

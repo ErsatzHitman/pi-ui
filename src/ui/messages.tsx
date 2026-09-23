@@ -573,9 +573,23 @@ function renderNarrativeMessage(message: AppMessage): string {
 	);
 }
 
+/** Screen-reader prefix and status-dot color per `notice` severity (r1-audit #24). */
+const noticeToneLabels: Record<
+	NonNullable<AppMessage["noticeTone"]>,
+	{ prefix: string; className: string }
+> = {
+	info: { prefix: "Info: ", className: "info-foreground" },
+	warning: { prefix: "Warning: ", className: "warning-foreground" },
+	error: { prefix: "Error: ", className: "error-foreground" },
+};
+
 function renderSystemMessage(message: AppMessage): string {
 	if (message.state === "error") return renderErrorMessage(message);
 	const hasStatus = message.role === "notice";
+	// Notices appended before `noticeTone` existed (and pi-ui's own internal
+	// notices, e.g. "Usage: /name <title>") default to "warning", matching
+	// their look before this field was introduced.
+	const tone = noticeToneLabels[message.noticeTone ?? "warning"];
 	return syncHtml(
 		<article
 			class={[
@@ -588,12 +602,12 @@ function renderSystemMessage(message: AppMessage): string {
 		>
 			{hasStatus && (
 				<span class="tool-state-dot status-dot" aria-hidden="true">
-					<span class="tool-status-ball warning-foreground" />
+					<span class={`tool-status-ball ${tone.className}`} />
 				</span>
 			)}
 			<p class={["message-system-text", hasStatus && "tool-header"]}>
 				<span class={hasStatus ? "tool-title" : undefined}>
-					{hasStatus && <span class="sr-only">Warning: </span>}
+					{hasStatus && <span class="sr-only">{tone.prefix}</span>}
 					{message.title ? (
 						<>
 							<span safe>{message.title}</span>
