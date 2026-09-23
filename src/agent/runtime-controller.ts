@@ -59,6 +59,7 @@ import { LiveWorkspaceController } from "./live-workspace-controller.ts";
 import {
 	createLiveWorkspaceHostExtension,
 	createLiveWorkspaceHostOrigin,
+	createTappedEventBus,
 	type LiveWorkspaceHostOrigin,
 	type LiveWorkspaceHostSink,
 } from "./live-workspace-host-extension.ts";
@@ -320,12 +321,20 @@ export class RuntimeController {
 				...extensionFactories,
 				createLiveWorkspaceHostExtension(liveWorkspaceSink, liveWorkspaceOrigin),
 			];
+			// A#27: every `pi.events` channel any loaded extension publishes reaches the Live
+			// Workspace pane, not just a hardcoded subset — see `createTappedEventBus`.
+			const liveWorkspaceEventBus = createTappedEventBus((channel, payload) => {
+				liveWorkspaceSink(liveWorkspaceOrigin, (controller) =>
+					controller.recordChannel(channel, payload),
+				);
+			});
 			const services = await sessionPerformance.measure(
 				"runtimeServicesCreate",
 				() =>
 					createAgentSessionServices({
 						cwd,
 						resourceLoaderOptions: {
+							eventBus: liveWorkspaceEventBus,
 							extensionFactories: sessionExtensionFactories,
 						},
 					}),
