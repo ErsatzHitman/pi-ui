@@ -85,7 +85,7 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 			>
 				{renderExtensionWidgets(state, "aboveEditor")}
 				{renderPiUiWidgets(state)}
-				{renderTerminalSurfacePersistent(state)}
+				{renderTerminalSurfacePersistent(state, "aboveEditor")}
 				<div class="prompt-editor-row">
 					<textarea
 						id="prompt-input"
@@ -237,6 +237,7 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 					</div>
 				</div>
 				{renderExtensionWidgets(state, "belowEditor")}
+				{renderTerminalSurfacePersistent(state, "belowEditor")}
 			</div>
 			<footer id="prompt-footer" class="raised-surface prompt-footer">
 				{renderPromptStart(state)}

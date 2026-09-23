@@ -220,6 +220,7 @@ export class ExtensionUiController {
 						kind: "widget",
 						factory: content,
 						colorScheme: this.colorScheme(),
+						belowEditor: options?.placement === "belowEditor",
 					});
 				}
 				this.store.setExtensionWidgets(this.#widgets.values().toArray());

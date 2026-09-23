@@ -120,15 +120,17 @@ test("a discovered extension drives a real pi-tui SelectList and a streaming Tex
 		// Drive the SelectList with real terminal byte sequences (down arrow,
 		// then enter) routed through the exact route handlers use:
 		// `RuntimeController.handleTerminalSurfaceInput`.
-		assertEquals(controller.handleTerminalSurfaceInput(overlay.id, "\u001b[B"), true);
-		await waitFor(() =>
+		// The selection marker must visibly move to "Two": the component
+		// mutates its state without requesting a render, so this proves the
+		// host re-renders after dispatching input.
+		const selectedLine = () =>
 			(
 				store.snapshot().terminalSurfaces.find((s) => s.id === overlay.id)
 					?.lines ?? []
-			)
-				.join("\n")
-				.includes("Two"),
-		);
+			).find((line) => line.includes("→"));
+		assertStringIncludes(selectedLine() ?? "", "One");
+		assertEquals(controller.handleTerminalSurfaceInput(overlay.id, "\u001b[B"), true);
+		await waitFor(() => selectedLine()?.includes("Two") ?? false);
 		assertEquals(controller.handleTerminalSurfaceInput(overlay.id, "\r"), true);
 
 		// done() disposes the overlay and resolves the command's await.

@@ -186,6 +186,12 @@ export type UiCommitEffect =
 				| "tree-dialog"
 				| (string & {});
 			open: boolean;
+			/**
+			 * Defaults to `true`. `false` only for a terminal-surface overlay whose
+			 * `OverlayOptions.nonCapturing` is set — shown non-modally (`.show()`,
+			 * no backdrop, no focus trap) so it never steals focus from the prompt.
+			 */
+			modal?: boolean;
 	  }
 	| { type: "document-title"; title: string }
 	| { type: "scroll-transcript-bottom" }
@@ -823,6 +829,12 @@ export class AppStore {
 				.filter((surface) => surface.kind === "overlay")
 				.map((surface) => surface.id),
 		);
+		const nextModalById = new Map(
+			surfaces
+				.values()
+				.filter((surface) => surface.kind === "overlay")
+				.map((surface) => [surface.id, !surface.overlayOptions?.nonCapturing]),
+		);
 		this.terminalSurfaces = surfaces.map((surface) => structuredClone(surface));
 		this.presentation?.terminalSurfacesChanged();
 		this.commit();
@@ -833,6 +845,7 @@ export class AppStore {
 					type: "dialog",
 					id: terminalSurfaceDialogId(id),
 					open: true,
+					modal: nextModalById.get(id) ?? true,
 				});
 			}
 		}
