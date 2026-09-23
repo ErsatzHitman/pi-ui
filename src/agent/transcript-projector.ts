@@ -142,10 +142,18 @@ export class TranscriptProjector {
 			}
 			case "assistant": {
 				const messages = assistantContentToMessages(message.content, timestamp);
+				// A canonical abort surfaces either as its own dedicated stop reason
+				// (the common case — a user hitting stop mid-stream) or, for some
+				// providers, as an `"error"` stop reason whose message just says the
+				// request was aborted (round-4 O6).
+				const aborted =
+					message.stopReason === "aborted" ||
+					(message.stopReason === "error" &&
+						isAbortErrorMessage(message.errorMessage));
 				if (
 					options.includeAssistantError !== false &&
 					message.stopReason === "error" &&
-					!isAbortErrorMessage(message.errorMessage)
+					!aborted
 				) {
 					messages.push({
 						role: "system",
@@ -153,6 +161,13 @@ export class TranscriptProjector {
 						timestamp,
 						state: "error",
 					});
+				} else if (aborted) {
+					// A canonical abort isn't a provider error (the branch above stays
+					// silent for it), but the reply it cut off still deserves a visible,
+					// muted marker instead of just trailing off (round-4 O6). Mirrors
+					// `session-event-reducer.ts`'s live-streaming equivalent.
+					const last = messages.at(-1);
+					if (last?.role === "assistant") last.meta = "Stopped";
 				}
 				return messages;
 			}

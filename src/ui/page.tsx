@@ -339,7 +339,7 @@ export function renderPage(
 					{renderAuthDialog(state.authDialog)}
 					{renderExtensionDialog(state.extensionDialog)}
 					{renderLlamaDialog(state.llamaDialog)}
-					{renderPiUiSheets(state)}
+					{renderPiUiSheets(state, displayClientId)}
 					{renderTerminalSurfaceOverlays(state)}
 
 					<dialog

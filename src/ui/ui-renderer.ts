@@ -119,6 +119,9 @@ export class UiRenderer implements AppStorePresentation {
 		const disconnect = () => {
 			this.displayClients.disconnect(clientId);
 			this.messages.setDisplayRefreshHz(this.displayClients.targetHz);
+			// So a closed tab's reported color scheme can't keep overriding a still-open
+			// tab's (round-4 O4) — see `AppStore.clearClientColorScheme`.
+			this.store.clearClientColorScheme(clientId);
 			if (this.hub.clientCount === 0) {
 				this.pendingEnhancements.clear();
 				this.messages.transcriptReplacing();

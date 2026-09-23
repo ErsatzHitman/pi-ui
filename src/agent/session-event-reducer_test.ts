@@ -5,6 +5,7 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { assertEquals } from "#testing/assertions";
 
 import type {
+	FinishedAssistantIds,
 	TranscriptMessage,
 	TranscriptMessageOptions,
 } from "../state/transcript-state.ts";
@@ -49,16 +50,28 @@ class FakeState implements SessionEventStateSink {
 		this.updates.push({ id, patch });
 	}
 
+	private activeAssistantId: string | undefined;
+	private activeThoughtId: string | undefined;
+
 	appendThoughtDelta(delta: string): void {
 		this.thoughts.push(delta);
+		this.activeThoughtId ??= "thought-active";
 	}
 
 	appendAssistantDelta(delta: string): void {
 		this.assistant.push(delta);
+		this.activeAssistantId ??= "assistant-active";
 	}
 
-	finishAssistant(): void {
+	finishAssistant(): FinishedAssistantIds {
 		this.finishCount += 1;
+		const ids = {
+			assistantId: this.activeAssistantId,
+			thoughtId: this.activeThoughtId,
+		};
+		this.activeAssistantId = undefined;
+		this.activeThoughtId = undefined;
+		return ids;
 	}
 
 	showRecentMessages(): void {
@@ -233,6 +246,64 @@ test("does not surface a canonical abort as a provider error", () => {
 
 	assertEquals(state.finishCount, 1);
 	assertEquals(state.appended, []);
+});
+
+test("marks an aborted assistant message as stopped instead of erroring (round-4 O6)", () => {
+	const { state, context } = fixture();
+	state.appendAssistantDelta("partial reply");
+	reduceSessionEvent(
+		event({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [],
+				stopReason: "error",
+				errorMessage: "The operation was aborted.",
+			},
+		}),
+		context,
+	);
+
+	assertEquals(state.finishCount, 1);
+	assertEquals(state.appended, []);
+	assertEquals(state.updates, [{ id: "assistant-active", patch: { meta: "Stopped" } }]);
+});
+
+test("marks a dedicated-stopReason abort as stopped (round-4 O6)", () => {
+	// The SDK's actual abort path reports `stopReason: "aborted"` directly (no
+	// `errorMessage` at all), distinct from the `"error"` + abort-worded-message
+	// case covered above — both must produce the same muted marker.
+	const { state, context } = fixture();
+	state.appendAssistantDelta("partial reply");
+	reduceSessionEvent(
+		event({
+			type: "message_end",
+			message: { role: "assistant", content: [], stopReason: "aborted" },
+		}),
+		context,
+	);
+
+	assertEquals(state.finishCount, 1);
+	assertEquals(state.appended, []);
+	assertEquals(state.updates, [{ id: "assistant-active", patch: { meta: "Stopped" } }]);
+});
+
+test("does not mark anything stopped when an abort lands before any assistant text streamed", () => {
+	const { state, context } = fixture();
+	reduceSessionEvent(
+		event({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [],
+				stopReason: "error",
+				errorMessage: "The operation was aborted.",
+			},
+		}),
+		context,
+	);
+
+	assertEquals(state.updates, []);
 });
 
 test("uses a fallback when a provider omits its error message", () => {

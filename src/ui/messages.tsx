@@ -583,6 +583,11 @@ function renderNarrativeMessage(message: AppMessage): string {
 				</div>
 			)}
 			<div class="markdown-content">{content}</div>
+			{message.role === "assistant" && message.meta && (
+				<p class="message-stopped-note" safe>
+					{message.meta}
+				</p>
+			)}
 		</article>,
 	);
 }

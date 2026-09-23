@@ -177,9 +177,14 @@ function openLiveWorkspaceExtensionsAction(): string {
 
 export function renderPiUiSheets(
 	state: Pick<AppStateSnapshot, "extensionElements">,
+	// Only the page's own initial render (`page.tsx`) has a real per-tab client id to give
+	// this; `data-init` never re-runs for the later dirty-region re-renders that also call
+	// this (`UiRenderer`'s patches morph into the same `#piui-sheets` node), so they can leave
+	// it unset (round-4 O4 — see `colorSchemeReportScript`).
+	clientId?: string,
 ): string {
 	return syncHtml(
-		<div id="piui-sheets" data-init={colorSchemeReportScript()}>
+		<div id="piui-sheets" data-init={colorSchemeReportScript(clientId)}>
 			{state.extensionElements
 				.filter(isPiUiSheetElement)
 				.map((element) => renderPiUiSheetDialog(element))}
@@ -194,10 +199,16 @@ export function renderPiUiSheets(
  * audit m9). `data-init` only runs once per element, and `#piui-sheets` is mounted once per
  * page connection and never recreated by a later PIUI patch (same node, same id), so this
  * piggybacks on it rather than adding a dedicated always-empty host element.
+ *
+ * `clientId`, when given, is reported alongside the scheme so the server can track it per
+ * connection instead of one shared last-writer-wins value (round-4 O4). It's the page's own
+ * stable per-tab id (`page.tsx`'s `displayClientId`), the same one the stream connection and
+ * display-refresh Hz reporting already send.
  */
-function colorSchemeReportScript(): string {
+function colorSchemeReportScript(clientId?: string): string {
+	const clientIdLiteral = clientId ? JSON.stringify(clientId) : "undefined";
 	const post = (expression: string) =>
-		`@post('${endpoints.extensionUiColorScheme}', { payload: { colorScheme: ${expression} }, requestCancellation: 'disabled' })`;
+		`@post('${endpoints.extensionUiColorScheme}', { payload: { colorScheme: ${expression}, clientId: ${clientIdLiteral} }, requestCancellation: 'disabled' })`;
 	return `const mql = window.matchMedia('(prefers-color-scheme: dark)');
 		${post("mql.matches ? 'dark' : 'light'")};
 		mql.addEventListener('change', (evt) => { ${post("evt.matches ? 'dark' : 'light'")} });`;

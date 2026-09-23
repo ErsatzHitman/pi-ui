@@ -5,11 +5,13 @@ import {
 	enumField,
 	jsonSizeField,
 	nonnegativeIntegerField,
+	optionalString,
 	readActionSignals,
 	requiredString,
 	stringField,
 } from "../action-input.ts";
 import { datastarResponse } from "../datastar.ts";
+import { isDisplayClientId } from "../display-refresh.ts";
 import type { RouteMap } from "../route.ts";
 import { requireHost, type RouteContext } from "./context.ts";
 import { endpoints } from "./endpoints.ts";
@@ -86,8 +88,18 @@ export const extensionUiRoutes = {
 			// audit m9), so a bound runtime isn't a precondition the way the other routes here
 			// need one for `dispatchExtensionUiAction`/terminal input.
 			const signals = await readActionSignals(request);
+			// `clientId` is the same per-tab id the stream connection and display-refresh Hz
+			// reporting already carry (`page.tsx`'s `displayClientId`) — tracking the scheme
+			// per client, instead of one shared scalar, is round-4 O4. A caller that doesn't
+			// send one (an older client, or a direct signal post) falls back to the store's
+			// legacy shared slot, matching the previous single-scalar behavior.
+			const clientId = optionalString(signals, "clientId");
+			if (clientId !== undefined && !isDisplayClientId(clientId)) {
+				throw new ActionInputError("Invalid clientId.");
+			}
 			context.store.setClientColorScheme(
 				enumField(signals, "colorScheme", ["light", "dark"] as const),
+				clientId,
 			);
 			return datastarResponse();
 		},

@@ -659,6 +659,15 @@
 		margin-bottom: var(--message-tool-narrative-gap);
 	}
 
+	/* A muted marker on an assistant reply that was aborted mid-stream (round-4 O6) —
+	   deliberately quiet, matching the app's other small meta labels (`.context-meta`),
+	   not an error: the reply just stopped, it didn't fail. */
+	.message-stopped-note {
+		margin: 0.375rem 0 0;
+		color: var(--text-muted);
+		font-size: var(--text-sm);
+	}
+
 	.tool-output-surface {
 		margin-top: 0.5rem;
 		border: 1px solid var(--border);

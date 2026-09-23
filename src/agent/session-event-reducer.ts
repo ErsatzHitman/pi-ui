@@ -1,6 +1,7 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 import type {
+	FinishedAssistantIds,
 	TranscriptMessage,
 	TranscriptMessageInput,
 	TranscriptMessageOptions,
@@ -32,7 +33,7 @@ export type SessionEventStateSink = {
 	updateMessage(id: string, patch: Partial<Omit<TranscriptMessage, "id">>): void;
 	appendThoughtDelta(delta: string): void;
 	appendAssistantDelta(delta: string): void;
-	finishAssistant(): void;
+	finishAssistant(): FinishedAssistantIds;
 	showRecentMessages(): void;
 	setActivityText(activityText: string | undefined): void;
 	setQueuedMessages(steering: readonly string[], followUp: readonly string[]): void;
@@ -247,16 +248,26 @@ export function reduceSessionEvent(
 		}
 		case "message_end":
 			if (event.message.role === "assistant") {
-				state.finishAssistant();
-				if (
-					event.message.stopReason === "error" &&
-					!isAbortErrorMessage(event.message.errorMessage)
-				) {
+				const finished = state.finishAssistant();
+				// A canonical abort surfaces either as its own dedicated stop reason
+				// (the common case — a user hitting stop mid-stream) or, for some
+				// providers, as an `"error"` stop reason whose message just says the
+				// request was aborted (round-4 O6).
+				const aborted =
+					event.message.stopReason === "aborted" ||
+					(event.message.stopReason === "error" &&
+						isAbortErrorMessage(event.message.errorMessage));
+				if (event.message.stopReason === "error" && !aborted) {
 					state.appendMessage(
 						"system",
 						formatProviderErrorMessage(event.message.errorMessage),
 						{ state: "error" },
 					);
+				} else if (aborted && finished.assistantId) {
+					// A canonical abort isn't a provider error (the branch above stays
+					// silent for it), but it still deserves a visible marker instead of
+					// the reply just trailing off with no explanation (round-4 O6).
+					state.updateMessage(finished.assistantId, { meta: "Stopped" });
 				}
 				const cacheMissNotice = context.cacheMissNotice?.(event.message);
 				if (cacheMissNotice)

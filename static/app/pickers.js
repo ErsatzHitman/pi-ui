@@ -223,12 +223,45 @@ export function completeSlashCommand(name) {
 // (and its callers in prompt-box.tsx / pickers.tsx) intercept "/copy" entirely client-side
 // and never send it to the server. `RuntimeController.prompt()` still no-ops "/copy" too,
 // as a defensive fallback for any caller that posts it anyway.
+//
+// The return value means "the copy actually happened" (used to decide whether to fall
+// through to the server for a "Nothing to copy yet." notice), so it has to reflect real
+// success, not just that there was text to copy: `navigator.clipboard` doesn't exist over
+// plain HTTP on a LAN and in some embedded webviews (O3), and `writeText` itself can reject
+// (permission denied, no focused document). `execCommand("copy")` on a detached, invisible
+// textarea is synchronous and works in both of those cases, so it's the fallback rather than
+// silently reporting success with nothing copied.
 export function copyLastAssistantMessage() {
 	const nodes = document.querySelectorAll(".message-assistant .markdown-content");
 	const text = nodes[nodes.length - 1]?.textContent?.trim();
 	if (!text) return false;
-	navigator.clipboard?.writeText(text)?.catch?.(() => {});
-	return true;
+	if (navigator.clipboard?.writeText) {
+		navigator.clipboard.writeText(text).catch(() => copyWithFallback(text));
+		return true;
+	}
+	return copyWithFallback(text);
+}
+
+function copyWithFallback(text) {
+	try {
+		const textarea = document.createElement("textarea");
+		textarea.value = text;
+		textarea.setAttribute("readonly", "");
+		textarea.style.position = "fixed";
+		textarea.style.top = "0";
+		textarea.style.left = "0";
+		textarea.style.opacity = "0";
+		textarea.style.pointerEvents = "none";
+		document.body.append(textarea);
+		textarea.focus();
+		textarea.select();
+		textarea.setSelectionRange(0, text.length);
+		const copied = document.execCommand?.("copy") ?? false;
+		textarea.remove();
+		return copied;
+	} catch {
+		return false;
+	}
 }
 
 function insertFilePrefix() {
