@@ -33,14 +33,18 @@ function tickElapsed(): void {
 	)) {
 		const at = Number(element.dataset.liveWorkspaceElapsed);
 		if (!Number.isFinite(at)) continue;
-		element.textContent = formatElapsed(now - at);
+		const text = formatElapsed(now - at);
+		// Only write on change: the MutationObserver below re-ticks on every DOM change, and an
+		// unconditional write would itself count as one.
+		if (element.textContent !== text) element.textContent = text;
 	}
 	for (const element of document.querySelectorAll<HTMLElement>(
 		"[data-live-workspace-retry-at]",
 	)) {
 		const at = Number(element.dataset.liveWorkspaceRetryAt);
 		if (!Number.isFinite(at)) continue;
-		element.textContent = formatRetryCountdown(at - now);
+		const text = formatRetryCountdown(at - now);
+		if (element.textContent !== text) element.textContent = text;
 	}
 }
 
@@ -182,6 +186,39 @@ function bindLiveWorkspace() {
 		},
 		isOpen: isOverlayOpen,
 	});
+	// The pane can already be open on page load (its `open` preference is persisted), and
+	// `#app`'s first `data-effect` run can land before this module has replaced main.js's
+	// no-op `applyOpen` — so nothing registered the history entry, and on a phone/tablet a
+	// back press (Android's, via Capacitor) left the app instead of closing the restored
+	// sheet/drawer. Adopt that initial open state here, without moving focus (a cold load
+	// must not steal focus from the prompt).
+	const adoptInitialOpen = () => {
+		if (
+			open ||
+			!document.getElementById("app")?.classList.contains("live-workspace-open")
+		)
+			return false;
+		open = true;
+		if (!historyEntry && isOverlayOpen()) {
+			historyEntry = true;
+			notifyExternalSurfaceOpen();
+		}
+		return true;
+	};
+	const app = document.getElementById("app");
+	// Only when the server rendered the pane as initially open (the persisted preference) —
+	// otherwise a user opening it moments after load must go through `applyOpen` (which also
+	// moves focus into the pane), not this focus-less adoption.
+	const initiallyOpen =
+		app?.getAttribute("data-signals:_live-workspace-open__ifmissing") === "true";
+	if (app && initiallyOpen && !adoptInitialOpen()) {
+		// Datastar may not have applied `data-class` yet; catch the first class change.
+		const observer = new MutationObserver(() => {
+			if (adoptInitialOpen() || open) observer.disconnect();
+		});
+		observer.observe(app, { attributeFilter: ["class"], attributes: true });
+		setTimeout(() => observer.disconnect(), 5000);
+	}
 	return { applyOpen, requestNotificationPermission };
 }
 
@@ -190,3 +227,18 @@ window.piUi.liveWorkspace = bindLiveWorkspace();
 watchTurnPhase();
 tickElapsed();
 setInterval(tickElapsed, tickIntervalMs);
+// Every SSE patch of a tab re-renders its elapsed/countdown spans empty (the server only
+// renders the timestamp); fill them right away instead of leaving them blank until the next
+// 1s tick, which made active-tool and activity times flicker on every streamed update.
+let tickQueued = false;
+const livePane = document.getElementById("live-workspace");
+if (livePane) {
+	new MutationObserver(() => {
+		if (tickQueued) return;
+		tickQueued = true;
+		queueMicrotask(() => {
+			tickQueued = false;
+			tickElapsed();
+		});
+	}).observe(livePane, { childList: true, subtree: true });
+}
