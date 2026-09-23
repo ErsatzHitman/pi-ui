@@ -429,6 +429,16 @@ export function bindTerminalSurfaces() {
 	observeNewGrids();
 	const mutationObserver = new MutationObserver((mutations) => {
 		for (const mutation of mutations) {
+			// A re-mounted surface keeps its slot id (`setHeader`/`setWidget` called again,
+			// or every surface re-bound after /reload or a session switch), so the morph
+			// reuses the already-observed grid element while the server resets it to the
+			// default grid size; the ResizeObserver never fires for that. Re-fit whenever
+			// the server-reported size changes (a no-op when it already matches).
+			if (mutation.type === "attributes" && mutation.target instanceof Element) {
+				const grid = mutation.target.closest(gridSelector);
+				if (grid) scheduleResize(grid);
+				continue;
+			}
 			if (mutation.addedNodes.length > 0) observeNewGrids(document);
 			if (mutation.removedNodes.length > 0) {
 				restoreFocusAfterInlineUnmount(mutation.removedNodes);
@@ -443,7 +453,13 @@ export function bindTerminalSurfaces() {
 		// after page load is never ResizeObserver-fitted and stays at the default grid.
 		document.getElementById("terminal-surface-persistent-below"),
 	]) {
-		if (root) mutationObserver.observe(root, { childList: true, subtree: true });
+		if (root) {
+			mutationObserver.observe(root, {
+				childList: true,
+				subtree: true,
+				attributeFilter: ["data-cols", "data-rows"],
+			});
+		}
 	}
 	document.addEventListener("keydown", handleKeydown);
 	document.addEventListener("compositionend", handleCompositionEnd);
