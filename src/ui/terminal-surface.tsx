@@ -1,4 +1,6 @@
 import {
+	isBlankTerminalLine,
+	isVisibleTerminalOverlay,
 	terminalSurfaceDialogId,
 	type TerminalSurface,
 	type TerminalSurfaceOverlayOptions,
@@ -43,7 +45,7 @@ export function renderTerminalSurfaceOverlays(
 	return syncHtml(
 		<div id="terminal-surface-overlays">
 			{state.terminalSurfaces
-				.filter((surface) => surface.kind === "overlay")
+				.filter(isVisibleTerminalOverlay)
 				.map((surface) => renderTerminalSurfaceDialog(surface))}
 		</div>,
 	);
@@ -82,11 +84,6 @@ export function renderTerminalSurfacePersistent(
 	);
 }
 
-/** True when a rendered line (already-escaped HTML from `ansiLineToHtml`) shows only blanks. */
-function isBlankLine(html: string): boolean {
-	return html.replace(/<[^>]*>/g, "").trim() === "";
-}
-
 /**
  * Widget/header/footer components are laid out for a full terminal, where blank padding
  * rows (a splash header sized to `terminal.rows`, a spacer line) cost nothing. Above the
@@ -97,8 +94,8 @@ function trimBlankEdges(surface: TerminalSurface): TerminalSurface {
 	const { lines } = surface;
 	let start = 0;
 	let end = lines.length;
-	while (start < end && isBlankLine(lines[start] ?? "")) start += 1;
-	while (end > start && isBlankLine(lines[end - 1] ?? "")) end -= 1;
+	while (start < end && isBlankTerminalLine(lines[start] ?? "")) start += 1;
+	while (end > start && isBlankTerminalLine(lines[end - 1] ?? "")) end -= 1;
 	if (start === 0 && end === lines.length) return surface;
 	const cursor =
 		surface.cursor && surface.cursor.row >= start && surface.cursor.row < end
@@ -117,12 +114,10 @@ function trimBlankEdges(surface: TerminalSurface): TerminalSurface {
 export function terminalSurfaceOverlayEffects(
 	state: Pick<AppStateSnapshot, "terminalSurfaces">,
 ): readonly { id: string; modal: boolean }[] {
-	return state.terminalSurfaces
-		.filter((surface) => surface.kind === "overlay")
-		.map((surface) => ({
-			id: terminalSurfaceDialogId(surface.id),
-			modal: !surface.overlayOptions?.nonCapturing,
-		}));
+	return state.terminalSurfaces.filter(isVisibleTerminalOverlay).map((surface) => ({
+		id: terminalSurfaceDialogId(surface.id),
+		modal: !surface.overlayOptions?.nonCapturing,
+	}));
 }
 
 /** The 9-way `OverlayAnchor` values `terminal-surface.css` has a `[data-anchor=…]` rule for. */

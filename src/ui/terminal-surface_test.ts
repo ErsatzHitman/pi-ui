@@ -188,3 +188,11 @@ test("persistent surfaces drop blank edge rows and skip surfaces with nothing vi
 	assertStringIncludes(html, "><span>body</span></pre>");
 	assertStringIncludes(html, "--terminal-cursor-row:0");
 });
+
+test("an overlay rendering nothing (e.g. stashed via setHidden) gets no dialog or open effect", () => {
+	const hidden = surface({ lines: [], overlayOptions: { nonCapturing: true } });
+	const blank = surface({ id: "s2", lines: ["   ", "<span> </span>"] });
+	const state = { terminalSurfaces: [hidden, blank] };
+	assertStringExcludes(renderTerminalSurfaceOverlays(state), "<dialog");
+	assertEquals(terminalSurfaceOverlayEffects(state), []);
+});

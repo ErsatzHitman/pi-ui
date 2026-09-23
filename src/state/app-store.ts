@@ -1,5 +1,6 @@
 import type { SessionTransitionState } from "../agent/session-transition-controller.ts";
 import {
+	isVisibleTerminalOverlay,
 	terminalSurfaceDialogId,
 	type TerminalSurface,
 } from "../agent/terminal-surface/types.ts";
@@ -903,22 +904,24 @@ export class AppStore {
 	 * `done()`/the overlay's `hide()`, or the session switched away).
 	 */
 	setTerminalSurfaces(surfaces: TerminalSurface[]): void {
+		// Open/close effects follow what the browser shows: an overlay rendering nothing (e.g.
+		// stashed with `setHidden(true)`) closes, and reopens when it draws again.
 		const previousOverlayIds = new Set(
 			this.terminalSurfaces
 				.values()
-				.filter((surface) => surface.kind === "overlay")
+				.filter(isVisibleTerminalOverlay)
 				.map((surface) => surface.id),
 		);
 		const nextOverlayIds = new Set(
 			surfaces
 				.values()
-				.filter((surface) => surface.kind === "overlay")
+				.filter(isVisibleTerminalOverlay)
 				.map((surface) => surface.id),
 		);
 		const nextModalById = new Map(
 			surfaces
 				.values()
-				.filter((surface) => surface.kind === "overlay")
+				.filter(isVisibleTerminalOverlay)
 				.map((surface) => [surface.id, !surface.overlayOptions?.nonCapturing]),
 		);
 		this.terminalSurfaces = surfaces.map((surface) => structuredClone(surface));

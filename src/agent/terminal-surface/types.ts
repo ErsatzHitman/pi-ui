@@ -60,3 +60,21 @@ export const maxTerminalSurfaceLineLength = 4000;
 export function terminalSurfaceDialogId(id: string): string {
 	return `terminal-surface-${id}`;
 }
+
+/** True when a rendered line (already-escaped HTML from `ansiLineToHtml`) shows only blanks. */
+export function isBlankTerminalLine(html: string): boolean {
+	return html.replace(/<[^>]*>/g, "").trim() === "";
+}
+
+/**
+ * An `overlay`-kind surface the browser should show. A component that renders nothing —
+ * notably an overlay the extension stashed with `OverlayHandle.setHidden(true)`, which
+ * pi-tui simply stops drawing — is invisible in a terminal, so its dialog stays closed
+ * here too instead of lingering as an empty frame (it reopens once it draws again).
+ */
+export function isVisibleTerminalOverlay(surface: TerminalSurface): boolean {
+	return (
+		surface.kind === "overlay" &&
+		surface.lines.some((line) => !isBlankTerminalLine(line))
+	);
+}
