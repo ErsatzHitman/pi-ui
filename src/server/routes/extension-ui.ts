@@ -35,6 +35,16 @@ const maxElementIdLength = 512;
 const maxActionIdLength = 256;
 const maxActionValueBytes = 64 * 1024;
 
+/** A `KeyId` string (e.g. `"ctrl+shift+p"`) is at most a handful of tokens —
+ * generous headroom over anything `matchesKeyId` would ever produce. */
+const maxKeyIdLength = 64;
+/** A single encoded keystroke (`encodeKeyEvent`'s output): an escape/CSI
+ * sequence is a few bytes, and bracketed-paste text never reaches this route
+ * (the client only forwards discrete `keydown`s, not `paste`) — generous
+ * enough for a pasted-then-composed IME character without permitting the
+ * unbounded buffering `terminalSurfaceInput`'s larger cap exists for. */
+const maxPromptLevelInputBytes = 4 * 1024;
+
 export const extensionUiRoutes = {
 	[endpoints.extensionUiEditor]: {
 		POST: async (request, context) => {
@@ -116,6 +126,31 @@ export const extensionUiRoutes = {
 				data,
 			);
 			return datastarResponse();
+		},
+	},
+	[endpoints.extensionShortcutInvoke]: {
+		POST: async (request, context) => {
+			const signals = await readActionSignals(request);
+			requireHost(context).invokeExtensionShortcut(
+				requiredString(signals, "keyId", { maxLength: maxKeyIdLength }),
+			);
+			return datastarResponse();
+		},
+	},
+	[endpoints.extensionPromptInput]: {
+		POST: async (request, context) => {
+			const signals = await readActionSignals(request);
+			const data = stringField(signals, "data");
+			if (Buffer.byteLength(data, "utf8") > maxPromptLevelInputBytes) {
+				throw new ActionInputError("data is too large.");
+			}
+			// Not `datastarResponse()`: the client (`static/app/extension-keys.ts`)
+			// needs a synchronous yes/no to decide whether to type the key itself,
+			// not a signal/element patch.
+			const { consumed } = requireHost(context).handlePromptLevelInput(data);
+			return new Response(JSON.stringify({ consumed }), {
+				headers: { "content-type": "application/json" },
+			});
 		},
 	},
 	[endpoints.terminalSurfaceResize]: {

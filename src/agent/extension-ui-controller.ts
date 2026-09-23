@@ -75,6 +75,20 @@ type PendingDialog = {
 	timer?: ReturnType<typeof setTimeout>;
 };
 
+/** Result of running every `ctx.ui.onTerminalInput` listener over one key/byte
+ * sequence — see `#runTerminalInputHandlers`'s doc comment. */
+type TerminalInputRoutingResult = {
+	consumed: boolean;
+	data: string;
+};
+
+/** Result of `handlePromptLevelInput` — whether some `ctx.ui.onTerminalInput`
+ * listener consumed the key; there is no rewritten `data` to hand back since,
+ * unlike a terminal surface, there is no fallback component to forward it to. */
+type PromptLevelInputResult = {
+	consumed: boolean;
+};
+
 export type ExtensionUiControllerHooks = {
 	/**
 	 * Receives PIUI `channel` ops. When set, the owner stores channel snapshots (so PIUI
@@ -166,8 +180,10 @@ export class ExtensionUiController {
 			onTerminalInput: (handler) => {
 				if (!isActive()) return () => {};
 				this.#terminalInputHandlers.add(handler);
+				this.syncTerminalInputActive();
 				return () => {
 					this.#terminalInputHandlers.delete(handler);
+					this.syncTerminalInputActive();
 				};
 			},
 			setStatus: (key, text) => {
@@ -309,11 +325,15 @@ export class ExtensionUiController {
 	}
 
 	/**
-	 * Routes a raw terminal byte sequence to a mounted surface. `ctx.ui.onTerminalInput`
-	 * listeners see it first, like the TUI's input pipeline: one may rewrite the data or
-	 * consume it. `false` if `id` is unknown.
+	 * Runs every registered `ctx.ui.onTerminalInput` listener over `data`, in
+	 * registration order, exactly like the real TUI's raw `inputListeners`
+	 * pipeline (`pi-tui`'s `TUI.handleTerminalInput`): each listener sees
+	 * whatever the previous one's `{data}` rewrote, and the first `{consume:
+	 * true}` short-circuits the rest. A listener that throws is reported and
+	 * skipped (never rewrites `data`), the same recovery
+	 * `handleTerminalSurfaceInput`/`handlePromptLevelInput` always had.
 	 */
-	handleTerminalSurfaceInput(id: string, data: string): boolean {
+	#runTerminalInputHandlers(data: string): TerminalInputRoutingResult {
 		let forwarded = data;
 		for (const handler of this.#terminalInputHandlers) {
 			let result: ReturnType<TerminalInputHandler>;
@@ -323,10 +343,47 @@ export class ExtensionUiController {
 				console.error("Extension terminal input handler failed", error);
 				continue;
 			}
-			if (result?.consume) return true;
+			if (result?.consume) return { consumed: true, data: forwarded };
 			if (result?.data !== undefined) forwarded = result.data;
 		}
+		return { consumed: false, data: forwarded };
+	}
+
+	/**
+	 * Routes a raw terminal byte sequence to a mounted surface. `ctx.ui.onTerminalInput`
+	 * listeners see it first, like the TUI's input pipeline: one may rewrite the data or
+	 * consume it. `false` if `id` is unknown.
+	 */
+	handleTerminalSurfaceInput(id: string, data: string): boolean {
+		const { consumed, data: forwarded } = this.#runTerminalInputHandlers(data);
+		if (consumed) return true;
 		return this.#terminalSurfaces.handleInput(id, forwarded);
+	}
+
+	/**
+	 * Routes a key typed at the prompt (nothing focused a terminal surface) to
+	 * every registered `ctx.ui.onTerminalInput` listener — real interactive-mode's
+	 * raw `inputListeners` see every keystroke before *any* component gets
+	 * focus dispatch, which is how `bash-background.ts`/`subagents.ts`'s
+	 * manage-mode arrows/`j`/`k`/`x`/Escape reach them without a mounted
+	 * surface of their own (F1 §2). The client (`static/app/extension-keys.ts`)
+	 * only calls this while `AppStore.extensionTerminalInputActive` is true,
+	 * and only forwards a bounded set of "candidate" keys (arrows/Escape/a
+	 * single unmodified character while the prompt is empty) so ordinary
+	 * typing never pays a round trip — see that module's doc comment for the
+	 * full precedence rationale. Unlike `handleTerminalSurfaceInput`, there is
+	 * no surface to fall back into: an unconsumed key is simply not consumed,
+	 * and the client types it (or applies its own fallback, e.g. Escape)
+	 * itself.
+	 */
+	handlePromptLevelInput(data: string): PromptLevelInputResult {
+		return { consumed: this.#runTerminalInputHandlers(data).consumed };
+	}
+
+	/** Whether `handlePromptLevelInput` currently has anything to route to — see
+	 * `AppStore.extensionTerminalInputActive`. */
+	private syncTerminalInputActive(): void {
+		this.store.setExtensionTerminalInputActive(this.#terminalInputHandlers.size > 0);
 	}
 
 	/** Applies a client-measured grid resize to a mounted surface. `false` if `id` is unknown. */
@@ -414,6 +471,7 @@ export class ExtensionUiController {
 		this.#widgets.clear();
 		this.#componentWidgetKeys.clear();
 		this.#terminalInputHandlers.clear();
+		this.syncTerminalInputActive();
 		this.#autocompleteProviders.length = 0;
 		// Deliberately NOT clearing `#piUiStores` here: this runs on every
 		// unbind (including backgrounding a session), and a per-runtime PIUI

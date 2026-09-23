@@ -289,6 +289,13 @@
 		color: var(--action-primary-text);
 	}
 
+	/* An extension shortcut pi-ui's own keybind already claims (F1 §1) — the chord shown
+	   here doesn't fire in the browser, so it's muted rather than styled like a working one;
+	   the row itself stays clickable. */
+	.shortcut[data-variant="muted"] .kbd {
+		opacity: 0.55;
+	}
+
 	.segmented-control {
 		display: flex;
 		padding: 0.125rem;

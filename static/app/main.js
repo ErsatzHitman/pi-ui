@@ -4,6 +4,7 @@ import { bindCodeCopy } from "./code-copy.js";
 import { activateCommandItem, bindControls, refreshControls } from "./controls.js";
 import { hydrateDateTime } from "./date-time.js";
 import { bindDisplayRefreshMeasurement } from "./display-refresh.js";
+import { bindExtensionKeys, promptLevelInputActive } from "./extension-keys.js";
 import { bindFileLinks } from "./file-links.js";
 import * as fileTransfer from "./file-transfer.js";
 import { bindDismissibleHistory } from "./history-stack.js";
@@ -44,6 +45,7 @@ window.piUi = {
 	controls: { refresh: refreshControls, activate: activateCommandItem },
 	codeTheme: { loadPreviews() {} },
 	dateTime: { hydrate: hydrateDateTime },
+	extensionKeys: { promptLevelInputActive },
 	fonts: { apply() {} },
 	fileTransfer,
 	messageScroll: {
@@ -106,6 +108,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 	bindDisplayRefreshMeasurement();
 	bindStreamReconnect();
 	bindTerminalSurfaces();
+	bindExtensionKeys();
 	bindDebugFps();
 
 	await Promise.all([

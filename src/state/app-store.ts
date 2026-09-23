@@ -101,6 +101,24 @@ export type AppExtensionDialog =
 			prefill?: string;
 	  };
 export type AppExtensionStatus = { key: string; text: string };
+/**
+ * A `pi.registerShortcut()` shortcut — see `src/agent/extension-shortcuts.ts`.
+ * `reachableByKeyboard` is false when `key` collides with one of pi-ui's own
+ * keybinds (`src/keybinds.ts`'s catalog): pi-ui's own bind always wins the
+ * keyboard chord (round-5 runtime-validation finding — a real extension's
+ * shortcut, valid and unique in the TUI, can still collide with a browser-only
+ * pi-ui convenience like "Toggle tool output" that has no TUI equivalent to
+ * defer to), but the shortcut itself stays listed and directly invocable —
+ * from the `/hotkeys` dialog and the command palette (`command-menu.tsx`) —
+ * so it is never silently unreachable, matching F1 §1/§3's requirement that
+ * every registered shortcut stays reachable without a physical keyboard.
+ */
+export type AppExtensionShortcut = {
+	key: string;
+	description?: string;
+	extensionPath: string;
+	reachableByKeyboard: boolean;
+};
 export type AppExtensionWidget = {
 	key: string;
 	lines: readonly string[];
@@ -259,6 +277,12 @@ export type AppStateSnapshot = Readonly<{
 	authDialog: AppAuthDialog | undefined;
 	extensionDialog: AppExtensionDialog | undefined;
 	extensionStatuses: readonly AppExtensionStatus[];
+	extensionShortcuts: readonly AppExtensionShortcut[];
+	/** Whether any extension currently has a `ctx.ui.onTerminalInput` listener
+	 * registered outside a focused terminal surface — the browser only bothers
+	 * matching/forwarding prompt-level keys (`static/app/extension-keys.ts`)
+	 * while this is true. See `ExtensionUiController.handlePromptLevelInput`. */
+	extensionTerminalInputActive: boolean;
 	extensionWidgets: readonly AppExtensionWidget[];
 	extensionElements: readonly PiUiElement[];
 	extensionChannels: readonly ExtensionChannelSnapshot[];
@@ -368,6 +392,8 @@ export class AppStore {
 	authDialog: AppAuthDialog | undefined;
 	extensionDialog: AppExtensionDialog | undefined;
 	extensionStatuses: AppExtensionStatus[] = [];
+	extensionShortcuts: AppExtensionShortcut[] = [];
+	extensionTerminalInputActive = false;
 	extensionWidgets: AppExtensionWidget[] = [];
 	extensionElements: PiUiElement[] = [];
 	extensionChannels: ExtensionChannelSnapshot[] = [];
@@ -508,6 +534,10 @@ export class AppStore {
 				? structuredClone(this.extensionDialog)
 				: undefined,
 			extensionStatuses: this.extensionStatuses.map((status) => ({ ...status })),
+			extensionShortcuts: this.extensionShortcuts.map((shortcut) => ({
+				...shortcut,
+			})),
+			extensionTerminalInputActive: this.extensionTerminalInputActive,
 			extensionWidgets: this.extensionWidgets.map((widget) => ({
 				...widget,
 				lines: [...widget.lines],
@@ -820,6 +850,17 @@ export class AppStore {
 	}
 	setExtensionStatuses(statuses: AppExtensionStatus[]): void {
 		this.extensionStatuses = statuses.map((status) => ({ ...status }));
+		this.commit();
+	}
+	setExtensionShortcuts(shortcuts: AppExtensionShortcut[]): void {
+		this.extensionShortcuts = shortcuts.map((shortcut) => ({ ...shortcut }));
+		this.presentation?.pickersChanged();
+		this.commit();
+	}
+	/** See `AppStateSnapshot.extensionTerminalInputActive`. */
+	setExtensionTerminalInputActive(active: boolean): void {
+		if (this.extensionTerminalInputActive === active) return;
+		this.extensionTerminalInputActive = active;
 		this.commit();
 	}
 	setExtensionWidgets(widgets: AppExtensionWidget[]): void {

@@ -5,7 +5,9 @@
 // pi-ui responds to, searchable, nothing to click.
 import { appCommandCatalog } from "../commands/catalog.ts";
 import { activeKeybind, type FocusKeybindId } from "../keybinds.ts";
-import { formatShortcut, shortcutParts } from "../utils/keyboard.ts";
+import { endpoints } from "../server/routes/endpoints.ts";
+import type { AppExtensionShortcut, AppStateSnapshot } from "../state/app-store.ts";
+import { formatKeyId, formatShortcut, shortcutParts } from "../utils/keyboard.ts";
 import { operatingSystem } from "../utils/platform.ts";
 import { shortcutGlyph } from "./keyboard.tsx";
 import { syncHtml } from "./sync-html.ts";
@@ -26,6 +28,77 @@ function ShortcutRef(props: { shortcut: string }) {
 	);
 }
 
+/**
+ * Same visual shape as `ShortcutRef`, for a raw pi-tui `KeyId` string
+ * (`"alt+o"`) instead of one of pi-ui's own `ShortcutSpec`-shaped binds —
+ * see `formatKeyId`'s doc comment. `reachable: false` (the key collides with
+ * one of pi-ui's own binds — `AppExtensionShortcut`'s doc comment) mutes the
+ * chip and adds a tooltip explaining the row is invoked by clicking it here
+ * instead, rather than showing a chord that silently does nothing.
+ */
+function KeyIdRef(props: { keyId: string; reachable: boolean }) {
+	return (
+		<span
+			class="shortcut hotkeys-row-shortcut"
+			data-variant={props.reachable ? undefined : "muted"}
+			data-tooltip={
+				props.reachable
+					? undefined
+					: "This key is already used by pi-ui — click this row to run it instead."
+			}
+		>
+			{formatKeyId(props.keyId)
+				.split(" ")
+				.map((part) => (
+					<kbd class="kbd">{part}</kbd>
+				))}
+		</span>
+	);
+}
+
+/**
+ * `pi.registerShortcut()` shortcuts (F1 §1) — a separate section since they come
+ * from whatever extensions the current session loaded, not a fixed catalog.
+ * Every row is clickable and invokes the shortcut directly (F1 §3's mobile/
+ * touch reachability, extended here too — not just the command palette —
+ * since it is also the only invocation path for one `KeyIdRef` marks
+ * `reachable: false`).
+ */
+function ExtensionShortcutsSection(props: {
+	shortcuts: readonly AppExtensionShortcut[];
+}) {
+	if (props.shortcuts.length === 0) return "";
+	return (
+		<>
+			<li class="hotkeys-row hotkeys-section-heading" aria-hidden="true">
+				<span class="command-item-title">Extensions</span>
+			</li>
+			{props.shortcuts.map((shortcut) => (
+				<li
+					class="hotkeys-row hotkeys-row-clickable"
+					data-attr:hidden={`!${JSON.stringify(`${shortcut.description ?? ""} ${shortcut.extensionPath}`.toLowerCase())}.includes($_hotkeysQuery.trim().toLowerCase())`}
+					data-on:click={`@post('${endpoints.extensionShortcutInvoke}', { payload: { keyId: ${JSON.stringify(shortcut.key)} } })`}
+				>
+					<span class="hotkeys-row-content command-item-content">
+						<span class="command-item-title" safe>
+							{shortcut.description ?? shortcut.extensionPath}
+						</span>
+						{shortcut.description && (
+							<span class="command-item-description" safe>
+								{shortcut.extensionPath}
+							</span>
+						)}
+					</span>
+					<KeyIdRef
+						keyId={shortcut.key}
+						reachable={shortcut.reachableByKeyboard}
+					/>
+				</li>
+			))}
+		</>
+	);
+}
+
 // Focus-only keybinds (see keybinds.ts's focusKeybindIds) have no command-catalog entry
 // of their own to source a description from.
 const focusShortcutDescriptions: Record<FocusKeybindId, string> = {
@@ -39,7 +112,7 @@ const focusShortcutDescriptions: Record<FocusKeybindId, string> = {
 	"focus-workspace-editor": "Focus the workspace file editor",
 };
 
-export function renderHotkeysDialog(): string {
+export function renderHotkeysDialog(state: AppStateSnapshot): string {
 	return syncHtml(
 		<dialog
 			id="hotkeys-dialog"
@@ -113,6 +186,7 @@ export function renderHotkeysDialog(): string {
 							</li>
 						),
 					)}
+					<ExtensionShortcutsSection shortcuts={state.extensionShortcuts} />
 				</ul>
 				<footer class="preference-dialog-footer">
 					<button
