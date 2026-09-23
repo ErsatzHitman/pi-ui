@@ -68,6 +68,7 @@ window.piUi = {
 	},
 	windowFocus,
 	workspaceReview: { applyOpen: () => {} },
+	liveWorkspace: { applyOpen: () => {} },
 	shouldAbortOnEscape(event) {
 		return !event.defaultPrevented && !hasOpenDismissible();
 	},
@@ -103,6 +104,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 		import("../../src/client/fonts.ts"),
 		import("../../src/client/code-theme.ts"),
 		import("../../src/client/workspace-review.ts"),
+		import("../../src/client/live-workspace.ts"),
 	]);
 });
 

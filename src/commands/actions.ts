@@ -48,6 +48,10 @@ export function toggleWorkspaceReviewAction(): string {
 	return "$_workspaceReviewOpen = !$_workspaceReviewOpen";
 }
 
+export function toggleLiveWorkspaceAction(): string {
+	return "$_liveWorkspaceOpen = !$_liveWorkspaceOpen";
+}
+
 function toggleKeybindHintsAction(): string {
 	return `document.body.toggleAttribute('data-keybind-hints'); @post('${endpoints.keybindHints}', { payload: { keybindHints: document.body.hasAttribute('data-keybind-hints') } })`;
 }
@@ -88,6 +92,7 @@ export const commandActions = {
 	"change-workspace": openWorkspaceDialogAction(true),
 	"fork-session-to-workspace": openWorkspaceDialogAction(true, "fork"),
 	"toggle-review": toggleWorkspaceReviewAction(),
+	"toggle-live-workspace": toggleLiveWorkspaceAction(),
 	login: authDialogAction("login"),
 	logout: authDialogAction("logout"),
 } satisfies Record<AppCommandId, string>;

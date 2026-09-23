@@ -1,6 +1,7 @@
 import { toggleMinimalModeAction, toggleToolOutputAction } from "../commands/actions.ts";
 import { activeFontStacks } from "../fonts.ts";
 import { activeKeybind, keybindActions } from "../keybinds.ts";
+import { liveWorkspaceRatioDefault } from "../live-workspace-types.ts";
 import { getPierreThemes } from "../pierre-theme.ts";
 import {
 	endpoints,
@@ -19,6 +20,7 @@ import { renderFontDialog } from "./font-dialog.tsx";
 import { Icon } from "./icon.tsx";
 import { FileUp, FolderOpen, PanelRight, Search } from "./icons.ts";
 import { ShortcutTooltip } from "./keyboard.tsx";
+import { renderLiveWorkspace, renderLiveWorkspaceToggle } from "./live-workspace.tsx";
 import { renderLlamaDialog } from "./llama-dialog.tsx";
 import { renderMessages } from "./messages.tsx";
 import { renderSessionPicker, renderWorkspaceDialogMenu } from "./pickers.tsx";
@@ -161,12 +163,22 @@ export function renderPage(
 							filterSignals: { include: /^workspaceReviewComments\\./ },
 						});
 					`}
+					data-on:pi-ui-live-workspace-preferences={`
+						$liveWorkspacePreferences = {
+							...$liveWorkspacePreferences,
+							...evt.detail,
+						};
+						@post('${endpoints.liveWorkspacePreferences}', {
+							filterSignals: { include: /^liveWorkspacePreferences\\./ },
+						});
+					`}
 					data-signals__ifmissing={JSON.stringify({
 						_isDraggingFile: false,
 						_sessionLoading: false,
 						_newSessionPending: false,
 						workspaceReviewComments: { comments: [] },
 						workspaceReviewPreferences: state.workspaceReviewPreferences,
+						liveWorkspacePreferences: state.liveWorkspacePreferences,
 						sessionDeletePath: "",
 						sessionDeleteTitle: "",
 						sessionRenamePath: "",
@@ -216,10 +228,18 @@ export function renderPage(
 							state.isTemporarySession && "temporary-chat",
 						]}
 						data-class:review-open="$_workspaceReviewOpen"
+						data-class:live-workspace-open="$_liveWorkspaceOpen"
 						data-class:temporary-chat="$_temporarySession"
 						data-on:pi-ui-workspace-review-open={`$_workspaceReviewOpen = evt.detail.open`}
-						data-effect="window.piUi.workspaceReview.applyOpen($_workspaceReviewOpen)"
+						data-on:pi-ui-live-workspace-open={`$_liveWorkspaceOpen = evt.detail.open`}
+						data-effect={`
+							window.piUi.workspaceReview.applyOpen($_workspaceReviewOpen);
+							window.piUi.liveWorkspace.applyOpen($_liveWorkspaceOpen);
+						`}
 						data-signals:_workspace-review-open__ifmissing="false"
+						data-signals:_live-workspace-open__ifmissing={
+							state.liveWorkspacePreferences.open ? "true" : "false"
+						}
 						data-init={`@get('${endpoints.stream}?clientId=${displayClientId}&appVersion=${appVersion}', {
 						payload: {},
 						retry: 'always',
@@ -236,6 +256,7 @@ export function renderPage(
 							class="workspace-shell"
 							data-style={`{
 								'--review-pane-ratio': $workspaceReviewPreferences.gitPaneRatio || ${gitPaneRatioDefault},
+								'--live-workspace-ratio': $liveWorkspacePreferences.ratio || ${liveWorkspaceRatioDefault},
 							}`}
 						>
 							<section
@@ -256,29 +277,32 @@ export function renderPage(
 							</section>
 							<div class="toolbar">
 								{renderToolbar(state, true)}
-								<button
-									id="session-sidebar-toggle"
-									type="button"
-									class="btn session-sidebar-toggle"
-									data-variant="ghost"
-									data-attr:data-variant="$_sessionSidebarOpen ? 'secondary' : 'ghost'"
-									data-size="icon-sm"
-									aria-label="Toggle sessions"
-									commandfor="session-sidebar"
-									command="--toggle"
-									aria-controls="session-sidebar"
-									aria-expanded="false"
-									data-attr:aria-expanded="$_sessionSidebarOpen ? 'true' : 'false'"
-									data-tooltip="Toggle sessions"
-									data-tooltip-delay
-									data-align="end"
-								>
-									<Icon icon={PanelRight} />
-									<ShortcutTooltip
-										label="Toggle sessions"
-										shortcut={activeKeybind("toggle-sessions")}
-									/>
-								</button>
+								<div class="toolbar-end">
+									{renderLiveWorkspaceToggle(state)}
+									<button
+										id="session-sidebar-toggle"
+										type="button"
+										class="btn session-sidebar-toggle"
+										data-variant="ghost"
+										data-attr:data-variant="$_sessionSidebarOpen ? 'secondary' : 'ghost'"
+										data-size="icon-sm"
+										aria-label="Toggle sessions"
+										commandfor="session-sidebar"
+										command="--toggle"
+										aria-controls="session-sidebar"
+										aria-expanded="false"
+										data-attr:aria-expanded="$_sessionSidebarOpen ? 'true' : 'false'"
+										data-tooltip="Toggle sessions"
+										data-tooltip-delay
+										data-align="end"
+									>
+										<Icon icon={PanelRight} />
+										<ShortcutTooltip
+											label="Toggle sessions"
+											shortcut={activeKeybind("toggle-sessions")}
+										/>
+									</button>
+								</div>
 							</div>
 							{renderWorkspaceReview(
 								state.workspacePath,
@@ -286,6 +310,11 @@ export function renderPage(
 								state.workspaceTreeRevision,
 								state.workspaceReview,
 								state.workspaceReviewPreferences,
+							)}
+							{renderLiveWorkspace(
+								state.liveWorkspace,
+								state.liveWorkspacePreferences,
+								state.usage,
 							)}
 						</div>
 					</div>

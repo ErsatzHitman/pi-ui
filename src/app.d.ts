@@ -77,6 +77,9 @@ interface PiUiNamespace {
 		focusFiles(): void;
 		focusGit(): void;
 	};
+	liveWorkspace: {
+		applyOpen(open: boolean): void;
+	};
 	shouldAbortOnEscape(event: KeyboardEvent): boolean;
 }
 
