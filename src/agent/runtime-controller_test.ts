@@ -345,7 +345,9 @@ test("RuntimeController production path binds callbacks before activation", asyn
 		dependencies: dependencies([fake]),
 	});
 	assertEquals(fake.calls, ["create", "bindExtensions"]);
-	assertEquals(fake.extensionBindings[0]?.mode, "rpc");
+	// Default binding (R4-A, O1): "tui" unlocks custom()/component/ctx.mode ===
+	// "tui" gated extension behavior via pi-ui's terminal-surface host.
+	assertEquals(fake.extensionBindings[0]?.mode, "tui");
 	assertEquals(Boolean(fake.extensionBindings[0]?.uiContext), true);
 	assertEquals(fake.beforeInvalidate.length, 1);
 	assertEquals(fake.rebind.length, 1);
@@ -354,6 +356,16 @@ test("RuntimeController production path binds callbacks before activation", asyn
 	await controller.dispose();
 	assertEquals(fake.calls.filter((call) => call === "unsubscribe").length, 1);
 	assertEquals(fake.disposeCount, 1);
+});
+
+test('RuntimeController extensionsMode: "rpc" is an escape hatch back to the pre-Round-4 binding', async () => {
+	const fake = fakeRuntime();
+	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
+		dependencies: dependencies([fake]),
+		extensionsMode: "rpc",
+	});
+	assertEquals(fake.extensionBindings[0]?.mode, "rpc");
+	await controller.dispose();
 });
 
 test("RuntimeController opens tree commands without prompting the model", async () => {
@@ -1027,6 +1039,9 @@ test("RuntimeController preserves a streaming session across workspace changes",
 	assertEquals(state.workspacePath, "/work/replacement");
 	assertEquals(source.disposeCount, 0);
 	assertEquals(source.calls.filter((call) => call === "unsubscribe").length, 1);
+	// openWorkspace() binds extensions on its own call site (runtime-controller.ts,
+	// separate from bindSessionExtensions()) — must honor the same configured mode.
+	assertEquals(replacement.extensionBindings[0]?.mode, "tui");
 
 	assertEquals(await controller.resumeSession("/sessions/source.jsonl"), {
 		status: "success",

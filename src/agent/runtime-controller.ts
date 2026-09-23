@@ -62,6 +62,7 @@ import {
 } from "./builtin-commands.ts";
 import { detectCacheMiss, formatCacheMissNotice } from "./cache-miss.ts";
 import { ExtensionUiController } from "./extension-ui-controller.ts";
+import type { ExtensionsMode } from "./extensions-config.ts";
 import { LiveWorkspaceController } from "./live-workspace-controller.ts";
 import {
 	createLiveWorkspaceHostExtension,
@@ -221,6 +222,10 @@ export type RuntimeControllerActivationOptions = {
 	isApplicationFocused?: () => boolean | Promise<boolean>;
 	notifySessionDone?: (details: SessionDoneNotification) => Promise<void>;
 	autoTitle?: AutoTitleConfig;
+	/** How extensions are bound (`session.bindExtensions({ mode })`) for every
+	 * runtime this controller creates, forks, resumes, or switches to. See
+	 * `extensions-config.ts`. Defaults to `"tui"`. */
+	extensionsMode?: ExtensionsMode;
 };
 
 export class RuntimeController {
@@ -320,6 +325,12 @@ export class RuntimeController {
 			new SessionTransitionController((transition) =>
 				state.setSessionTransition(transition),
 			);
+	}
+
+	/** How this controller binds extensions for every runtime it owns. See
+	 * `extensions-config.ts` for what each mode implies. */
+	private get extensionsMode(): ExtensionsMode {
+		return this.activationOptions.extensionsMode ?? "tui";
 	}
 
 	static async create(
@@ -1061,7 +1072,7 @@ export class RuntimeController {
 		const isActive = () => replacement === this.runtime;
 		try {
 			await replacement.session.bindExtensions({
-				mode: "rpc",
+				mode: this.extensionsMode,
 				uiContext: this.extensionUi.context(isActive, replacement),
 				// See `bindSessionExtensions()` for why this is needed at all.
 				onError: (error) => {
@@ -1950,7 +1961,7 @@ export class RuntimeController {
 			runtime === this.runtime && generation === this.foregroundGeneration;
 		await sessionPerformance.measure("extensionBind", () =>
 			session.bindExtensions({
-				mode: "rpc",
+				mode: this.extensionsMode,
 				uiContext: this.extensionUi.context(isActive, runtime),
 				// The SDK catches a thrown command handler internally (the prompt
 				// itself still resolves normally) and reports it only here, so
