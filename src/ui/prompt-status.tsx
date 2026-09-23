@@ -55,9 +55,12 @@ export function renderPromptStatus(state: AppStateSnapshot): string {
 				</span>
 			))}
 			{renderPiUiStatusChips(state)}
+			{/* extension-keys.js flashes `hidden` client-side; a status re-render
+			    (e.g. the notice the consumed key triggers) must not reset it. */}
 			<span
 				class="extension-capture-indicator badge"
 				id="extension-capture-indicator"
+				data-ignore-morph
 				data-variant="secondary"
 				data-tooltip="An extension is listening for the next keystroke"
 				hidden
