@@ -962,7 +962,10 @@ export class RuntimeController {
 		try {
 			await replacement.session.bindExtensions({
 				mode: "rpc",
-				uiContext: this.extensionUi.context(() => replacement === this.runtime),
+				uiContext: this.extensionUi.context(
+					() => replacement === this.runtime,
+					replacement,
+				),
 			});
 		} catch (error) {
 			await replacement.dispose();
@@ -1390,7 +1393,7 @@ export class RuntimeController {
 		// id, so resolve and send the `${ns}:${id}` form here — see A#22.
 		const resolved = {
 			...request,
-			elementId: this.extensionUi.resolveElementId(request.elementId),
+			elementId: this.extensionUi.resolveElementId(request.elementId, this.runtime),
 		};
 		const args = Buffer.from(JSON.stringify(resolved), "utf8").toString("base64url");
 		for (const command of commands) {
@@ -1494,6 +1497,10 @@ export class RuntimeController {
 		this.foregroundObservedRunning =
 			ownership?.observedRunning ?? runtime.session.isStreaming;
 		this.bindRuntimeCallbacks(runtime);
+		// Brings back whatever PIUI elements this runtime's own store already
+		// holds (e.g. re-foregrounding a session that kept updating them while
+		// backgrounded) instead of leaving the foreground blank (A#23).
+		this.extensionUi.restoreElements(runtime);
 	}
 
 	private ownedLiveRuntimeCount(): number {
@@ -1814,6 +1821,7 @@ export class RuntimeController {
 					() =>
 						runtime === this.runtime &&
 						generation === this.foregroundGeneration,
+					runtime,
 				),
 				commandContextActions: {
 					waitForIdle: () => session.waitForIdle(),
@@ -1837,6 +1845,12 @@ export class RuntimeController {
 				},
 			}),
 		);
+		// Brings back whatever this runtime's own PIUI element store already
+		// holds — a no-op for a fresh runtime, but restores a re-foregrounded
+		// or rebound session's elements instead of leaving the view blank
+		// (A#23). Harmless if `adoptRuntime()` already did this for the same
+		// runtime just above this call.
+		if (runtime === this.runtime) this.extensionUi.restoreElements(runtime);
 	}
 
 	private async loadInitialCatalog(): Promise<void> {

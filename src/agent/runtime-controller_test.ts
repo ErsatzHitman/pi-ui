@@ -860,6 +860,65 @@ test("RuntimeController reuses streaming runtimes across repeated background act
 	assertEquals(b.disposeCount, 1);
 });
 
+test("RuntimeController keeps a backgrounded session's PIUI elements and restores them on re-foreground (A#23)", async () => {
+	const state = new AppStore();
+	const [a, b] = streamingRuntimes();
+	const controller = await activate(state, [a, b]);
+	const uiA = a.extensionBindings[0]?.uiContext;
+	if (!uiA) throw new Error("missing uiContext for runtime a");
+
+	uiA.notify(
+		`PIUI ${JSON.stringify({
+			v: 1,
+			op: "set",
+			el: {
+				id: "panel",
+				ns: "advisor",
+				kind: "panel",
+				placement: "sheet",
+				title: "v1",
+			},
+		})}`,
+		"info",
+	);
+	assertEquals(state.extensionElements.length, 1);
+	assertEquals(state.extensionElements[0]?.title, "v1");
+
+	// Backgrounding `a` (switching foreground to `b`) must not show `a`'s
+	// elements under `b`, but must not discard them either.
+	assertEquals(await controller.resumeSession("/sessions/b.jsonl"), {
+		status: "success",
+	});
+	assertEquals(state.extensionElements, []);
+
+	// The backgrounded runtime's own extension keeps updating its element —
+	// this must be captured even though `a` is not currently foreground.
+	uiA.notify(
+		`PIUI ${JSON.stringify({
+			v: 1,
+			op: "set",
+			el: {
+				id: "panel",
+				ns: "advisor",
+				kind: "panel",
+				placement: "sheet",
+				title: "v2",
+			},
+		})}`,
+		"info",
+	);
+	assertEquals(state.extensionElements, []);
+
+	// Re-foregrounding `a` restores its latest elements, not an empty view.
+	assertEquals(await controller.resumeSession("/sessions/a.jsonl"), {
+		status: "success",
+	});
+	assertEquals(state.extensionElements.length, 1);
+	assertEquals(state.extensionElements[0]?.title, "v2");
+
+	await controller.dispose();
+});
+
 test("RuntimeController tracks the previous session for alternate jumps", async () => {
 	const state = new AppStore();
 	const [a, b] = streamingRuntimes();

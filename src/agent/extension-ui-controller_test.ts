@@ -5,11 +5,17 @@ import { assertEquals, assertExists } from "#testing/assertions";
 import { piUiMarker } from "../extension-surface-types.ts";
 import { AppStore } from "../state/app-store.ts";
 import { ExtensionUiController } from "./extension-ui-controller.ts";
+import { agentSessionRuntimeStub } from "./test-fixtures.ts";
+
+/** A distinct, opaque per-runtime identity for `context()` in tests that don't exercise A#23's per-runtime distinction. */
+function fakeRuntimeKey() {
+	return agentSessionRuntimeStub({ session: {} });
+}
 
 test("extension UI resolves queued web dialogs in order", async () => {
 	const store = new AppStore();
 	const controller = new ExtensionUiController(store);
-	const ui = controller.context(() => true);
+	const ui = controller.context(() => true, fakeRuntimeKey());
 
 	const selected = ui.select("Choose", ["one", "two"]);
 	const confirmed = ui.confirm("Continue?", "This changes things.");
@@ -29,17 +35,23 @@ test("extension UI cancels dialogs on abort and inactive runtimes", async () => 
 	const store = new AppStore();
 	const controller = new ExtensionUiController(store);
 	const abort = new AbortController();
-	const ui = controller.context(() => true);
+	const ui = controller.context(() => true, fakeRuntimeKey());
 	const input = ui.input("Input", "value", { signal: abort.signal });
 	abort.abort();
 
 	assertEquals(await input, undefined);
 	assertEquals(store.extensionDialog, undefined);
-	assertEquals(await controller.context(() => false).confirm("No", "No"), false);
+	assertEquals(
+		await controller.context(() => false, fakeRuntimeKey()).confirm("No", "No"),
+		false,
+	);
 });
 
 test("extension UI degrades TUI-only capabilities instead of throwing", async () => {
-	const ui = new ExtensionUiController(new AppStore()).context(() => true);
+	const ui = new ExtensionUiController(new AppStore()).context(
+		() => true,
+		fakeRuntimeKey(),
+	);
 
 	// custom() matches the SDK's real RPC-mode contract: resolves undefined,
 	// it must never throw into the extension's command handler.
@@ -73,7 +85,7 @@ test("extension UI degrades TUI-only capabilities instead of throwing", async ()
 	// prior string-line widget under the same key.
 	const store = new AppStore();
 	const controller = new ExtensionUiController(store);
-	const widgetUi = controller.context(() => true);
+	const widgetUi = controller.context(() => true, fakeRuntimeKey());
 	widgetUi.setWidget("panel", ["line"]);
 	assertEquals(store.extensionWidgets.length, 1);
 	widgetUi.setWidget("panel", () => ({ render: () => [] }) as never);
@@ -94,7 +106,7 @@ test("extension UI degrades TUI-only capabilities instead of throwing", async ()
 test("extension UI projects status, widgets, working state, and editor text", () => {
 	const store = new AppStore();
 	const controller = new ExtensionUiController(store);
-	const ui = controller.context(() => true);
+	const ui = controller.context(() => true, fakeRuntimeKey());
 
 	ui.setStatus("example", "ready");
 	ui.setWidget("example", ["line one", "line two"], {
@@ -132,7 +144,7 @@ test("extension UI projects status, widgets, working state, and editor text", ()
 test("extension UI intercepts PIUI bridge payloads instead of showing them as notices", () => {
 	const store = new AppStore();
 	const controller = new ExtensionUiController(store);
-	const ui = controller.context(() => true);
+	const ui = controller.context(() => true, fakeRuntimeKey());
 
 	ui.notify(
 		`${piUiMarker}${JSON.stringify({
@@ -188,7 +200,7 @@ test("extension UI intercepts PIUI bridge payloads instead of showing them as no
 test("extension UI notify levels are visually and textually distinct (A#24)", () => {
 	const store = new AppStore();
 	const controller = new ExtensionUiController(store);
-	const ui = controller.context(() => true);
+	const ui = controller.context(() => true, fakeRuntimeKey());
 
 	ui.notify("all good", "info");
 	ui.notify("careful now", "warning");
@@ -214,7 +226,7 @@ test("extension UI hands PIUI channel ops to the channel owner when one is confi
 	const controller = new ExtensionUiController(store, {
 		onChannel: (channel, payload) => received.push([channel, payload]),
 	});
-	const ui = controller.context(() => true);
+	const ui = controller.context(() => true, fakeRuntimeKey());
 
 	ui.notify(
 		`${piUiMarker}${JSON.stringify({
