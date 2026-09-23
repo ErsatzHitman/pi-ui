@@ -1,4 +1,5 @@
 import type {
+	AgentSessionRuntime,
 	AutocompleteProviderFactory,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -23,6 +24,20 @@ import { isString } from "../utils/type-guards.ts";
 import { PiUiBridgeDecoder, PiUiElementStore } from "./pi-ui-bridge.ts";
 
 const defaultWorkingVisible = true;
+
+/**
+ * The visible/accessible label `notify()` gives "info"/"warning" (A#24).
+ * "error" gets its own distinct rendering entirely — see `notify()` below —
+ * so every level ends up visually and textually distinct: previously "info"
+ * got no label at all and `renderSystemMessage` added a hardcoded
+ * "Warning: " on top of everything regardless of level, reading as
+ * "Warning: info…" for an info notice and "Warning: warning: …" for a
+ * warning one.
+ */
+const notifyLevelLabels: Record<"info" | "warning", string> = {
+	info: "Info",
+	warning: "Warning",
+};
 
 /**
  * A `Theme` stand-in for the web UI, where there is no terminal to paint
@@ -53,6 +68,11 @@ const identityTheme = new Proxy({} as Theme, {
 		return (...args: unknown[]) => args.findLast(isString) ?? "";
 	},
 });
+
+type PiUiRuntimeStore = {
+	decoder: PiUiBridgeDecoder;
+	elements: PiUiElementStore;
+};
 
 type PendingDialog = {
 	dialog: AppExtensionDialog;
@@ -87,8 +107,18 @@ export class ExtensionUiController {
 	readonly #componentWidgetKeys = new Set<string>();
 	readonly #terminalInputHandlers = new Set<TerminalInputHandler>();
 	readonly #autocompleteProviders: AutocompleteProviderFactory[] = [];
-	readonly #piUiDecoder = new PiUiBridgeDecoder();
-	readonly #piUiElements = new PiUiElementStore();
+	/**
+	 * One PIUI decoder/element store per runtime (session) — never a single
+	 * shared one for "the current foreground runtime". A `WeakMap` needs no
+	 * manual cleanup: once a runtime is disposed and dropped from every
+	 * other collection, its entry here becomes collectable on its own.
+	 * `notify()` always applies an incoming PIUI op to the *owning*
+	 * runtime's own store, foreground or not, so a backgrounded session's
+	 * elements are never lost; `restoreElements()` republishes a runtime's
+	 * store into `AppStore` when it becomes (or resumes being) the
+	 * foreground one (A#23).
+	 */
+	readonly #piUiStores = new WeakMap<AgentSessionRuntime, PiUiRuntimeStore>();
 	#active: PendingDialog | undefined;
 	#workingIndicator: AppExtensionWorkingIndicator | undefined;
 	#workingMessage: string | undefined;
@@ -104,7 +134,15 @@ export class ExtensionUiController {
 		private readonly hooks: ExtensionUiControllerHooks = {},
 	) {}
 
-	context(isActive: () => boolean): ExtensionUIContext {
+	/**
+	 * `runtimeKey` identifies which runtime this context belongs to — used
+	 * to find or create that runtime's own PIUI element store. It must be
+	 * the same object every time the same runtime's context is (re)built.
+	 */
+	context(
+		isActive: () => boolean,
+		runtimeKey: AgentSessionRuntime,
+	): ExtensionUIContext {
 		return {
 			select: (title, options, dialogOptions) =>
 				this.select(isActive, title, options, dialogOptions),
@@ -112,7 +150,8 @@ export class ExtensionUiController {
 				this.confirm(isActive, title, message, dialogOptions),
 			input: (title, placeholder, dialogOptions) =>
 				this.input(isActive, title, placeholder, dialogOptions),
-			notify: (message, type = "info") => this.notify(isActive, message, type),
+			notify: (message, type = "info") =>
+				this.notify(isActive, runtimeKey, message, type),
 			onTerminalInput: (handler) => {
 				if (!isActive()) return () => {};
 				this.#terminalInputHandlers.add(handler);
@@ -238,6 +277,49 @@ export class ExtensionUiController {
 		return this.#headerFactory;
 	}
 
+	/**
+	 * Reconstructs the `${ns}:${id}` form a bridge-aware extension's
+	 * `lib/bridge.ts` derives its namespace from (`elementId.split(":")[0]`)
+	 * — see `pi_ui_event`'s `dispatchExtensionUiAction` caller. Looked up in
+	 * `runtimeKey`'s own element store (the action always targets whichever
+	 * runtime is currently foreground). A bare id the browser already sent
+	 * prefixed (contains `:`), or one that store cannot uniquely resolve to
+	 * a single namespace, is returned unprefixed.
+	 */
+	resolveElementId(id: string, runtimeKey: AgentSessionRuntime): string {
+		if (id.includes(":")) return id;
+		const ns = this.#piUiStores.get(runtimeKey)?.elements.findNamespace(id);
+		return ns === undefined ? id : `${ns}:${id}`;
+	}
+
+	/**
+	 * Republishes `runtimeKey`'s own PIUI elements (and, absent a channel
+	 * owner hook, channels) into `AppStore` — call whenever that runtime
+	 * becomes, or resumes being, the foreground one. Elements a backgrounded
+	 * session received via `notify()` are kept in its own store the whole
+	 * time (see `notify()`); this is what actually brings them back into
+	 * view instead of leaving the foreground blank (A#23).
+	 */
+	restoreElements(runtimeKey: AgentSessionRuntime): void {
+		const runtimeStore = this.#piUiStores.get(runtimeKey);
+		this.store.setExtensionElements(runtimeStore?.elements.elements() ?? []);
+		if (!this.hooks.onChannel) {
+			this.store.setExtensionChannels(runtimeStore?.elements.channels() ?? []);
+		}
+	}
+
+	#piUiStoreFor(runtimeKey: AgentSessionRuntime): PiUiRuntimeStore {
+		let runtimeStore = this.#piUiStores.get(runtimeKey);
+		if (!runtimeStore) {
+			runtimeStore = {
+				decoder: new PiUiBridgeDecoder(),
+				elements: new PiUiElementStore(),
+			};
+			this.#piUiStores.set(runtimeKey, runtimeStore);
+		}
+		return runtimeStore;
+	}
+
 	respond(id: string, value: string | undefined, cancelled: boolean): boolean {
 		if (this.#active?.dialog.id !== id) return false;
 		const active = this.#active;
@@ -247,7 +329,16 @@ export class ExtensionUiController {
 		return true;
 	}
 
-	cancelAll(): void {
+	/**
+	 * Rejects every pending/active dialog (as a cancel) without touching any
+	 * other extension UI state. A command handler that throws mid-dialog
+	 * (e.g. after calling `select()` but before it resolves) otherwise
+	 * leaves that dialog queued forever — nothing will ever call
+	 * `respond()`/`abort()` for it — blocking every dialog queued behind it.
+	 * `bindSessionExtensions()`'s `onError` calls this so the queue recovers
+	 * from a throwing command.
+	 */
+	cancelPendingDialogs(): void {
 		const pending = [this.#active, ...this.#queue].filter(
 			(dialog): dialog is PendingDialog => dialog !== undefined,
 		);
@@ -257,13 +348,22 @@ export class ExtensionUiController {
 			this.cleanup(dialog);
 			dialog.respond(undefined, true);
 		}
+		this.store.setExtensionDialog(undefined);
+	}
+
+	cancelAll(): void {
+		this.cancelPendingDialogs();
 		this.#statuses.clear();
 		this.#widgets.clear();
 		this.#componentWidgetKeys.clear();
 		this.#terminalInputHandlers.clear();
 		this.#autocompleteProviders.length = 0;
-		this.#piUiDecoder.reset();
-		this.#piUiElements.clear();
+		// Deliberately NOT clearing `#piUiStores` here: this runs on every
+		// unbind (including backgrounding a session), and a per-runtime PIUI
+		// element store must survive that so `restoreElements()` has
+		// something to bring back on re-foreground (A#23). A genuinely
+		// disposed runtime's entry becomes collectable on its own once
+		// nothing else references it.
 		this.#workingIndicator = undefined;
 		this.#workingMessage = undefined;
 		this.#workingVisible = defaultWorkingVisible;
@@ -284,10 +384,10 @@ export class ExtensionUiController {
 
 	private notify(
 		isActive: () => boolean,
+		runtimeKey: AgentSessionRuntime,
 		message: string,
 		type: "info" | "warning" | "error",
 	): void {
-		if (!isActive()) return;
 		if (PiUiBridgeDecoder.isPiUiMessage(message)) {
 			// Bridge-aware extensions (see `~/.pi/agent/extensions/lib/bridge.ts`)
 			// speak the "Pi UI Bridge" (PIUI) protocol over this same fire-and-
@@ -295,24 +395,39 @@ export class ExtensionUiController {
 			// client — which pi-ui always is. These payloads are structured
 			// element updates, never user-facing text, so they must NEVER reach
 			// the transcript as a notice, whether or not they decode cleanly.
-			const op = this.#piUiDecoder.decode(message);
+			const runtimeStore = this.#piUiStoreFor(runtimeKey);
+			const op = runtimeStore.decoder.decode(message);
 			if (!op) return;
 			if (op.op === "channel" && this.hooks.onChannel) {
-				this.hooks.onChannel(op.channel, op.payload);
+				// Channels route to a single shared owner (e.g. LiveWorkspaceController)
+				// and are not restored per-runtime like elements — only forwarded
+				// while this runtime is the foreground one, as before.
+				if (isActive()) this.hooks.onChannel(op.channel, op.payload);
 				return;
 			}
-			this.#piUiElements.apply(op);
+			// Applied to the OWNING runtime's own store regardless of whether it
+			// is currently foreground, so a backgrounded session's elements are
+			// never lost — only whether they're published to `AppStore` depends
+			// on being foreground; `restoreElements()` republishes them on
+			// re-foreground (A#23).
+			runtimeStore.elements.apply(op);
+			if (!isActive()) return;
 			if (op.op === "channel") {
-				this.store.setExtensionChannels(this.#piUiElements.channels());
+				this.store.setExtensionChannels(runtimeStore.elements.channels());
 			} else {
-				this.store.setExtensionElements(this.#piUiElements.elements());
+				this.store.setExtensionElements(runtimeStore.elements.elements());
 			}
 			return;
 		}
-		this.store.appendMessage(
-			"notice",
-			type === "info" ? message : `${type}: ${message}`,
-		);
+		if (!isActive()) return;
+		if (type === "error") {
+			// Gets its own expandable, distinctly-styled treatment (see
+			// `renderErrorMessage`) instead of sharing the plain notice row
+			// "info"/"warning" get — a real variant per level, not just a prefix.
+			this.store.appendMessage("notice", message, { state: "error" });
+			return;
+		}
+		this.store.appendMessage("notice", `${notifyLevelLabels[type]}: ${message}`);
 	}
 
 	private select(

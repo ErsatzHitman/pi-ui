@@ -19,7 +19,8 @@
 	"type": "module",
 	"imports": {
 		"#testing/assertions": "./src/testing/assertions.ts",
-		"#testing/temp": "./src/testing/temp.ts"
+		"#testing/temp": "./src/testing/temp.ts",
+		"#testing/symlink": "./src/testing/symlink.ts"
 	},
 	"publishConfig": {
 		"access": "public"

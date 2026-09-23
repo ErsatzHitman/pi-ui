@@ -17,6 +17,7 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { exportSessionToHtml } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/export-html/index.js";
 import { resolveModelScopeFromModels } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/model-resolver.js";
 import { exportSessionToJsonl } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-export.js";
+import { resolvePath as canonicalizeSessionPath } from "../../node_modules/@earendil-works/pi-coding-agent/dist/utils/paths.js";
 import agentPackageJson from "../../node_modules/@earendil-works/pi-coding-agent/package.json" with { type: "json" };
 import type { PiUiActionRequest } from "../extension-surface-types.ts";
 import { sessionPerformance } from "../perf/session-performance.ts";
@@ -754,7 +755,7 @@ export class RuntimeController {
 	}
 
 	async abortBackgroundSession(sessionPath: string): Promise<boolean> {
-		const session = this.backgroundSessions.get(sessionPath);
+		const session = this.backgroundSessions.get(this.backgroundKey(sessionPath));
 		if (session?.status !== "running") return false;
 		await session.runtime.session.abort();
 		session.status = "completed";
@@ -871,7 +872,9 @@ export class RuntimeController {
 			if (current.sessionManager.getSessionFile() === target) {
 				current.setSessionName(nextName);
 			} else {
-				const background = this.backgroundSessions.get(target);
+				const background = this.backgroundSessions.get(
+					this.backgroundKey(target),
+				);
 				if (background) background.runtime.session.setSessionName(nextName);
 				else manager.appendSessionInfo(nextName);
 			}
@@ -902,7 +905,10 @@ export class RuntimeController {
 			);
 			return false;
 		}
-		if (this.backgroundSessions.get(targetSessionFile)?.status === "running") {
+		if (
+			this.backgroundSessions.get(this.backgroundKey(targetSessionFile))?.status ===
+			"running"
+		) {
 			this.state.appendMessage(
 				"system",
 				"Cannot delete a running background session.",
@@ -921,11 +927,13 @@ export class RuntimeController {
 			if (this.state.previousSessionPath === targetSessionFile) {
 				this.state.setPreviousSessionPath(undefined);
 			}
-			const backgroundSession = this.backgroundSessions.get(targetSessionFile);
+			const backgroundSession = this.backgroundSessions.get(
+				this.backgroundKey(targetSessionFile),
+			);
 			if (backgroundSession) {
 				this.unsubscribeBackgroundSession(backgroundSession);
 				await backgroundSession.runtime.dispose();
-				this.backgroundSessions.delete(targetSessionFile);
+				this.backgroundSessions.delete(this.backgroundKey(targetSessionFile));
 			}
 			this.state.removeSession(targetSessionFile);
 			await this.refreshSessions();
@@ -951,10 +959,21 @@ export class RuntimeController {
 			agentDir: this.dependencies.getAgentDir(),
 			sessionManager: this.dependencies.createSessionManager(cwd, this.sessionDir),
 		});
+		const isActive = () => replacement === this.runtime;
 		try {
 			await replacement.session.bindExtensions({
 				mode: "rpc",
-				uiContext: this.extensionUi.context(() => replacement === this.runtime),
+				uiContext: this.extensionUi.context(isActive, replacement),
+				// See `bindSessionExtensions()` for why this is needed at all.
+				onError: (error) => {
+					if (!isActive()) return;
+					this.state.appendMessage(
+						"notice",
+						`Extension command failed: ${error.error}`,
+						{ state: "error" },
+					);
+					this.extensionUi.cancelPendingDialogs();
+				},
 			});
 		} catch (error) {
 			await replacement.dispose();
@@ -1054,7 +1073,7 @@ export class RuntimeController {
 				persisted: sourcePersisted,
 			}),
 			findBackground: (path) => {
-				const session = this.backgroundSessions.get(path);
+				const session = this.backgroundSessions.get(this.backgroundKey(path));
 				sessionPerformance.recordOwnershipDiagnostics(
 					{
 						targetBackgroundLookup: session ? "hit" : "miss",
@@ -1069,7 +1088,9 @@ export class RuntimeController {
 				return session;
 			},
 			activateBackground: async (path, session) => {
-				const activation = this.backgroundSessions.beginActivation(path);
+				const activation = this.backgroundSessions.beginActivation(
+					this.backgroundKey(path),
+				);
 				if (!activation || activation.runtime !== session) {
 					throw new RuntimeOwnershipInvariantError();
 				}
@@ -1375,7 +1396,14 @@ export class RuntimeController {
 			.getRegisteredCommands()
 			.filter((command) => command.name === piUiEventCommandName);
 		if (commands.length === 0) return false;
-		const args = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
+		// `lib/bridge.ts` derives the namespace a reply routes to from
+		// `elementId.split(":")[0]`; the browser only knows the element's bare
+		// id, so resolve and send the `${ns}:${id}` form here — see A#22.
+		const resolved = {
+			...request,
+			elementId: this.extensionUi.resolveElementId(request.elementId, this.runtime),
+		};
+		const args = Buffer.from(JSON.stringify(resolved), "utf8").toString("base64url");
 		for (const command of commands) {
 			try {
 				await command.handler(
@@ -1477,10 +1505,27 @@ export class RuntimeController {
 		this.foregroundObservedRunning =
 			ownership?.observedRunning ?? runtime.session.isStreaming;
 		this.bindRuntimeCallbacks(runtime);
+		// Brings back whatever PIUI elements this runtime's own store already
+		// holds (e.g. re-foregrounding a session that kept updating them while
+		// backgrounded) instead of leaving the foreground blank (A#23).
+		this.extensionUi.restoreElements(runtime);
 	}
 
 	private ownedLiveRuntimeCount(): number {
 		return this.backgroundSessions.liveCount(this.isCurrentRuntimeActive());
+	}
+
+	/**
+	 * Canonicalizes a session file path the same way `session-resume.ts` does
+	 * before using it as a `backgroundSessions` key, so registration and lookup
+	 * always agree regardless of how the caller spelled the path. In production
+	 * `getSessionFile()` already returns an absolute, canonical path, so this is
+	 * a no-op there; it only matters cross-platform, where a POSIX-style path
+	 * resolves differently than an already-platform-absolute one (e.g. on
+	 * Windows, `resolve("/sessions/a.jsonl")` lands under the current drive).
+	 */
+	private backgroundKey(sessionFile: string): string {
+		return canonicalizeSessionPath(sessionFile);
 	}
 
 	private unsubscribeBackgroundSession(session: BackgroundSession): void {
@@ -1557,7 +1602,7 @@ export class RuntimeController {
 	private backgroundCurrentRuntime(): void {
 		const sessionFile = this.runtime.session.sessionManager.getSessionFile();
 		if (!sessionFile) return;
-		if (this.backgroundSessions.has(sessionFile)) {
+		if (this.backgroundSessions.has(this.backgroundKey(sessionFile))) {
 			throw new RuntimeOwnershipInvariantError();
 		}
 		const snapshot = this.state.snapshotChat();
@@ -1582,7 +1627,10 @@ export class RuntimeController {
 		backgroundSession.unsubscribe = this.runtime.session.subscribe((event) =>
 			this.handleBackgroundEvent(backgroundSession, event),
 		);
-		this.backgroundSessions.register(sessionFile, backgroundSession);
+		this.backgroundSessions.register(
+			this.backgroundKey(sessionFile),
+			backgroundSession,
+		);
 		this.liveWorkspace.setBackgroundSession(
 			sessionFile,
 			"running",
@@ -1774,14 +1822,29 @@ export class RuntimeController {
 		const runtime = this.runtime;
 		const generation = this.foregroundGeneration;
 		const session = runtime.session;
+		const isActive = () =>
+			runtime === this.runtime && generation === this.foregroundGeneration;
 		await sessionPerformance.measure("extensionBind", () =>
 			session.bindExtensions({
 				mode: "rpc",
-				uiContext: this.extensionUi.context(
-					() =>
-						runtime === this.runtime &&
-						generation === this.foregroundGeneration,
-				),
+				uiContext: this.extensionUi.context(isActive, runtime),
+				// The SDK catches a thrown command handler internally (the prompt
+				// itself still resolves normally) and reports it only here, so
+				// without this it is silently swallowed: no error notice, and any
+				// dialog the command opened before throwing is left stuck forever
+				// with nothing left to ever respond to it. Surfacing it and
+				// recovering the dialog queue only applies while this runtime is
+				// still the foreground one — a backgrounded session's own error
+				// isn't user-facing right now.
+				onError: (error) => {
+					if (!isActive()) return;
+					this.state.appendMessage(
+						"notice",
+						`Extension command failed: ${error.error}`,
+						{ state: "error" },
+					);
+					this.extensionUi.cancelPendingDialogs();
+				},
 				commandContextActions: {
 					waitForIdle: () => session.waitForIdle(),
 					newSession: (options) => runtime.newSession(options),
@@ -1804,6 +1867,12 @@ export class RuntimeController {
 				},
 			}),
 		);
+		// Brings back whatever this runtime's own PIUI element store already
+		// holds — a no-op for a fresh runtime, but restores a re-foregrounded
+		// or rebound session's elements instead of leaving the view blank
+		// (A#23). Harmless if `adoptRuntime()` already did this for the same
+		// runtime just above this call.
+		if (runtime === this.runtime) this.extensionUi.restoreElements(runtime);
 	}
 
 	private async loadInitialCatalog(): Promise<void> {

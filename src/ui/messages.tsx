@@ -593,7 +593,12 @@ function renderSystemMessage(message: AppMessage): string {
 			)}
 			<p class={["message-system-text", hasStatus && "tool-header"]}>
 				<span class={hasStatus ? "tool-title" : undefined}>
-					{hasStatus && <span class="sr-only">Warning: </span>}
+					{/* Generic per-notice announcement, not level-specific — a
+					level-specific label (e.g. an extension notify()'s "Info:"/
+					"Warning:") lives in the message text itself; a hardcoded
+					"Warning: " here regardless of level read as "Warning: info…"
+					for an info notice and "Warning: warning: …" for a warning one. */}
+					{hasStatus && <span class="sr-only">Notice: </span>}
 					{message.title ? (
 						<>
 							<span safe>{message.title}</span>

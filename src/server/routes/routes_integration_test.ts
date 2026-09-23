@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import { mkdir, rm } from "node:fs/promises";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { Jsonifiable } from "@starfederation/datastar-sdk/types";
@@ -261,7 +261,10 @@ test.skipIf(!fdPath)(
 		const secondWorkspace = await makeTempDir();
 		try {
 			await Bun.write(`${firstWorkspace}/first.txt`, "");
-			await Bun.write(`${secondWorkspace}/<unsafe>.txt`, "");
+			// `<`, `>` and `"` are reserved characters NTFS refuses in a filename;
+			// `&` and `'` still need HTML-escaping and are valid everywhere, and
+			// keeping "unsafe" contiguous preserves the fuzzy-search query below.
+			await Bun.write(`${secondWorkspace}/unsafe'&.txt`, "");
 			const context = fakeContext();
 			context.resources.fdPath = fdPath;
 			context.store.setWorkspacePath(firstWorkspace);
@@ -279,7 +282,7 @@ test.skipIf(!fdPath)(
 			assertEquals(response.headers.get("content-type"), "text/event-stream");
 			const body = await response.text();
 			assertStringIncludes(body, 'id="file-picker-results"');
-			assertStringIncludes(body, "&lt;unsafe&gt;.txt");
+			assertStringIncludes(body, "unsafe&#x27;&amp;.txt");
 			assertStringIncludes(body, "datastar-patch-elements");
 			assertStringIncludes(body, '"_filePickerOpen":true');
 
@@ -453,7 +456,12 @@ test("workspace browser creates folders in the browsed directory and rejects inv
 			);
 		const response = await create("new project");
 		assertEquals(response.status, 200);
-		assertStringIncludes(await response.text(), `${workspace}/parent/new project`);
+		// The route reports the folder's native (backslash, on Windows) path,
+		// not a `/`-joined one.
+		assertStringIncludes(
+			await response.text(),
+			join(workspace, "parent", "new project"),
+		);
 		const listing = await router.fetch(
 			signalGet("/workspace/browse", {
 				workspacePath: `${workspace}/parent`,
@@ -929,7 +937,10 @@ test("file links resolve inside and outside paths to the editor without download
 		context.store.setWorkspacePath(workspace);
 		for (const [linkedPath, editorPath] of [
 			[path, name],
-			[outside, outside],
+			// An "outside" file's reported `path` is normalized to `/`
+			// separators (see the sibling "outside files can be read, edited
+			// and downloaded" test), not the raw native-separator path.
+			[outside, outside.replaceAll("\\", "/")],
 		] as const) {
 			const response = await createRouter(context).fetch(
 				fileOpenRequest(pathToFileURL(linkedPath).href),

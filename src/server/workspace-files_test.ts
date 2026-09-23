@@ -3,6 +3,7 @@ import { mkdir, rm, symlink } from "node:fs/promises";
 import { relative } from "node:path";
 
 import { assertEquals, assertRejects } from "#testing/assertions";
+import { hasFileSymlinkSupport } from "#testing/symlink";
 import { makeTempDir, makeTempFile } from "#testing/temp";
 
 import {
@@ -16,7 +17,14 @@ import {
 	writeWorkspaceFile,
 } from "./workspace-files.ts";
 
-test("workspace files list source files without dependencies or symlinks", async () => {
+// These three tests create *file* symlinks, which — unlike directory symlinks
+// (see `#testing/symlink`'s `symlinkDir`) — have no privilege-free Windows
+// equivalent (NTFS junctions are directories-only). On a host lacking
+// `SeCreateSymbolicLinkPrivilege` (no elevation, Developer Mode off) they skip
+// rather than fail on an OS capability the test isn't meant to exercise.
+const testFileSymlink = test.skipIf(!hasFileSymlinkSupport());
+
+testFileSymlink("workspace files list source files without dependencies or symlinks", async () => {
 	const workspace = await makeTempDir();
 	const outside = await makeTempFile();
 	try {
@@ -106,7 +114,7 @@ test("workspace files read and save with revision conflict protection", async ()
 	}
 });
 
-test("linked files outside the workspace read and save through absolute paths, relative paths and symlinks", async () => {
+testFileSymlink("linked files outside the workspace read and save through absolute paths, relative paths and symlinks", async () => {
 	const workspace = await makeTempDir();
 	const outside = await makeTempFile();
 	try {
@@ -174,7 +182,7 @@ test("workspace files describe native previews and preserve editable source", as
 	}
 });
 
-test("workspace files handle unsupported files and keep tree mutations workspace-scoped", async () => {
+testFileSymlink("workspace files handle unsupported files and keep tree mutations workspace-scoped", async () => {
 	const workspace = await makeTempDir();
 	const outside = await makeTempFile();
 	try {

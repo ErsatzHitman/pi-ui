@@ -129,7 +129,9 @@ test("a discovered pi extension uses the web UI bridge end to end", async () => 
 		assertEquals(store.documentTitle, "pi-ui");
 		assertEquals(
 			store.messages.at(-1)?.text,
-			"two|true|typed|edited|browser draft + extension",
+			// "info"-level notify() now carries its own level label (A#24)
+			// rather than reaching the transcript unlabeled.
+			"Info: two|true|typed|edited|browser draft + extension",
 		);
 	} finally {
 		await controller?.dispose();
@@ -171,8 +173,10 @@ test("a bridge-aware extension's PIUI elements render natively and route actions
 		]);
 
 		// A user action on the rendered element routes to the extension's own
-		// `pi_ui_event` command handler — not through `session.prompt()` — and
-		// the extension observes exactly the decoded {elementId, actionId, value}.
+		// `pi_ui_event` command handler — not through `session.prompt()`. The
+		// browser only knows the element's bare id; the host resolves it to
+		// the `${ns}:${id}` form `lib/bridge.ts` needs to route the reply to
+		// the right namespace handler (A#22) before forwarding it.
 		assertEquals(
 			await controller.dispatchExtensionUiAction({
 				elementId: "panel",
@@ -189,8 +193,184 @@ test("a bridge-aware extension's PIUI elements render natively and route actions
 				store.extensionStatuses.find((status) => status.key === "piui-action")!
 					.text,
 			),
-			{ elementId: "panel", actionId: "go", value: { confirmed: true } },
+			{ elementId: "fixture:panel", actionId: "go", value: { confirmed: true } },
 		);
+	} finally {
+		await controller?.dispose();
+		await rm(root, { recursive: true });
+	}
+});
+
+const throwingFixtureSource = `
+export default function (pi) {
+  pi.registerCommand("ui-throws", {
+    description: "Extension command that throws mid-handler",
+    handler: async (_args, ctx) => {
+      // Opens (and leaves open) a dialog before throwing, so the test can
+      // confirm the queue recovers rather than getting stuck on this one.
+      const selectPromise = ctx.ui.select("Pick one", ["a", "b"]);
+      selectPromise.catch(() => {});
+      throw new Error("fixture command failed");
+    },
+  });
+  pi.registerCommand("ui-after-throw", {
+    description: "Runs after ui-throws to prove the dialog queue recovered",
+    handler: async (_args, ctx) => {
+      const confirmed = await ctx.ui.confirm("Still working?", "Yes");
+      ctx.ui.notify("after-throw:" + confirmed, "info");
+    },
+  });
+}
+`;
+
+const fullFixtureSource = `
+export default function (pi) {
+  pi.registerCommand("ui-full-fixture", {
+    description: "Exercise every remaining ExtensionUIContext member",
+    handler: async (_args, ctx) => {
+      const results = {};
+
+      // onTerminalInput: registers and unsubscribes without throwing.
+      const unsubscribe = ctx.ui.onTerminalInput(() => undefined);
+      unsubscribe();
+      results.onTerminalInput = true;
+
+      ctx.ui.setWorkingVisible(false);
+      results.setWorkingVisible = true;
+
+      ctx.ui.setHiddenThinkingLabel("Thinking (hidden)");
+      results.setHiddenThinkingLabel = true;
+
+      ctx.ui.addAutocompleteProvider((current) => current);
+      results.addAutocompleteProvider = true;
+
+      const editorFactory = (tui, theme, keybindings) => ({ render: () => [] });
+      ctx.ui.setEditorComponent(editorFactory);
+      results.setEditorComponent =
+        ctx.ui.getEditorComponent() === editorFactory;
+      ctx.ui.setEditorComponent(undefined);
+
+      ctx.ui.setFooter((tui, theme, footerData) => ({ render: () => [] }));
+      ctx.ui.setFooter(undefined);
+      results.setFooter = true;
+
+      ctx.ui.setHeader((tui, theme) => ({ render: () => [] }));
+      ctx.ui.setHeader(undefined);
+      results.setHeader = true;
+
+      const customResult = await ctx.ui.custom(() => ({ render: () => [] }));
+      results.custom = customResult === undefined;
+
+      results.theme =
+        ctx.ui.theme.fg("accent", "text") === "text" &&
+        ctx.ui.theme.bold("text") === "text";
+
+      results.getAllThemes = Array.isArray(ctx.ui.getAllThemes())
+        && ctx.ui.getAllThemes().length === 0;
+      results.getTheme = ctx.ui.getTheme("dark") === undefined;
+      const setThemeResult = ctx.ui.setTheme("dark");
+      results.setTheme =
+        setThemeResult.success === false && typeof setThemeResult.error === "string";
+
+      const before = ctx.ui.getToolsExpanded();
+      ctx.ui.setToolsExpanded(!before);
+      results.toolsExpanded = ctx.ui.getToolsExpanded() === !before;
+      ctx.ui.setToolsExpanded(before);
+
+      ctx.ui.notify("RESULTS " + JSON.stringify(results), "info");
+    },
+  });
+}
+`;
+
+test("a discovered pi extension can drive every remaining ExtensionUIContext member without throwing", async () => {
+	const root = await makeTempDir();
+	const agentDir = `${root}/agent`;
+	const cwd = `${root}/workspace`;
+	await mkdir(`${agentDir}/extensions`, { recursive: true });
+	await mkdir(cwd);
+	await Bun.write(`${agentDir}/extensions/ui-full-fixture.js`, fullFixtureSource);
+
+	const store = new AppStore();
+	let controller: RuntimeController | undefined;
+	try {
+		controller = await RuntimeController.prepare(store, cwd, {
+			dependencies: dependencies(agentDir),
+		});
+		controller.activate();
+
+		assertEquals(await controller.prompt("/ui-full-fixture"), true);
+
+		const resultsText = store.messages.at(-1)?.text ?? "";
+		assertEquals(resultsText.startsWith("Info: RESULTS "), true);
+		const results: Record<string, boolean> = JSON.parse(
+			resultsText.slice("Info: RESULTS ".length),
+		);
+		// Every member ran to completion and self-checked true — including the
+		// members `extension-ui-controller_test.ts` only exercises directly
+		// against `ExtensionUiController`, this time end to end through a real
+		// discovered extension and `RuntimeController.prompt()`.
+		assertEquals(
+			Object.entries(results).filter(([, ok]) => !ok),
+			[],
+		);
+		assertEquals(Object.keys(results).sort(), [
+			"addAutocompleteProvider",
+			"custom",
+			"getAllThemes",
+			"getTheme",
+			"onTerminalInput",
+			"setEditorComponent",
+			"setFooter",
+			"setHeader",
+			"setHiddenThinkingLabel",
+			"setTheme",
+			"setWorkingVisible",
+			"theme",
+			"toolsExpanded",
+		]);
+	} finally {
+		await controller?.dispose();
+		await rm(root, { recursive: true });
+	}
+});
+
+test("a command that throws is surfaced as an error and the dialog queue recovers", async () => {
+	const root = await makeTempDir();
+	const agentDir = `${root}/agent`;
+	const cwd = `${root}/workspace`;
+	await mkdir(`${agentDir}/extensions`, { recursive: true });
+	await mkdir(cwd);
+	await Bun.write(`${agentDir}/extensions/ui-throws.js`, throwingFixtureSource);
+
+	const store = new AppStore();
+	let controller: RuntimeController | undefined;
+	try {
+		controller = await RuntimeController.prepare(store, cwd, {
+			dependencies: dependencies(agentDir),
+		});
+		controller.activate();
+
+		// The SDK catches the handler's throw internally — `prompt()` itself
+		// still resolves normally — and reports it only through `onError`.
+		assertEquals(await controller.prompt("/ui-throws"), true);
+
+		assertEquals(
+			store.messages.at(-1)?.text,
+			"Extension command failed: fixture command failed",
+		);
+		assertEquals(store.messages.at(-1)?.state, "error");
+		// The select() dialog the throwing handler opened (and never resolved)
+		// must not be left stuck forever.
+		assertEquals(store.extensionDialog, undefined);
+
+		// A later command's own dialog opens and resolves normally — the queue
+		// was not left blocked by the orphaned dialog.
+		const afterThrow = controller.prompt("/ui-after-throw");
+		await waitForDialog(store, "confirm");
+		respond(controller, store, "confirm");
+		assertEquals(await afterThrow, true);
+		assertEquals(store.messages.at(-1)?.text, "Info: after-throw:true");
 	} finally {
 		await controller?.dispose();
 		await rm(root, { recursive: true });
