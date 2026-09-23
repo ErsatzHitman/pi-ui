@@ -26,7 +26,17 @@ import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppStateSnapshot, AppUsage } from "../state/app-store.ts";
 import { formatTokens } from "../utils/format.ts";
 import { Icon } from "./icon.tsx";
-import { Activity, Bell, BellOff, Bot, Download, Gauge, List, X } from "./icons.ts";
+import {
+	Activity,
+	Bell,
+	BellOff,
+	Bot,
+	Download,
+	Gauge,
+	List,
+	Puzzle,
+	X,
+} from "./icons.ts";
 import { ShortcutKbd, ShortcutTooltip } from "./keyboard.tsx";
 import { renderPiUiElement } from "./pi-ui-elements.tsx";
 import { resumeSessionAction } from "./session-transition.tsx";
@@ -56,7 +66,7 @@ const tabIcons: Record<LiveWorkspaceTab, typeof Activity> = {
 	agents: Bot,
 	usage: Gauge,
 	activity: List,
-	extensions: Bot,
+	extensions: Puzzle,
 };
 
 /** Mirrors `workspace-review.tsx`'s resize-handle factory, scoped to the single `ratio` preference. */
