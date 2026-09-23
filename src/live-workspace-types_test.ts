@@ -3,6 +3,7 @@ import { test } from "bun:test";
 import { assertEquals } from "#testing/assertions";
 
 import {
+	formatRetryCountdown,
 	liveWorkspaceRatioMax,
 	liveWorkspaceRatioMin,
 	normalizeLiveWorkspacePreferences,
@@ -15,6 +16,21 @@ test("live workspace preferences keep only valid values", () => {
 	assertEquals(normalizeLiveWorkspacePreferences({ open: "yes" }).open, undefined);
 	assertEquals(normalizeLiveWorkspacePreferences({ tab: "agents" }).tab, "agents");
 	assertEquals(normalizeLiveWorkspacePreferences({ tab: "bogus" }).tab, undefined);
+	assertEquals(
+		normalizeLiveWorkspacePreferences({ notifications: true }).notifications,
+		true,
+	);
+	assertEquals(
+		normalizeLiveWorkspacePreferences({ notifications: "yes" }).notifications,
+		undefined,
+	);
+});
+
+test("formatRetryCountdown reports seconds remaining or that a retry is happening now", () => {
+	assertEquals(formatRetryCountdown(4200), "in 5s");
+	assertEquals(formatRetryCountdown(1000), "in 1s");
+	assertEquals(formatRetryCountdown(0), "retrying now");
+	assertEquals(formatRetryCountdown(-500), "retrying now");
 });
 
 test("live workspace ratio clamps to the supported range", () => {

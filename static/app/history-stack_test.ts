@@ -2,7 +2,10 @@ import { test } from "bun:test";
 
 import { assertEquals } from "#testing/assertions";
 
-import { createDismissibleHistoryGuard } from "./history-stack.js";
+import {
+	createDismissibleHistoryGuard,
+	registerDismissibleSurface,
+} from "./history-stack.js";
 
 test("opening a dismissible surface pushes one history entry", () => {
 	const pushed: unknown[] = [];
@@ -59,6 +62,16 @@ test("popstate with nothing open is a no-op", () => {
 		() => (closed += 1),
 	);
 	assertEquals(closed, 0);
+});
+
+test("registering and unregistering a non-dialog dismissible surface never throws (A#17)", () => {
+	const unregister = registerDismissibleSurface({
+		isOpen: () => false,
+		close: () => {},
+	});
+	unregister();
+	// Unregistering twice must stay a no-op, not throw.
+	unregister();
 });
 
 test("a later independent close is handled normally again after the popstate settles", async () => {
