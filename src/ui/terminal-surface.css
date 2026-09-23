@@ -80,11 +80,16 @@
 	}
 
 	@media (width <= 40rem) {
+		/* A full-width sheet: the UA's `width: fit-content` would otherwise let a wide
+		   component's lines (rendered at the previous, wider grid) size the sheet past the
+		   viewport, so the grid re-measured that width and never fitted the phone. */
 		.terminal-surface-dialog {
 			position: fixed;
 			inset-block-end: 0;
 			inset-inline: 0;
 			top: auto;
+			width: 100%;
+			max-width: 100%;
 			margin: 0;
 			translate: 0;
 		}
