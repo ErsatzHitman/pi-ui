@@ -23,6 +23,7 @@ import { ShortcutTooltip } from "./keyboard.tsx";
 import { renderLiveWorkspace, renderLiveWorkspaceToggle } from "./live-workspace.tsx";
 import { renderLlamaDialog } from "./llama-dialog.tsx";
 import { renderMessages } from "./messages.tsx";
+import { renderPiUiSheets } from "./pi-ui-elements.tsx";
 import { renderSessionPicker, renderWorkspaceDialogMenu } from "./pickers.tsx";
 import { renderPromptBox } from "./prompt-box.tsx";
 import type { AppRenderSnapshot } from "./render-state.ts";
@@ -332,6 +333,7 @@ export function renderPage(
 					{renderAuthDialog(state.authDialog)}
 					{renderExtensionDialog(state.extensionDialog)}
 					{renderLlamaDialog(state.llamaDialog)}
+					{renderPiUiSheets(state)}
 
 					<dialog
 						id="workspace-dialog"

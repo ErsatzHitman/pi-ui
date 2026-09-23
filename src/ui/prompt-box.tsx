@@ -5,6 +5,7 @@ import { renderExtensionWidgets } from "./extension-widgets.tsx";
 import { Icon } from "./icon.tsx";
 import { ArrowDown, Paperclip, X } from "./icons.ts";
 import { ShortcutKbd, ShortcutTooltip } from "./keyboard.tsx";
+import { renderPiUiWidgets } from "./pi-ui-elements.tsx";
 import { renderSlashPicker, slashPickerOpenExpression } from "./pickers.tsx";
 import { renderPromptAction } from "./prompt-action.tsx";
 import { renderModelPicker, renderThinkingPicker } from "./prompt-pickers.tsx";
@@ -82,6 +83,7 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 				data-init="el.removeAttribute('data-prompt-initial')"
 			>
 				{renderExtensionWidgets(state, "aboveEditor")}
+				{renderPiUiWidgets(state)}
 				<div class="prompt-editor-row">
 					<textarea
 						id="prompt-input"

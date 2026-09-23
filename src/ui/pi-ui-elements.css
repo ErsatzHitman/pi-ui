@@ -10,6 +10,19 @@
 		display: grid;
 		gap: 0.375rem;
 	}
+
+	/*
+	 * The prompt-area host sits inside the absolutely positioned prompt box: without a cap,
+	 * a few pinned elements push the editor (and the top of the stack) off-screen on phones.
+	 */
+	#piui-widgets {
+		max-height: min(40dvh, 24rem);
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+	#piui-widgets:empty {
+		display: none;
+	}
 	.piui-element {
 		border-radius: var(--radius-md);
 		background: var(--surface-muted);
@@ -89,11 +102,25 @@
 		border-radius: var(--radius-sm);
 		padding: 0.1875rem 0.375rem;
 	}
-	.piui-roster-label {
+	.piui-roster-main {
+		display: grid;
+		flex: 1;
+		min-width: 0;
+	}
+	.piui-roster-label,
+	.piui-roster-detail {
 		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+	.piui-roster-detail {
+		color: var(--text-muted);
+		font-size: var(--text-2xs);
+	}
+	.piui-actions.piui-roster-actions {
+		flex-shrink: 0;
+		margin-block-start: 0;
 	}
 	.piui-roster-state {
 		flex-shrink: 0;

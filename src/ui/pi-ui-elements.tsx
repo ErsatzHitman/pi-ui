@@ -3,7 +3,6 @@ import {
 	type PiUiAction,
 	type PiUiElement,
 	piUiDialogId,
-	piUiSlug,
 } from "../extension-surface-types.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
@@ -30,6 +29,9 @@ import { syncHtml } from "./sync-html.ts";
  */
 
 const widgetPlacements = new Set(["pinned", "inline"]);
+/** Action ids the user's `lib/bridge.ts` consumers (ask-user.ts, btw.ts) listen on. */
+const submitActionId = "submit";
+const closeActionId = "close";
 
 export function renderPiUiStatusChips(
 	state: Pick<AppStateSnapshot, "extensionElements">,
@@ -112,6 +114,7 @@ function renderPiUiSheetDialog(element: PiUiElement): string {
 			class="dialog piui-sheet"
 			aria-labelledby={`${dialogId(element)}-title`}
 			closedby="any"
+			data-preserve-attr="open"
 			data-on:close={dismissAction(element)}
 		>
 			<header>
@@ -121,15 +124,17 @@ function renderPiUiSheetDialog(element: PiUiElement): string {
 			</header>
 			{renderPiUiBody(element)}
 			<footer>
-				<button
-					type="button"
-					class="btn"
-					data-variant="outline"
-					commandfor={dialogId(element)}
-					command="close"
-				>
-					Close
-				</button>
+				{!element.actions?.some((action) => action.id === closeActionId) && (
+					<button
+						type="button"
+						class="btn"
+						data-variant="outline"
+						commandfor={dialogId(element)}
+						command="close"
+					>
+						Close
+					</button>
+				)}
 				{renderPiUiActions(element)}
 			</footer>
 		</dialog>,
@@ -205,11 +210,11 @@ function renderRoster(element: PiUiElement): string {
 	const rows = arrayField(element.data);
 	if (!rows) return renderGenericData(element.data);
 	return syncHtml(
-		<ul class="piui-roster">{rows.map((row) => renderRosterRow(row))}</ul>,
+		<ul class="piui-roster">{rows.map((row) => renderRosterRow(element, row))}</ul>,
 	);
 }
 
-function renderRosterRow(row: JsonValue): string {
+function renderRosterRow(element: PiUiElement, row: JsonValue): string {
 	if (!isJsonObject(row)) {
 		return syncHtml(
 			<li class="piui-roster-row">
@@ -225,14 +230,38 @@ function renderRosterRow(row: JsonValue): string {
 		textField(record.id) ??
 		"—";
 	const state = textField(record.state) ?? textField(record.status);
+	const detail = textField(record.detail);
+	const rowId = textField(record.id) ?? textField(record.key);
+	// Per-row actions (e.g. subagents.ts's roster `kill`/`select`) reply with the row id,
+	// which `lib/bridge.ts` handlers read back as `value.id`.
+	const actions = rowId === undefined ? [] : parseActions(record.actions);
 	return syncHtml(
 		<li class="piui-roster-row" data-piui-roster-state={state}>
-			<span class="piui-roster-label" safe>
-				{label}
+			<span class="piui-roster-main">
+				<span class="piui-roster-label" safe>
+					{label}
+				</span>
+				{detail && (
+					<span class="piui-roster-detail" safe>
+						{detail}
+					</span>
+				)}
 			</span>
 			{state && (
 				<span class="piui-roster-state" safe>
 					{state}
+				</span>
+			)}
+			{actions.length > 0 && (
+				<span class="piui-actions piui-roster-actions">
+					{actions.map((action) =>
+						renderActionButton(
+							element,
+							action,
+							JSON.stringify({ id: rowId }),
+							"xs",
+						),
+					)}
 				</span>
 			)}
 		</li>,
@@ -277,19 +306,51 @@ function renderPanelBody(element: PiUiElement): string {
 	const sections = arrayFieldOf(element.data.sections);
 	const fields = normalizeFields(element.data.fields);
 	if (!sections && fields.length === 0) return renderGenericData(element.data);
+	const topLevelFieldIds = new Set(fields.map((field) => field.id));
 	return syncHtml(
 		<div class="piui-panel">
-			{sections?.map((section) => renderPanelSection(section))}
+			{sections?.map((section) =>
+				renderPanelSection(element, section, topLevelFieldIds),
+			)}
 			{fields.length > 0 && renderFields(element, fields)}
 		</div>,
 	);
 }
 
-function renderPanelSection(section: JsonValue): string {
+function renderPanelSection(
+	element: PiUiElement,
+	section: JsonValue,
+	topLevelFieldIds: ReadonlySet<string>,
+): string {
 	if (!isJsonObject(section)) return "";
 	const record = section;
 	const kind = textField(record.kind);
 	const text = textField(record.text) ?? "";
+	if (kind === "form") {
+		// A nested form section (e.g. btw.ts's composer) carries its own fields and actions.
+		// Fields also declared top-level (ask-user.ts sends both) render once, from there.
+		const sectionFields = normalizeFields(record.fields).filter(
+			(field) => !topLevelFieldIds.has(field.id),
+		);
+		const sectionActions = parseActions(record.actions);
+		if (sectionFields.length === 0 && sectionActions.length === 0) return "";
+		return syncHtml(
+			<div class="piui-panel-section piui-panel-form">
+				{sectionFields.length > 0 && renderFields(element, sectionFields)}
+				{sectionActions.length > 0 && (
+					<div class="piui-actions">
+						{sectionActions.map((action) =>
+							renderActionButton(
+								element,
+								action,
+								fieldValuesExpression(element, sectionFields),
+							),
+						)}
+					</div>
+				)}
+			</div>,
+		);
+	}
 	if (kind === "markdown") {
 		return syncHtml(
 			<div class="piui-panel-section piui-panel-markdown markdown-content">
@@ -391,7 +452,7 @@ function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 						<label class="piui-multiselect-option">
 							<input
 								type="checkbox"
-								data-on:change={`${signal} = evt.target.checked ? [...${signal}, ${JSON.stringify(option.id)}] : ${signal}.filter((value) => value !== ${JSON.stringify(option.id)})`}
+								data-on:change={`$${signal} = evt.target.checked ? [...$${signal}, ${JSON.stringify(option.id)}] : $${signal}.filter((value) => value !== ${JSON.stringify(option.id)})`}
 							/>
 							<span safe>{option.label}</span>
 						</label>
@@ -415,22 +476,56 @@ function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 }
 
 function renderPiUiActions(element: PiUiElement): string {
-	if (!element.actions || element.actions.length === 0) return "";
 	const fields = normalizeFields(element.data.fields);
+	const declared = element.actions ?? [];
+	// Bridge forms such as ask-user.ts's sheet send `fields` without any `actions` and wait
+	// for a `submit` action carrying the field values; give them the button that sends it.
+	const actions: readonly PiUiAction[] =
+		fields.length > 0 && !declared.some((action) => action.id === submitActionId)
+			? [{ id: submitActionId, label: "Submit", variant: "primary" }, ...declared]
+			: declared;
+	if (actions.length === 0) return "";
 	return syncHtml(
 		<div class="piui-actions">
-			{element.actions.map((action) => (
-				<button
-					type="button"
-					class="btn"
-					data-variant={action.variant === "primary" ? undefined : "outline"}
-					data-on:click={actionClick(element, action, fields)}
-					safe
-				>
-					{action.label}
-				</button>
-			))}
+			{actions.map((action) =>
+				renderActionButton(
+					element,
+					action,
+					fieldValuesExpression(element, fields),
+				),
+			)}
 		</div>,
+	);
+}
+
+function renderActionButton(
+	element: PiUiElement,
+	action: PiUiAction,
+	valueExpression: string,
+	size?: "xs",
+): string {
+	const post = actionPost(element, action.id, valueExpression);
+	return syncHtml(
+		<button
+			type="button"
+			class="btn"
+			data-variant={
+				action.variant === "primary"
+					? undefined
+					: action.variant === "danger"
+						? "destructive"
+						: "outline"
+			}
+			data-size={size}
+			data-on:click={
+				action.confirm
+					? `if (confirm(${JSON.stringify(action.confirm)})) { ${post} }`
+					: post
+			}
+			safe
+		>
+			{action.label}
+		</button>,
 	);
 }
 
@@ -457,27 +552,55 @@ function dialogId(element: PiUiElement): string {
 	return piUiDialogId(element);
 }
 
+/**
+ * The Datastar signal name holding a field's value. Only identifier characters are kept:
+ * `piUiSlug` allows `-`, which Datastar expressions would parse as subtraction.
+ */
 function fieldSignal(element: PiUiElement, field: PiUiFieldSpec): string {
-	return `_piuiField_${piUiSlug(element.ns)}_${piUiSlug(element.id)}_${piUiSlug(field.id)}`;
+	return `_piuiField_${signalPart(element.ns)}_${signalPart(element.id)}_${signalPart(field.id)}`;
 }
 
+function signalPart(value: string): string {
+	return value.replaceAll(/[^a-zA-Z0-9_]/g, "_");
+}
+
+/**
+ * Closing the sheet (Esc, backdrop, the Close button) replies with the `close` action id,
+ * which `lib/bridge.ts` consumers (ask-user.ts, btw.ts) listen on to cancel or tear down.
+ */
 function dismissAction(element: PiUiElement): string {
-	return actionPost(element, "dismiss", "undefined");
+	return actionPost(element, closeActionId, "undefined");
 }
 
-function actionClick(
+function fieldValuesExpression(
 	element: PiUiElement,
-	action: PiUiAction,
-	fields: PiUiFieldSpec[],
+	fields: readonly PiUiFieldSpec[],
 ): string {
-	const valueExpression =
-		fields.length > 0
-			? `{ ${fields.map((field) => `${JSON.stringify(field.id)}: ${fieldSignal(element, field)}`).join(", ")} }`
-			: "undefined";
-	const post = actionPost(element, action.id, valueExpression);
-	return action.confirm
-		? `if (confirm(${JSON.stringify(action.confirm)})) { ${post} }`
-		: post;
+	return fields.length > 0
+		? `{ ${fields.map((field) => `${JSON.stringify(field.id)}: $${fieldSignal(element, field)}`).join(", ")} }`
+		: "undefined";
+}
+
+function parseActions(value: JsonValue | undefined): PiUiAction[] {
+	if (!Array.isArray(value)) return [];
+	const actions: PiUiAction[] = [];
+	for (const candidate of value) {
+		if (!isJsonObject(candidate)) continue;
+		const id = textField(candidate.id);
+		const label = textField(candidate.label);
+		if (id === undefined || label === undefined) continue;
+		const variant = candidate.variant;
+		actions.push({
+			id,
+			label,
+			variant:
+				variant === "primary" || variant === "secondary" || variant === "danger"
+					? variant
+					: undefined,
+			confirm: textField(candidate.confirm),
+		});
+	}
+	return actions;
 }
 
 function actionPost(
