@@ -173,7 +173,9 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 							window.piUi.fileTransfer.insert(evt.clipboardData);
 						}`}
 						data-on:keydown={`
-							window.piUi.promptHistory.handleKeydown(evt, $_promptHistory);
+							if (!window.piUi.extensionKeys.takesPromptKey(evt)) {
+								window.piUi.promptHistory.handleKeydown(evt, $_promptHistory);
+							}
 							if (
 							evt.code === 'Escape' &&
 							!evt.ctrlKey &&

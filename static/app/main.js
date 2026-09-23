@@ -8,6 +8,7 @@ import {
 	bindExtensionKeys,
 	promptInputBusy,
 	promptLevelInputActive,
+	takesPromptKey,
 } from "./extension-keys.js";
 import { bindFileLinks } from "./file-links.js";
 import * as fileTransfer from "./file-transfer.js";
@@ -49,7 +50,7 @@ window.piUi = {
 	controls: { refresh: refreshControls, activate: activateCommandItem },
 	codeTheme: { loadPreviews() {} },
 	dateTime: { hydrate: hydrateDateTime },
-	extensionKeys: { promptInputBusy, promptLevelInputActive },
+	extensionKeys: { promptInputBusy, promptLevelInputActive, takesPromptKey },
 	fonts: { apply() {} },
 	fileTransfer,
 	messageScroll: {

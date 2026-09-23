@@ -2,7 +2,7 @@ import { afterEach, test } from "bun:test";
 
 import { assertEquals } from "#testing/assertions";
 
-import { bindExtensionKeys, promptInputBusy } from "./extension-keys.js";
+import { bindExtensionKeys, promptInputBusy, takesPromptKey } from "./extension-keys.js";
 
 /** Patches a global via `Object.defineProperty` (see live-workspace-open_test.ts). */
 function patchGlobal(name: string, value: unknown): () => void {
@@ -72,6 +72,7 @@ type Harness = {
 	aborts: number[];
 	requests: Deferred[];
 	submitted: string[];
+	recalls: string[];
 	press: (key: string, options?: { shiftKey?: boolean }) => FakeKeyboardEvent;
 	settle: () => Promise<void>;
 };
@@ -99,6 +100,18 @@ function install(options: { running?: boolean } = {}): Harness {
 	const documentListeners: ((event: Event) => void)[] = [];
 	const requests: Deferred[] = [];
 	const submitted: string[] = [];
+	const recalls: string[] = [];
+
+	// Stand-in for prompt-box.tsx's inline history recall (target phase), which
+	// stands down for a key this module takes.
+	input.addEventListener("keydown", (event) => {
+		const keyEvent = event as FakeKeyboardEvent;
+		if (keyEvent.key !== "ArrowUp" && keyEvent.key !== "ArrowDown") return;
+		if (takesPromptKey(event)) return;
+		event.preventDefault();
+		recalls.push(keyEvent.key);
+		input.value = "recalled";
+	});
 
 	// Stand-in for prompt-box.tsx's inline Enter-to-send (target phase).
 	input.addEventListener("keydown", (event) => {
@@ -166,8 +179,8 @@ function install(options: { running?: boolean } = {}): Harness {
 			shiftKey: options.shiftKey,
 		});
 		// Target phase first (prompt-box.tsx), then the document listener.
+		Object.defineProperty(event, "target", { value: input, configurable: true });
 		input.dispatchEvent(event);
-		Object.defineProperty(event, "target", { value: input });
 		for (const listener of documentListeners) listener(event);
 		return event;
 	}
@@ -176,7 +189,7 @@ function install(options: { running?: boolean } = {}): Harness {
 		for (let i = 0; i < 20; i += 1) await Promise.resolve();
 	}
 
-	return { input, aborts, requests, submitted, press, settle };
+	return { input, aborts, requests, submitted, recalls, press, settle };
 }
 
 test("two characters typed inside one round trip both land, in order", async () => {
@@ -252,4 +265,29 @@ test("a consumed Escape never aborts a running turn", async () => {
 	requests[0]?.resolve(true);
 	await settle();
 	assertEquals(aborts.length, 0);
+});
+
+test("a manage-mode ArrowUp at an empty prompt reaches the listener before history", async () => {
+	const { input, recalls, requests, press, settle } = install();
+	const up = press("ArrowUp");
+	assertEquals(up.defaultPrevented, true);
+	await settle();
+	assertEquals(
+		requests.map((request) => request.data),
+		["[A"],
+	);
+	requests[0]?.resolve(true);
+	await settle();
+	assertEquals(recalls, []);
+	assertEquals(input.value, "");
+});
+
+test("an unconsumed ArrowUp still recalls prompt history", async () => {
+	const { input, recalls, requests, press, settle } = install();
+	press("ArrowUp");
+	await settle();
+	requests[0]?.resolve(false);
+	await settle();
+	assertEquals(recalls, ["ArrowUp"]);
+	assertEquals(input.value, "recalled");
 });

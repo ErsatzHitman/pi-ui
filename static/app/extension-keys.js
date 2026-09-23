@@ -301,6 +301,7 @@ function applyKeyLocally(input, event) {
 			return;
 		case "ArrowLeft":
 		case "ArrowUp": {
+			if (replayHistoryKey(input, event)) return;
 			const caret = collapsed
 				? event.key === "ArrowUp"
 					? 0
@@ -311,6 +312,7 @@ function applyKeyLocally(input, event) {
 		}
 		case "ArrowRight":
 		case "ArrowDown": {
+			if (replayHistoryKey(input, event)) return;
 			const length = input.value.length;
 			const caret = collapsed
 				? event.key === "ArrowDown"
@@ -323,6 +325,29 @@ function applyKeyLocally(input, event) {
 		default:
 			if (event.key.length === 1) replaceSelection(input, event.key, start, end);
 	}
+}
+
+/** Plays an unconsumed plain ArrowUp/ArrowDown back through `prompt-box.tsx`'s
+ * own keydown handling (prompt history recall), the same non-bubbling replay
+ * Enter uses: that handler stood down for the original event (see
+ * `takesPromptKey`) so a listener could see it first. Returns whether history
+ * took it. */
+function replayHistoryKey(input, event) {
+	if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return false;
+	if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return false;
+	const replay = new KeyboardEvent("keydown", {
+		key: event.key,
+		code: event.code,
+		bubbles: false,
+		cancelable: true,
+	});
+	replaying = true;
+	try {
+		input.dispatchEvent(replay);
+	} finally {
+		replaying = false;
+	}
+	return replay.defaultPrevented;
 }
 
 /** Replicates `prompt-box.tsx`'s own inline Escape-blurs-the-prompt handling,
@@ -419,19 +444,31 @@ async function drainPendingKeys() {
  * too, so fast typing (two keydowns inside one round trip) is applied in
  * order rather than the later round trip overwriting the earlier key.
  */
-function handlePromptLevelKeydown(event) {
-	if (event.defaultPrevented || event.isComposing) return false;
+/**
+ * Whether `handlePromptLevelKeydown` will take this keydown (forward it, or
+ * queue it behind a forward in flight). Exposed on `window.piUi.extensionKeys`
+ * so `prompt-box.tsx`'s own target-phase ArrowUp/ArrowDown history recall
+ * stands down for it: that handler runs on the textarea before this module's
+ * `document` listener, and recalling history there first would preventDefault()
+ * the arrow before a manage-mode listener (`/bg`, `/subagents`) ever saw it.
+ * An unconsumed arrow is replayed into that handler (`replayHistoryKey`).
+ */
+export function takesPromptKey(event) {
+	if (replaying || event.defaultPrevented || event.isComposing) return false;
 	if (!focusInScope()) return false;
 	const input = promptInput();
 	const fromPrompt = input !== undefined && event.target === input;
-	if (pendingKeys.length > 0 || draining) {
-		if (!fromPrompt || !isOrderedKey(event)) return false;
-	} else {
-		if (!promptLevelInputActive()) return false;
-		const promptEmpty = !input || input.value.length === 0;
-		if (!isForwardCandidate(event, promptEmpty)) return false;
-		if (encodeKeyEvent(event) === null) return false;
-	}
+	if (pendingKeys.length > 0 || draining) return fromPrompt && isOrderedKey(event);
+	if (!promptLevelInputActive()) return false;
+	const promptEmpty = !input || input.value.length === 0;
+	if (!isForwardCandidate(event, promptEmpty)) return false;
+	return encodeKeyEvent(event) !== null;
+}
+
+function handlePromptLevelKeydown(event) {
+	if (!takesPromptKey(event)) return false;
+	const input = promptInput();
+	const fromPrompt = input !== undefined && event.target === input;
 	event.preventDefault();
 	pendingKeys.push({ event, fromPrompt });
 	if (!draining) void drainPendingKeys();
