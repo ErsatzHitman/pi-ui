@@ -1,5 +1,10 @@
 import type { SessionTransitionState } from "../agent/session-transition-controller.ts";
 import { appCommandCatalog } from "../commands/catalog.ts";
+import {
+	type ExtensionChannelSnapshot,
+	type PiUiElement,
+	piUiDialogId,
+} from "../extension-surface-types.ts";
 import { activeKeybind } from "../keybinds.ts";
 import { sessionPerformance } from "../perf/session-performance.ts";
 import type { AvailableUpdate } from "../update-check.ts";
@@ -79,6 +84,18 @@ export type AppExtensionWidget = {
 	lines: readonly string[];
 	placement: "aboveEditor" | "belowEditor";
 };
+/**
+ * The interactive working indicator an extension configured via
+ * `ctx.ui.setWorkingIndicator()`. `undefined` (the field itself, not this
+ * type) means "restore the default animated spinner"; `frames: []` means
+ * "hide the indicator glyph entirely" (the working message/text can still
+ * show); `frames.length === 1` is a static glyph; more frames cycle at
+ * `intervalMs` (client-rendered — see `prompt-status.tsx`).
+ */
+export type AppExtensionWorkingIndicator = {
+	frames: readonly string[];
+	intervalMs?: number;
+};
 export type AppLlamaModel = { id: string; status: string };
 export type AppLlamaDialog = {
 	models: AppLlamaModel[];
@@ -146,7 +163,14 @@ export type UiCommitEffect =
 	| { type: "restore-model-picker" }
 	| {
 			type: "dialog";
-			id: "auth-dialog" | "extension-dialog" | "llama-dialog" | "tree-dialog";
+			// `(string & {})` keeps literal autocomplete for the fixed dialog ids
+			// while still accepting a PIUI sheet's dynamically slugged id.
+			id:
+				| "auth-dialog"
+				| "extension-dialog"
+				| "llama-dialog"
+				| "tree-dialog"
+				| (string & {});
 			open: boolean;
 	  }
 	| { type: "document-title"; title: string }
@@ -188,7 +212,9 @@ export type AppStateSnapshot = Readonly<{
 	extensionDialog: AppExtensionDialog | undefined;
 	extensionStatuses: readonly AppExtensionStatus[];
 	extensionWidgets: readonly AppExtensionWidget[];
-	extensionWorkingIndicator: string | undefined;
+	extensionElements: readonly PiUiElement[];
+	extensionChannels: readonly ExtensionChannelSnapshot[];
+	extensionWorkingIndicator: AppExtensionWorkingIndicator | undefined;
 	extensionWorkingMessage: string | undefined;
 	extensionWorkingVisible: boolean;
 	llamaDialog: AppLlamaDialog | undefined;
@@ -253,6 +279,9 @@ function uniqueStrings(values: string[]): string[] {
 	unique.delete("");
 	return [...unique];
 }
+function isPiUiSheetElement(element: PiUiElement): boolean {
+	return element.placement === "sheet" || element.placement === "screen";
+}
 
 /** Mutable authoritative application state. It has no renderer or transport dependency. */
 export class AppStore {
@@ -273,7 +302,9 @@ export class AppStore {
 	extensionDialog: AppExtensionDialog | undefined;
 	extensionStatuses: AppExtensionStatus[] = [];
 	extensionWidgets: AppExtensionWidget[] = [];
-	extensionWorkingIndicator: string | undefined;
+	extensionElements: PiUiElement[] = [];
+	extensionChannels: ExtensionChannelSnapshot[] = [];
+	extensionWorkingIndicator: AppExtensionWorkingIndicator | undefined;
 	extensionWorkingMessage: string | undefined;
 	extensionWorkingVisible = true;
 	llamaDialog: AppLlamaDialog | undefined;
@@ -373,7 +404,18 @@ export class AppStore {
 				...widget,
 				lines: [...widget.lines],
 			})),
-			extensionWorkingIndicator: this.extensionWorkingIndicator,
+			extensionElements: this.extensionElements.map((element) =>
+				structuredClone(element),
+			),
+			extensionChannels: this.extensionChannels.map((channel) =>
+				structuredClone(channel),
+			),
+			extensionWorkingIndicator: this.extensionWorkingIndicator
+				? {
+						...this.extensionWorkingIndicator,
+						frames: [...this.extensionWorkingIndicator.frames],
+					}
+				: undefined,
 			extensionWorkingMessage: this.extensionWorkingMessage,
 			extensionWorkingVisible: this.extensionWorkingVisible,
 			llamaDialog: this.llamaDialog ? structuredClone(this.llamaDialog) : undefined,
@@ -663,10 +705,39 @@ export class AppStore {
 		}));
 		this.commit();
 	}
+	setExtensionElements(elements: PiUiElement[]): void {
+		// A `sheet`/`screen` element's `<dialog>` only exists in the DOM once
+		// rendered, and a freshly created `<dialog>` needs an explicit
+		// `showModal()` to actually appear (mirroring `setAuthDialog`/
+		// `setExtensionDialog`'s "dialog" effect). Diff against the previous
+		// element list so only elements that are *newly* present get an open
+		// effect — an already-open sheet just re-renders in place on every
+		// commit and must not be told to reopen.
+		const previouslyOpenSheetIds = new Set(
+			this.extensionElements.filter(isPiUiSheetElement).map(piUiDialogId),
+		);
+		this.extensionElements = elements.map((element) => structuredClone(element));
+		this.commit();
+		for (const element of elements.filter(isPiUiSheetElement)) {
+			const id = piUiDialogId(element);
+			if (!previouslyOpenSheetIds.has(id)) {
+				// `pickersChanged()` is what makes `patchDirtyRegions` actually run
+				// `pickerEffectScripts` (where "dialog" effects are turned into a
+				// `showModal()` script) — matching `setAuthDialog`/
+				// `setExtensionDialog`'s identical pairing.
+				this.presentation?.pickersChanged();
+				this.presentation?.requestCommit({ type: "dialog", id, open: true });
+			}
+		}
+	}
+	setExtensionChannels(channels: ExtensionChannelSnapshot[]): void {
+		this.extensionChannels = channels.map((channel) => structuredClone(channel));
+		this.commit();
+	}
 	setExtensionWorking(options: {
 		message?: string;
 		visible: boolean;
-		indicator?: string;
+		indicator?: AppExtensionWorkingIndicator;
 	}): void {
 		this.extensionWorkingMessage = options.message;
 		this.extensionWorkingVisible = options.visible;
