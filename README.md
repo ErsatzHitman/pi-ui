@@ -286,16 +286,10 @@ terminal:
   these extensions onto their `custom()` fallback too (their own live-RPC-client check keys off
   the RPC family of modes), pi-ui sets the `PI_UI_BRIDGE=1` environment variable before any
   extension loads as a documented host-capability signal. A bridge helper opts in by honouring it
-  at both of its gates — the top-level "use the bridge at all" check and its internal wire-delivery
-  check (patching only the first leaves panels silently undelivered):
-
-  ```ts
-  const hostForcesBridge = () => process.env?.PI_UI_BRIDGE === "1";
-  // bridgeIsLive(ctx): if (hostForcesBridge()) return true;  …existing RPC-mode check
-  // isTui():           if (hostForcesBridge()) return false; …existing "tui" check
-  ```
-
-  Nothing requires it: an extension that ignores the marker still works, as a terminal surface.
+  at both of its gates — `bridgeIsLive()` returns `true` and its internal `isTui()` wire-delivery
+  check returns `false` when `process.env.PI_UI_BRIDGE === "1"` (patching only the first leaves
+  panels silently undelivered). Nothing requires it: an extension that ignores the marker still
+  works, as a terminal surface.
 - Slash commands — every built-in plus every extension-registered command — get argument
   completions and native handling (pickers, dialogs, or notices) instead of being sent to the
   model as chat text.

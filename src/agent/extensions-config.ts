@@ -21,14 +21,12 @@ import { isRecord, isString } from "../utils/type-guards.ts";
  * `hasUI`, so binding `"tui"` alone would push them onto their `custom()`/TUI path
  * instead of their native PIUI sheet. To keep their HTML path under `"tui"`, pi-ui
  * sets `process.env.PI_UI_BRIDGE = "1"` before any extension loads (see
- * `applyExtensionsHostMarker` below) as a documented host-capability signal; a
- * small patch to the extension's own `lib/bridge.ts` (never applied to the
- * user's real `~/.pi/agent` — see `scratchpad/r4-bridge.patch`) makes both
- * `bridgeIsLive()` (the extension's top-level "use the bridge at all" gate)
- * and the bridge's own internal wire-delivery gate honor it — both are
- * needed: patching only the former leaves a bridge-aware panel built but
- * silently undelivered, since the delivery gate still thinks it's a literal
- * TUI.
+ * `applyExtensionsHostMarker` below) as a documented host-capability signal. An
+ * extension's bridge helper opts in by honouring it in both `bridgeIsLive()`
+ * (its top-level "use the bridge at all" gate) and its own internal
+ * wire-delivery gate — both are needed: patching only the former leaves a
+ * bridge-aware panel built but silently undelivered, since the delivery gate
+ * still thinks it's a literal TUI (see README "extension compatibility").
  */
 export type ExtensionsMode = "tui" | "rpc";
 
