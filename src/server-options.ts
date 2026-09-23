@@ -88,12 +88,12 @@ options:
       --host <hostname>     listen hostname (default: ${defaultServerHostname}; env: PI_UI_HOST)
       --port <port>         listen port (default: ${defaultServerPort}; env: PI_UI_PORT)
       --auth-token <token>  require this bearer token on every request (env: PI_UI_AUTH_TOKEN).
-                             Strongly recommended with --host set to anything other than
-                             127.0.0.1/::1/localhost, since that exposes pi-ui to your whole
-                             LAN. Open http://<host>:<port>/?token=<token> once per browser;
-                             pi-ui remembers it in a cookie after that.
-      --version              show the version
-  -h, --help                 show this help`;
+                            Strongly recommended with --host set to anything other than
+                            127.0.0.1/::1/localhost, since that exposes pi-ui to your whole
+                            LAN. Open http://<host>:<port>/?token=<token> once per browser;
+                            pi-ui remembers it in a cookie after that.
+      --version             show the version
+  -h, --help                show this help`;
 
 function parseHostname(value: string | undefined, source: string): string {
 	const hostname = value?.trim();

@@ -1664,3 +1664,21 @@ test("RuntimeController hides the internal pi_ui_event reverse channel from the 
 	assertEquals(names.includes("visible"), true);
 	await controller.dispose();
 });
+
+test("RuntimeController rejects /export targets that name a directory", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime("/sessions/current.jsonl");
+	const controller = await activate(state, [fake], "/workspace");
+
+	for (const target of ["..", ".", "../.."]) {
+		assertEquals(await controller.prompt(`/export ${target}`), true);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		assertEquals(
+			state.messages.at(-1)?.text.startsWith("Usage: /export"),
+			true,
+			target,
+		);
+	}
+	assertEquals(fake.promptInputs, []);
+	await controller.dispose();
+});

@@ -686,6 +686,14 @@ export class RuntimeController {
 		// server process can reach. This also lets the download link below reuse the
 		// existing, already-workspace-scoped workspace file download route.
 		const requestedName = trimmed ? basename(trimmed) : undefined;
+		// `basename` leaves "." and ".." untouched; they name directories, not an export file.
+		if (requestedName === "." || requestedName === "..") {
+			this.state.appendMessage(
+				"notice",
+				"Usage: /export [file.html | file.jsonl] — the file is written to the workspace folder.",
+			);
+			return;
+		}
 		const jsonl = requestedName
 			? extname(requestedName).toLowerCase() === ".jsonl"
 			: false;
@@ -695,10 +703,15 @@ export class RuntimeController {
 			const outputPath = jsonl
 				? exportSessionToJsonl(sessionManager, target)
 				: await exportSessionToHtml(sessionManager, undefined, target);
+			// The download route resolves `path` against the store's workspace root; only link
+			// when the session's cwd is that same folder, so the link can never 404.
+			const downloadable =
+				resolvePath(cwd) === resolvePath(this.state.workspacePath);
 			const downloadUrl = `${endpoints.workspaceFileContent}?download=1&path=${encodeURIComponent(basename(outputPath))}`;
+			const exported = `Exported session to ${formatHomePath(outputPath)}`;
 			this.state.appendMessage(
 				"system",
-				`Exported session to ${formatHomePath(outputPath)}\n${downloadUrl}`,
+				downloadable ? `${exported}\n${downloadUrl}` : exported,
 			);
 		} catch (error) {
 			this.state.appendMessage(
