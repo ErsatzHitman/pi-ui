@@ -420,7 +420,9 @@ export class RuntimeController {
 		// sent to the model as plain chat text instead of running or reporting "unsupported".
 		// Give all of them a native web-UI handling here instead.
 		const parsed = parseSlashCommand(trimmed);
-		if (parsed) {
+		// A first token containing another "/" is a path ("/Users/me/app.ts fails"), never a
+		// command name — send it to the model as ordinary text.
+		if (parsed && !parsed.name.includes("/")) {
 			if (isBuiltinCommandName(parsed.name)) {
 				this.dispatchBuiltinCommand(parsed.name, parsed.args);
 				return true;

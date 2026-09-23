@@ -1477,6 +1477,19 @@ test("RuntimeController reports an unrecognized slash command without sending it
 	await controller.dispose();
 });
 
+test("RuntimeController sends a prompt that starts with a file path to the model", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/Users/me/app.ts fails to compile"), true);
+
+	assertEquals(fake.promptInputs, [
+		{ text: "/Users/me/app.ts fails to compile", streamingBehavior: undefined },
+	]);
+	await controller.dispose();
+});
+
 test("RuntimeController forwards a registered extension slash command to the model", async () => {
 	const state = new AppStore();
 	const fake = fakeRuntime();
