@@ -160,6 +160,14 @@ export function renderPage(
 					data-on:pi-ui-display-refresh={`@post('${endpoints.displayRefresh}', {
 						payload: { clientId: '${displayClientId}', hz: evt.detail.hz },
 					})`}
+					data-on:pi-ui-terminal-viewport={`@post('${endpoints.terminalViewport}', {
+						payload: {
+							clientId: '${displayClientId}',
+							cols: evt.detail.cols,
+							rows: evt.detail.rows,
+						},
+						requestCancellation: 'disabled',
+					})`}
 					data-on:pi-ui-session-performance={`@post('${endpoints.sessionPerformanceClient}', { payload: evt.detail })`}
 					data-on:pi-ui-workspace-review-preferences={`
 						$workspaceReviewPreferences = {
