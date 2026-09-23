@@ -1592,6 +1592,26 @@ test("RuntimeController reports /bug and /quit as unsupported without prompting 
 	await controller.dispose();
 });
 
+test("RuntimeController confirms a successful /clone (round-4 O5)", async () => {
+	const state = new AppStore();
+	const source = fakeRuntime("/sessions/source.jsonl");
+	const cloned = fakeRuntime("/sessions/fork.jsonl");
+	// A non-streaming, persisted source takes `executeSessionResume`'s in-place
+	// `switchSession` branch instead (not covered by any test fixture here), so mark it
+	// streaming to exercise the same open-a-new-runtime path `forkSessionToWorkspace`'s test
+	// does, and consume the second fixture.
+	source.setStreaming(true);
+	const controller = await activate(state, [source, cloned], "/workspace");
+
+	assertEquals(await controller.prompt("/clone"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(source.promptInputs, []);
+	assertEquals(state.currentSessionPath, "/sessions/fork.jsonl");
+	assertEquals(state.messages.at(-1)?.text, "Session cloned.");
+	await controller.dispose();
+});
+
 test("RuntimeController reports temporary sessions cannot be cloned without prompting the model", async () => {
 	const state = new AppStore();
 	const fake = fakeRuntime();
@@ -1665,6 +1685,7 @@ test("RuntimeController starts a new session for /new without prompting the mode
 	await new Promise((resolve) => setTimeout(resolve, 0));
 
 	assertEquals(fake.promptInputs, []);
+	assertEquals(state.messages.at(-1)?.text, "Started a new session.");
 	await controller.dispose();
 });
 

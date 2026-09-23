@@ -565,7 +565,7 @@ export class RuntimeController {
 				this.showChangelog();
 				return;
 			case "clone":
-				void this.cloneSession();
+				void this.dispatchCloneCommand();
 				return;
 			case "trust":
 				void this.trustProject();
@@ -577,7 +577,7 @@ export class RuntimeController {
 				this.openLogout();
 				return;
 			case "new":
-				void this.newSession();
+				void this.dispatchNewCommand();
 				return;
 			case "compact":
 				void this.compact(args || undefined);
@@ -662,6 +662,26 @@ export class RuntimeController {
 		// new title in place instead, so that caller doesn't want this message.
 		if (await this.renameSession(path, title)) {
 			this.state.appendMessage("system", `Session renamed to "${title}".`);
+		}
+	}
+
+	/**
+	 * `/clone` itself; `cloneSession()` stays callable without a confirmation notice for other
+	 * (non-command) callers. Both of `cloneSession()`'s own failure paths ("cancelled"/"busy"/
+	 * "error") already report themselves — the transition overlay for "busy"/"error", its own
+	 * "Temporary sessions cannot be cloned." notice for "cancelled" — so only "success" gets a
+	 * new message here, matching `/name`'s pattern (round-4 O5).
+	 */
+	private async dispatchCloneCommand(): Promise<void> {
+		if ((await this.cloneSession()).status === "success") {
+			this.state.appendMessage("system", "Session cloned.");
+		}
+	}
+
+	/** `/new`'s confirmation; see `dispatchCloneCommand` (round-4 O5). */
+	private async dispatchNewCommand(): Promise<void> {
+		if ((await this.newSession()).status === "success") {
+			this.state.appendMessage("system", "Started a new session.");
 		}
 	}
 
