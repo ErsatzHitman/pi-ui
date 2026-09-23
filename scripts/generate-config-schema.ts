@@ -6,6 +6,12 @@ import { appConfigSchemaUrl } from "../src/config-schema.ts";
 import { defaultFonts, FONT_OPTIONS } from "../src/fonts.ts";
 import { keybindIds } from "../src/keybinds.ts";
 import {
+	liveWorkspaceRatioDefault,
+	liveWorkspaceRatioMax,
+	liveWorkspaceRatioMin,
+	liveWorkspaceTabs,
+} from "../src/live-workspace-types.ts";
+import {
 	sessionSidebarWidthDefault,
 	sessionSidebarWidthMax,
 	sessionSidebarWidthMin,
@@ -162,6 +168,32 @@ const schema = Type.Object(
 				{
 					description:
 						"Keyboard shortcut overrides by action id, for example ctrl O, ctrl alt O, or alt shift T.",
+					additionalProperties: false,
+				},
+			),
+		),
+		liveWorkspace: Type.Optional(
+			Type.Object(
+				{
+					open: Type.Optional(
+						Type.Boolean({
+							default: false,
+							description: "Open the Live Workspace pane on desktop.",
+						}),
+					),
+					ratio: Type.Optional(
+						Type.Number({
+							minimum: liveWorkspaceRatioMin,
+							maximum: liveWorkspaceRatioMax,
+							default: liveWorkspaceRatioDefault,
+						}),
+					),
+					tab: Type.Optional(
+						Type.Union(liveWorkspaceTabs.map((tab) => Type.Literal(tab))),
+					),
+				},
+				{
+					description: "Live Workspace pane preferences.",
 					additionalProperties: false,
 				},
 			),

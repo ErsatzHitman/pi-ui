@@ -13,6 +13,7 @@ import { renderDebugOverlay } from "./debug.tsx";
 import { DisplayRefreshClients } from "./display-refresh-clients.ts";
 import { renderExtensionDialogContent } from "./extension-dialog.tsx";
 import { renderExtensionWidgets } from "./extension-widgets.tsx";
+import { renderLiveWorkspaceData } from "./live-workspace.tsx";
 import { renderLlamaDialogContent } from "./llama-dialog.tsx";
 import {
 	MessageRenderService,
@@ -49,6 +50,7 @@ type DirtyRegions = {
 	sessions: boolean;
 	sessionSidebar: boolean;
 	workspaceReview: boolean;
+	liveWorkspace: boolean;
 };
 
 export class UiRenderer implements AppStorePresentation {
@@ -63,6 +65,7 @@ export class UiRenderer implements AppStorePresentation {
 	private sessionsDirty = false;
 	private sessionSidebarDirty = false;
 	private workspaceReviewDirty = false;
+	private liveWorkspaceDirty = false;
 	private replaceTranscriptOnCommit = false;
 
 	constructor(
@@ -156,11 +159,13 @@ export class UiRenderer implements AppStorePresentation {
 			sessions: this.sessionsDirty,
 			sessionSidebar: this.sessionSidebarDirty,
 			workspaceReview: this.workspaceReviewDirty,
+			liveWorkspace: this.liveWorkspaceDirty,
 		};
 		this.pickersDirty = false;
 		this.sessionsDirty = false;
 		this.sessionSidebarDirty = false;
 		this.workspaceReviewDirty = false;
+		this.liveWorkspaceDirty = false;
 		if (this.hub.clientCount > 0) {
 			const state = this.store.snapshot();
 			if (this.replaceTranscriptOnCommit) {
@@ -218,6 +223,17 @@ export class UiRenderer implements AppStorePresentation {
 				[],
 			);
 		}
+		if (dirty.liveWorkspace) {
+			this.hub.patchView(
+				renderLiveWorkspaceData(
+					snapshot.liveWorkspace,
+					snapshot.liveWorkspacePreferences,
+					snapshot.usage,
+				),
+				"{}",
+				[],
+			);
+		}
 	}
 	messageAppended(id: string): void {
 		if (this.hub.clientCount === 0) return;
@@ -259,6 +275,9 @@ export class UiRenderer implements AppStorePresentation {
 	}
 	workspaceReviewChanged(): void {
 		this.workspaceReviewDirty = true;
+	}
+	liveWorkspaceChanged(): void {
+		this.liveWorkspaceDirty = true;
 	}
 	codeThemeChanged(): void {
 		if (this.hub.clientCount > 0) this.messages.codeThemeChanged();
@@ -392,6 +411,11 @@ export class UiRenderer implements AppStorePresentation {
 					snapshot.workspaceTreeRevision,
 					snapshot.workspaceReview,
 					snapshot.workspaceReviewPreferences,
+				) +
+				renderLiveWorkspaceData(
+					snapshot.liveWorkspace,
+					snapshot.liveWorkspacePreferences,
+					snapshot.usage,
 				),
 			signals: this.renderSignals(snapshot, overrides),
 			scripts: this.initialDialogScripts(snapshot),

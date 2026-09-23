@@ -9,6 +9,7 @@ import { displayRefreshRoutes } from "./routes/display-refresh.ts";
 import { extensionUiRoutes } from "./routes/extension-ui.ts";
 import { fileRoutes } from "./routes/files.ts";
 import { fontRoutes } from "./routes/fonts.ts";
+import { liveWorkspaceRoutes } from "./routes/live-workspace.ts";
 import { llamaRoutes } from "./routes/llama.ts";
 import { modelRoutes } from "./routes/models.ts";
 import { promptRoutes } from "./routes/prompt.ts";
@@ -33,6 +34,7 @@ export const appRoutes: RouteMap<RouteContext> = {
 	...sessionSidebarRoutes,
 	...workspaceRoutes,
 	...workspaceReviewRoutes,
+	...liveWorkspaceRoutes,
 	...displayPreferenceRoutes,
 	...modelRoutes,
 	...authRoutes,

@@ -51,6 +51,8 @@ import {
 } from "./builtin-commands.ts";
 import { detectCacheMiss, formatCacheMissNotice } from "./cache-miss.ts";
 import { ExtensionUiController } from "./extension-ui-controller.ts";
+import { LiveWorkspaceController } from "./live-workspace-controller.ts";
+import { createLiveWorkspaceHostExtension } from "./live-workspace-host-extension.ts";
 import { LlamaController } from "./llama-controller.ts";
 import { llamaProviderExtension } from "./llama-provider-extension.ts";
 import { ModelController } from "./model-controller.ts";
@@ -199,6 +201,7 @@ export class RuntimeController {
 		private readonly preparedSessions: Promise<PreparedSessionList>,
 		sessionDir: string | undefined,
 		private readonly activationOptions: RuntimeControllerActivationOptions,
+		private readonly liveWorkspace: LiveWorkspaceController,
 	) {
 		this.dependencies =
 			activationOptions.dependencies ?? runtimeControllerDependencies;
@@ -269,6 +272,15 @@ export class RuntimeController {
 	): Promise<RuntimeController> {
 		const dependencies = options.dependencies ?? runtimeControllerDependencies;
 		const sessionsPromise = dependencies.prepareSessions();
+		// One controller and one derived extension-factory list per RuntimeController
+		// instance: `createRuntime` (below) is reused for every session this controller
+		// creates, forks, resumes, or switches to, so the same host extension — and
+		// therefore the same LiveWorkspaceController — backs the pane across all of them.
+		const liveWorkspace = new LiveWorkspaceController();
+		const sessionExtensionFactories = [
+			...extensionFactories,
+			createLiveWorkspaceHostExtension(liveWorkspace),
+		];
 		const createRuntime: CreateAgentSessionRuntimeFactory = async ({
 			cwd,
 			sessionManager,
@@ -279,7 +291,9 @@ export class RuntimeController {
 				() =>
 					createAgentSessionServices({
 						cwd,
-						resourceLoaderOptions: { extensionFactories },
+						resourceLoaderOptions: {
+							extensionFactories: sessionExtensionFactories,
+						},
 					}),
 			);
 			// pi-ui resizes images with Bun.Image because pi's Photon resizer is not
@@ -337,6 +351,7 @@ export class RuntimeController {
 				sessionsPromise,
 				sessionDir,
 				options,
+				liveWorkspace,
 			);
 			host.bindRuntimeCallbacks(runtime);
 			await host.bindSessionExtensions();
@@ -1159,6 +1174,11 @@ export class RuntimeController {
 		return true;
 	}
 
+	clearLiveWorkspaceActivity(): void {
+		this.liveWorkspace.clearActivity();
+		this.publishLiveWorkspace();
+	}
+
 	async compact(customInstructions?: string): Promise<boolean> {
 		try {
 			await this.runtime.session.compact(customInstructions);
@@ -1510,6 +1530,12 @@ export class RuntimeController {
 			this.handleBackgroundEvent(backgroundSession, event),
 		);
 		this.backgroundSessions.register(sessionFile, backgroundSession);
+		this.liveWorkspace.setBackgroundSession(
+			sessionFile,
+			"running",
+			formatHomePath(this.runtime.session.sessionManager.getCwd()),
+			Date.now(),
+		);
 		this.state.setCurrentSessionPath(undefined);
 		this.catalog.mergeCurrentStatuses();
 		void this.catalog.refreshPath(sessionFile);
@@ -1521,6 +1547,10 @@ export class RuntimeController {
 	): void {
 		if (event.type === "agent_start") backgroundSession.observedRunning = true;
 		if (event.type === "agent_settled") backgroundSession.observedRunning = false;
+		const sessionPath =
+			backgroundSession.runtime.session.sessionManager.getSessionFile();
+		this.liveWorkspace.recordEvent(event, { background: true, sessionPath });
+		this.publishLiveWorkspace();
 		const outcome = this.reduceEvent(
 			event,
 			backgroundSession.state,
@@ -1543,10 +1573,22 @@ export class RuntimeController {
 				backgroundSession.runtime.session.sessionManager.getSessionFile();
 			if (path) {
 				this.catalog.agentCompleted(path);
+				this.liveWorkspace.markBackgroundSessionCompleted(path);
+				this.publishLiveWorkspace();
 				void this.catalog.refreshPath(path);
 			}
 			return;
 		}
+	}
+
+	/** Publishes the current LiveWorkspaceController snapshot into AppStore. */
+	private publishLiveWorkspace(): void {
+		this.state.setLiveWorkspace(
+			this.liveWorkspace.snapshot({
+				queuedSteering: this.state.queuedSteeringMessages.length,
+				queuedFollowUp: this.state.queuedFollowUpMessages.length,
+			}),
+		);
 	}
 
 	private notifyRuntimeDone(runtime: AgentSessionRuntime, background: boolean): void {
@@ -1580,6 +1622,9 @@ export class RuntimeController {
 		this.unsubscribeBackgroundSession(backgroundSession);
 		this.adoptRuntime(backgroundSession.runtime, backgroundSession);
 		restoreSessionEventToolState(this.tools, backgroundSession.tools);
+		const sessionFile =
+			backgroundSession.runtime.session.sessionManager.getSessionFile();
+		if (sessionFile) this.liveWorkspace.removeBackgroundSession(sessionFile);
 		this.bindSessionState({ resetToolState: false, syncSessions: false });
 		this.state.restoreChat(backgroundSession.state.snapshot());
 		this.catalog.mergeCurrentStatuses();
@@ -1614,6 +1659,8 @@ export class RuntimeController {
 			this.state.setCurrentSessionPath(session.sessionManager.getSessionFile());
 			this.state.setTemporarySession(!session.sessionManager.isPersisted());
 			if (resetToolState) clearSessionEventToolState(this.tools);
+			this.liveWorkspace.resetForegroundSession();
+			this.publishLiveWorkspace();
 			this.unsubscribe = session.subscribe((event) => this.handleEvent(event));
 			this.state.setActivityText(
 				session.isStreaming || this.foregroundObservedRunning
@@ -1717,6 +1764,8 @@ export class RuntimeController {
 				);
 				this.updateSessionCatalogFromEvent(event, this.runtime);
 				this.scheduleAutoTitleAfterUserMessage(this.runtime, event);
+				this.liveWorkspace.recordEvent(event, { background: false });
+				this.publishLiveWorkspace();
 				if (this.foregroundObservedRunning && !this.state.activityText) {
 					this.state.setActivityText("Working...");
 				}

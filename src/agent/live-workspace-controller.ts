@@ -1,0 +1,461 @@
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+
+import type { ExtensionChannelSnapshot } from "../extension-surface-types.ts";
+import {
+	liveWorkspaceActivityLimit,
+	liveWorkspaceActivityTextLimit,
+	liveWorkspaceChannelJsonLimit,
+	liveWorkspaceChannelRowLimit,
+	liveWorkspaceToolPreviewLimit,
+	truncateForDisplay,
+	type LiveWorkspaceActiveTool,
+	type LiveWorkspaceActivityEntry,
+	type LiveWorkspaceAgentRow,
+	type LiveWorkspaceSnapshot,
+	type LiveWorkspaceTurnState,
+} from "../live-workspace-types.ts";
+import type { JsonValue } from "../utils/json-types.ts";
+import { asRecord, isNumber, isString } from "../utils/type-guards.ts";
+import { toolTitle } from "./tool-presentation.ts";
+
+export type LiveWorkspaceEventContext = Readonly<{
+	background: boolean;
+	sessionPath?: string;
+}>;
+
+export type LiveWorkspaceSnapshotInput = Readonly<{
+	queuedSteering: number;
+	queuedFollowUp: number;
+}>;
+
+type RetryState = { attempt: number; maxAttempts: number; at: number };
+type CompactionState = { reason: "manual" | "threshold" | "overflow" };
+type WaitingState = { kind: string; title: string | undefined };
+type ActiveToolState = {
+	toolName: string;
+	startedAt: number;
+	summary?: string;
+	preview?: string;
+};
+
+/**
+ * Aggregates cross-cutting "what's happening now" state for the Live Workspace pane: turn
+ * phase, in-flight tool calls, background-session/extension-channel rosters, and a bounded
+ * activity log of the session events the core reducer otherwise drops (server-arch.md §2).
+ *
+ * Pure state, no AppStore/SDK dependency — `RuntimeController` feeds it raw `AgentSessionEvent`s
+ * and host-extension callbacks, then reads `snapshot()` to publish into `AppStore`. This mirrors
+ * `reduceSessionEvent`'s "pure function + fake sink" shape so it stays unit-testable in isolation
+ * (see testing.md §1.3).
+ */
+export class LiveWorkspaceController {
+	private revision = 0;
+	private running = false;
+	private retry: RetryState | undefined;
+	private compaction: CompactionState | undefined;
+	private waiting: WaitingState | undefined;
+	private readonly activeTools = new Map<string, ActiveToolState>();
+	private readonly agents = new Map<string, LiveWorkspaceAgentRow>();
+	private readonly backgroundToolCounts = new Map<string, number>();
+	private readonly channels = new Map<string, ExtensionChannelSnapshot>();
+	private activity: LiveWorkspaceActivityEntry[] = [];
+	private nextActivityId = 0;
+
+	/** Feeds one raw session event. Never throws — a malformed event is logged, not fatal. */
+	recordEvent(event: AgentSessionEvent, context: LiveWorkspaceEventContext): void {
+		try {
+			if (context.background)
+				this.recordBackgroundEvent(event, context.sessionPath);
+			else this.recordForegroundEvent(event);
+		} catch (error) {
+			this.pushActivity(
+				"error",
+				`Live Workspace could not record an event: ${errorText(error)}`,
+				context.background,
+			);
+		}
+		this.revision += 1;
+	}
+
+	private recordForegroundEvent(event: AgentSessionEvent): void {
+		switch (event.type) {
+			case "agent_start":
+				this.running = true;
+				this.retry = undefined;
+				this.compaction = undefined;
+				break;
+			case "agent_settled":
+				this.running = false;
+				this.retry = undefined;
+				this.compaction = undefined;
+				this.waiting = undefined;
+				break;
+			case "auto_retry_start":
+				this.retry = {
+					attempt: event.attempt,
+					maxAttempts: event.maxAttempts,
+					at: Date.now() + Math.max(0, event.delayMs),
+				};
+				this.pushActivity(
+					"retry",
+					`Retrying (${event.attempt}/${event.maxAttempts}) after: ${event.errorMessage}`,
+					false,
+				);
+				break;
+			case "auto_retry_end":
+				this.retry = undefined;
+				if (!event.success) {
+					this.pushActivity(
+						"retry",
+						`Retry failed: ${event.finalError ?? "unknown error"}`,
+						false,
+					);
+				}
+				break;
+			case "compaction_start":
+				this.compaction = { reason: event.reason };
+				this.pushActivity(
+					"compaction",
+					`Compacting context (${event.reason})`,
+					false,
+				);
+				break;
+			case "compaction_end":
+				this.compaction = undefined;
+				this.pushActivity(
+					"compaction",
+					event.aborted ? "Compaction aborted" : "Compaction finished",
+					false,
+				);
+				break;
+			case "turn_end":
+				this.pushActivity("turn", "Turn finished", false);
+				break;
+			case "session_info_changed":
+				if (event.name) {
+					this.pushActivity(
+						"session",
+						`Session renamed to "${event.name}"`,
+						false,
+					);
+				}
+				break;
+			case "thinking_level_changed":
+				this.pushActivity(
+					"model",
+					`Thinking level changed to ${event.level}`,
+					false,
+				);
+				break;
+			case "summarization_retry_scheduled":
+				this.pushActivity(
+					"retry",
+					`Summarization retry scheduled (${event.attempt}/${event.maxAttempts})`,
+					false,
+				);
+				break;
+			case "summarization_retry_attempt_start":
+				this.pushActivity(
+					"retry",
+					`Summarization retry attempt started (${event.source})`,
+					false,
+				);
+				break;
+			case "summarization_retry_finished":
+				this.pushActivity("retry", "Summarization retry finished", false);
+				break;
+			case "tool_execution_start":
+				this.activeTools.set(event.toolCallId, {
+					toolName: event.toolName,
+					startedAt: Date.now(),
+					// SAFETY: `toolTitle` only reads plain JSON-shaped fields off `args` (via
+					// `asRecord`) and tolerates any other shape, so the SDK's `any` is safe here.
+					summary: toolTitle(
+						"running",
+						event.toolName,
+						(event.args ?? null) as JsonValue,
+					),
+				});
+				break;
+			case "tool_execution_update": {
+				const tool = this.activeTools.get(event.toolCallId);
+				if (tool) tool.preview = summarizePartialResult(event.partialResult);
+				break;
+			}
+			case "tool_execution_end":
+				this.activeTools.delete(event.toolCallId);
+				break;
+			default:
+				break;
+		}
+	}
+
+	private recordBackgroundEvent(
+		event: AgentSessionEvent,
+		sessionPath: string | undefined,
+	): void {
+		if (!sessionPath) return;
+		if (event.type === "tool_execution_start") {
+			this.backgroundToolCounts.set(
+				sessionPath,
+				(this.backgroundToolCounts.get(sessionPath) ?? 0) + 1,
+			);
+		} else if (event.type === "tool_execution_end") {
+			const count = (this.backgroundToolCounts.get(sessionPath) ?? 0) - 1;
+			if (count > 0) this.backgroundToolCounts.set(sessionPath, count);
+			else this.backgroundToolCounts.delete(sessionPath);
+		} else if (event.type === "agent_settled") {
+			this.pushActivity("background", "Background session settled", true);
+		}
+	}
+
+	/** Registers or updates a pi-ui background session row (see runtime-controller.ts `BackgroundSession`). */
+	setBackgroundSession(
+		sessionPath: string,
+		status: "running" | "completed",
+		label: string,
+		startedAt: number,
+	): void {
+		this.agents.set(sessionPath, {
+			id: sessionPath,
+			kind: "background-session",
+			source: "pi-ui",
+			label,
+			status,
+			depth: 0,
+			startedAt,
+		});
+		this.revision += 1;
+	}
+
+	removeBackgroundSession(sessionPath: string): void {
+		this.agents.delete(sessionPath);
+		this.backgroundToolCounts.delete(sessionPath);
+		this.revision += 1;
+	}
+
+	/** Marks a tracked background session row as finished, leaving its other fields intact. */
+	markBackgroundSessionCompleted(sessionPath: string): void {
+		const agent = this.agents.get(sessionPath);
+		if (!agent || agent.kind !== "background-session") return;
+		this.agents.set(sessionPath, { ...agent, status: "completed" });
+		this.revision += 1;
+	}
+
+	/**
+	 * Clears the Now tab's turn phase and active-tool list when a different session becomes
+	 * the foreground session, so the previous session's state never bleeds into the new one.
+	 * Background rosters, extension channels, and the activity log are cross-session state and
+	 * are intentionally left alone.
+	 */
+	resetForegroundSession(): void {
+		this.running = false;
+		this.retry = undefined;
+		this.compaction = undefined;
+		this.waiting = undefined;
+		this.activeTools.clear();
+		this.revision += 1;
+	}
+
+	recordUiPromptStart(kind: string, title: string | undefined): void {
+		this.waiting = { kind, title };
+		this.revision += 1;
+	}
+
+	recordUiPromptEnd(): void {
+		this.waiting = undefined;
+		this.revision += 1;
+	}
+
+	recordModelSelect(modelId: string, source: string): void {
+		this.pushActivity("model", `Model changed to ${modelId} (${source})`, false);
+	}
+
+	recordThinkingSelect(level: string, previousLevel: string): void {
+		if (level === previousLevel) return;
+		this.pushActivity(
+			"model",
+			`Thinking level changed from ${previousLevel} to ${level}`,
+			false,
+		);
+	}
+
+	/**
+	 * Records the latest payload published on an extension `pi.events` channel. The payload is
+	 * untrusted extension output: it is defensively coerced to JSON and size-capped before it is
+	 * ever handed to a renderer (AGENTS.md non-negotiable).
+	 */
+	recordChannel(channel: string, payload: JsonValue): void {
+		const value = asDisplayableJson(payload);
+		this.channels.set(channel, { channel, payload: value, updatedAt: Date.now() });
+		const rows = deriveAgentRows(channel, value);
+		const rowIds = new Set(rows.map((row) => row.id));
+		for (const [id, row] of this.agents) {
+			if (row.source === channel && !rowIds.has(id)) this.agents.delete(id);
+		}
+		for (const row of rows) this.agents.set(row.id, row);
+		this.revision += 1;
+	}
+
+	clearActivity(): void {
+		this.activity = [];
+		this.revision += 1;
+	}
+
+	snapshot(input: LiveWorkspaceSnapshotInput): LiveWorkspaceSnapshot {
+		const activeTools: LiveWorkspaceActiveTool[] = [
+			...this.activeTools.entries(),
+		].map(([toolCallId, tool]) => ({
+			toolCallId,
+			toolName: tool.toolName,
+			summary: tool.summary,
+			startedAt: tool.startedAt,
+			preview: tool.preview,
+		}));
+		const agents = [...this.agents.values()].map((agent) =>
+			agent.kind === "background-session"
+				? { ...agent, activeToolCount: this.backgroundToolCounts.get(agent.id) }
+				: agent,
+		);
+		return {
+			revision: this.revision,
+			turn: this.turnState(),
+			activeTools,
+			queuedSteering: input.queuedSteering,
+			queuedFollowUp: input.queuedFollowUp,
+			agents,
+			channels: [...this.channels.values()],
+			activity: [...this.activity].toReversed(),
+		};
+	}
+
+	private turnState(): LiveWorkspaceTurnState | undefined {
+		if (this.waiting) {
+			return {
+				phase: "waiting-for-extension",
+				waitingKind: this.waiting.kind,
+				waitingTitle: this.waiting.title,
+			};
+		}
+		if (this.compaction) {
+			return { phase: "compacting", compactionReason: this.compaction.reason };
+		}
+		if (this.retry) {
+			return {
+				phase: "retrying",
+				retryAttempt: this.retry.attempt,
+				retryMaxAttempts: this.retry.maxAttempts,
+				retryAt: this.retry.at,
+			};
+		}
+		if (this.running) return { phase: "running" };
+		return undefined;
+	}
+
+	private pushActivity(kind: string, text: string, background: boolean): void {
+		this.activity.push({
+			id: `a${this.nextActivityId++}`,
+			at: Date.now(),
+			kind,
+			text: truncateForDisplay(text, liveWorkspaceActivityTextLimit),
+			background,
+		});
+		if (this.activity.length > liveWorkspaceActivityLimit) {
+			this.activity = this.activity.slice(
+				this.activity.length - liveWorkspaceActivityLimit,
+			);
+		}
+	}
+}
+
+function summarizePartialResult(value: JsonValue | undefined): string | undefined {
+	if (value === undefined || value === null) return undefined;
+	if (isString(value)) return truncateForDisplay(value, liveWorkspaceToolPreviewLimit);
+	try {
+		return truncateForDisplay(JSON.stringify(value), liveWorkspaceToolPreviewLimit);
+	} catch {
+		return undefined;
+	}
+}
+
+function asDisplayableJson(payload: JsonValue): JsonValue {
+	try {
+		const json = JSON.stringify(payload) ?? "null";
+		if (json.length > liveWorkspaceChannelJsonLimit) {
+			return {
+				truncated: true,
+				preview: `${json.slice(0, liveWorkspaceChannelJsonLimit)}…`,
+			};
+		}
+		// SAFETY: `json` was just produced by `JSON.stringify`, so parsing it back always
+		// yields a JSON-shaped value.
+		return JSON.parse(json) as JsonValue;
+	} catch {
+		return { unrepresentable: true };
+	}
+}
+
+function deriveAgentRows(channel: string, value: JsonValue): LiveWorkspaceAgentRow[] {
+	const record = asRecord(value);
+	if (!record) return [];
+	if (channel === "subagents:fleet" || channel === "bash-bg:fleet") {
+		const entries = Array.isArray(record.entries) ? record.entries : [];
+		return entries.slice(0, liveWorkspaceChannelRowLimit).flatMap((entry, index) => {
+			const row = asRecord(entry);
+			if (!row) return [];
+			const key = isString(row.key) ? row.key : `${channel}:${index}`;
+			const label = isString(row.name)
+				? row.name
+				: isString(row.label)
+					? row.label
+					: key;
+			const status = isString(row.state)
+				? row.state
+				: isString(row.status)
+					? row.status
+					: "unknown";
+			return [
+				{
+					id: `${channel}:${key}`,
+					kind: "channel-entry" as const,
+					source: channel,
+					label,
+					detail: isString(row.model) ? row.model : undefined,
+					status,
+					depth: isNumber(row.depth) ? row.depth : 0,
+					tokens: isNumber(row.tokens) ? row.tokens : undefined,
+				},
+			];
+		});
+	}
+	if (channel === "workflow:progress" || channel === "pi-goal:status") {
+		if (record.active === false) return [];
+		const label = isString(record.name)
+			? record.name
+			: isString(record.text)
+				? record.text
+				: channel;
+		const status = isString(record.phase)
+			? record.phase
+			: isString(record.status)
+				? record.status
+				: "active";
+		return [
+			{
+				id: channel,
+				kind: "channel-entry" as const,
+				source: channel,
+				label,
+				detail: isString(record.detail) ? record.detail : undefined,
+				status,
+				depth: 0,
+				startedAt: isNumber(record.startedAt) ? record.startedAt : undefined,
+			},
+		];
+	}
+	return [];
+}
+
+function errorText(cause: unknown): string {
+	return cause instanceof Error ? cause.message : String(cause);
+}
