@@ -1410,6 +1410,30 @@ test("RuntimeController opens the model picker for a bare /model, without prompt
 	await controller.dispose();
 });
 
+test("RuntimeController opens the login dialog for /model when no model is available", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+	state.setModels([], undefined);
+	let pickerOpened = false;
+	state.requestOpenModelPicker = () => {
+		pickerOpened = true;
+	};
+	let loginOpened = 0;
+	controller.openLogin = () => {
+		loginOpened += 1;
+	};
+
+	assertEquals(await controller.prompt("/model"), true);
+	assertEquals(await controller.prompt("/scoped-models"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(fake.promptInputs, []);
+	assertEquals(pickerOpened, false);
+	assertEquals(loginOpened, 2);
+	await controller.dispose();
+});
+
 test("RuntimeController opens the model picker for /scoped-models, without prompting the model", async () => {
 	const state = new AppStore();
 	const fake = fakeRuntime();

@@ -562,7 +562,7 @@ export class RuntimeController {
 	private async dispatchModelCommand(args: string): Promise<void> {
 		const ref = args.trim();
 		if (!ref) {
-			this.state.requestOpenModelPicker();
+			this.openModelPickerOrLogin();
 			return;
 		}
 		if (await this.setModel(ref)) {
@@ -594,7 +594,17 @@ export class RuntimeController {
 		// The model picker (prompt-pickers.tsx) already has a per-row star toggle for
 		// exactly this ("scoped for Ctrl+P cycling"), so it doubles as /scoped-models'
 		// picker rather than needing a separate scope-only UI.
-		this.state.requestOpenModelPicker();
+		this.openModelPickerOrLogin();
+	}
+
+	/**
+	 * With no model available the toolbar shows a "no provider" login button instead of
+	 * the model picker (prompt-pickers.tsx), so there is no picker to open: `/model` and
+	 * `/scoped-models` open the same login dialog that button does rather than doing nothing.
+	 */
+	private openModelPickerOrLogin(): void {
+		if (this.state.models.length === 0) this.openLogin();
+		else this.state.requestOpenModelPicker();
 	}
 
 	private async dispatchNameCommand(args: string): Promise<void> {
