@@ -89,9 +89,28 @@
 	.hotkeys-row:hover {
 		background: var(--surface-control);
 	}
+	.hotkeys-row-clickable {
+		cursor: pointer;
+	}
 	.hotkeys-row-content {
 		display: flex;
 		flex-direction: column;
+	}
+
+	/* `pi.registerShortcut()` shortcuts (F1 §1) get their own heading, since
+	   they come from whatever the current session's extensions loaded rather
+	   than pi-ui's own fixed catalog — same treatment as the session sidebar's
+	   group headings. */
+	.hotkeys-section-heading {
+		padding: 0.5rem 0.5rem 0.25rem;
+		color: var(--text-muted);
+		font-size: var(--text-3xs);
+		font-weight: 500;
+		letter-spacing: 0.025em;
+		text-transform: lowercase;
+	}
+	.hotkeys-section-heading:hover {
+		background: none;
 	}
 
 	.font-card {

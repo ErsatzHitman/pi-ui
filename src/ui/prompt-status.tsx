@@ -8,6 +8,7 @@ import { formatTokens } from "../utils/format.ts";
 import { Icon } from "./icon.tsx";
 import { Loader } from "./icons.ts";
 import { renderPiUiStatusChips } from "./pi-ui-elements.tsx";
+import { StatusDot } from "./status-dot.tsx";
 import { syncHtml } from "./sync-html.ts";
 
 // Pure-CSS frame counts the working-indicator animation ships keyframes for
@@ -54,8 +55,51 @@ export function renderPromptStatus(state: AppStateSnapshot): string {
 				</span>
 			))}
 			{renderPiUiStatusChips(state)}
+			<span
+				class="extension-capture-indicator badge"
+				id="extension-capture-indicator"
+				data-variant="secondary"
+				data-tooltip="An extension is listening for the next keystroke"
+				hidden
+			>
+				<StatusDot
+					state="running"
+					label="Listening"
+					class="extension-capture-dot"
+				/>
+				Listening
+			</span>
 			{renderUsageIndicators(state.usage)}
+			{renderExtensionShortcutsData(state)}
 		</span>,
+	);
+}
+
+/**
+ * Hidden data island (F1 §1/§2): every currently-registered `pi.registerShortcut()`
+ * key, plus whether any `ctx.ui.onTerminalInput` listener is active outside a
+ * focused terminal surface. `static/app/extension-keys.ts` re-reads this DOM
+ * on every keydown rather than caching it, so it never needs its own
+ * SSE/signal plumbing and always reflects the latest `AppStore.commit()` —
+ * see `renderAppElements`'s doc comment on why this cheap a region doesn't
+ * need its own dirty flag.
+ */
+function renderExtensionShortcutsData(state: AppStateSnapshot) {
+	return (
+		<span
+			id="extension-shortcuts-data"
+			data-terminal-input-active={state.extensionTerminalInputActive}
+			hidden
+		>
+			{state.extensionShortcuts.map((shortcut) => (
+				<span
+					data-key={shortcut.key}
+					data-description={shortcut.description ?? ""}
+					data-extension={shortcut.extensionPath}
+					data-reachable={shortcut.reachableByKeyboard}
+				/>
+			))}
+		</span>
 	);
 }
 

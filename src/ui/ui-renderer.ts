@@ -15,10 +15,12 @@ import type { TranscriptMessage } from "../state/transcript-state.ts";
 import type { JsonObject } from "../utils/json-types.ts";
 import { renderAuthDialogContent } from "./auth-dialog.tsx";
 import { projectBackendSignals } from "./backend-signals.ts";
+import { renderCommandMenu } from "./command-menu.tsx";
 import { renderDebugOverlay } from "./debug.tsx";
 import { DisplayRefreshClients } from "./display-refresh-clients.ts";
 import { renderExtensionDialogContent } from "./extension-dialog.tsx";
 import { renderExtensionWidgets } from "./extension-widgets.tsx";
+import { renderHotkeysDialog } from "./hotkeys-dialog.tsx";
 import {
 	renderLiveWorkspaceActivitySection,
 	renderLiveWorkspaceAgentsSection,
@@ -505,7 +507,9 @@ export class UiRenderer implements AppStorePresentation {
 			renderModelPicker(snapshot) +
 			renderThinkingPicker(snapshot) +
 			renderSlashPicker(snapshot) +
-			renderTreePicker(snapshot)
+			renderTreePicker(snapshot) +
+			renderHotkeysDialog(snapshot) +
+			renderCommandMenu(snapshot)
 		);
 	}
 	renderSignals(snapshot: AppStateSnapshot, overrides: JsonObject = {}): string {

@@ -81,6 +81,8 @@ export const endpoints = {
 	extensionUiColorScheme: "/extensions/ui/color-scheme",
 	terminalSurfaceInput: "/extensions/terminal/input",
 	terminalSurfaceResize: "/extensions/terminal/resize",
+	extensionShortcutInvoke: "/extensions/ui/shortcut",
+	extensionPromptInput: "/extensions/ui/prompt-input",
 	commandArgumentCompletions: "/commands/argument-completions",
 	treeOpen: "/tree/open",
 	treeNavigate: "/tree/navigate",

@@ -173,6 +173,20 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+
+	/* F1 §2: flashed by `static/app/extension-keys.ts` while a prompt-level key
+	   was just claimed by an extension's `ctx.ui.onTerminalInput` listener. A
+	   plain `.badge` (see `controls.css`) with the same muted-secondary
+	   treatment status chips already use elsewhere, so it reads as "part of
+	   pi-ui" rather than a foreign notification. */
+	.extension-capture-indicator {
+		flex-shrink: 0;
+		gap: 0.3125rem;
+	}
+	.extension-capture-dot {
+		width: 0.5rem;
+		height: 0.5rem;
+	}
 	.usage-indicators {
 		order: 1;
 		flex-shrink: 0;

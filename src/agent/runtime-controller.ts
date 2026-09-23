@@ -25,9 +25,11 @@ import { exportSessionToJsonl } from "../../node_modules/@earendil-works/pi-codi
 import { resolvePath as canonicalizeSessionPath } from "../../node_modules/@earendil-works/pi-coding-agent/dist/utils/paths.js";
 import agentPackageJson from "../../node_modules/@earendil-works/pi-coding-agent/package.json" with { type: "json" };
 import type { PiUiActionRequest } from "../extension-surface-types.ts";
+import { activeKeybind, keybindIds } from "../keybinds.ts";
 import { sessionPerformance } from "../perf/session-performance.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import {
+	type AppExtensionShortcut,
 	type AppSlashCommand,
 	AppStore,
 	type BackgroundSessionStatus,
@@ -61,6 +63,11 @@ import {
 	parseSlashCommand,
 } from "./builtin-commands.ts";
 import { detectCacheMiss, formatCacheMissNotice } from "./cache-miss.ts";
+import {
+	findExtensionShortcut,
+	listExtensionShortcuts,
+	reservedAppKeyIds,
+} from "./extension-shortcuts.ts";
 import { ExtensionUiController } from "./extension-ui-controller.ts";
 import type { ExtensionsMode } from "./extensions-config.ts";
 import { LiveWorkspaceController } from "./live-workspace-controller.ts";
@@ -1972,6 +1979,7 @@ export class RuntimeController {
 				session.settingsManager?.getHideThinkingBlock() ?? false,
 			);
 			this.syncSlashCommands();
+			this.syncExtensionShortcuts();
 			this.usage.sync();
 			this.usage.refresh(true);
 			if (options.syncSessions !== false) {
@@ -2255,6 +2263,61 @@ export class RuntimeController {
 			...extensions,
 			...skills,
 		]);
+	}
+
+	/**
+	 * Publishes `pi.registerShortcut()` shortcuts (F1 §1) for the client to
+	 * match keydowns against (`static/app/extension-keys.ts`) and the
+	 * `/hotkeys` dialog/command palette to list. A shortcut colliding with a
+	 * pi-tui built-in never makes it into the published list (the SDK drops it
+	 * itself); one colliding with one of pi-ui's own binds is still published,
+	 * just flagged `reachableByKeyboard: false` — see `extension-shortcuts.ts`'s
+	 * doc comments.
+	 */
+	private syncExtensionShortcuts(): void {
+		const reserved = reservedAppKeyIds(keybindIds().map((id) => activeKeybind(id)));
+		const shortcuts: AppExtensionShortcut[] = listExtensionShortcuts(
+			this.runtime.session.extensionRunner,
+			reserved,
+		);
+		this.state.setExtensionShortcuts(shortcuts);
+	}
+
+	/**
+	 * Invokes the `pi.registerShortcut()` handler bound to `keyId` — matched by
+	 * the client's `matchesKeyId()` off a keydown, or named directly by a tap
+	 * on a command-palette/`/hotkeys` row for one flagged
+	 * `reachableByKeyboard: false` (F1 §1/§3) — the way real interactive-mode's
+	 * `setupExtensionShortcuts` dispatch does: without blocking the caller,
+	 * reporting a thrown/rejected handler as an error notice instead of
+	 * propagating it (mirroring `dispatchExtensionUiAction`'s failure
+	 * handling). Returns whether a shortcut was found for `keyId` — not
+	 * whether its handler succeeded, which the caller has no way to learn
+	 * either way once the handler is already running asynchronously.
+	 */
+	invokeExtensionShortcut(keyId: string): boolean {
+		const session = this.runtime.session;
+		const shortcut = findExtensionShortcut(session.extensionRunner, keyId);
+		if (!shortcut) return false;
+		Promise.resolve(shortcut.handler(session.extensionRunner.createContext())).catch(
+			(error) => {
+				this.state.appendMessage(
+					"notice",
+					`Shortcut handler error: ${errorMessage(error)}`,
+					{ state: "error" },
+				);
+			},
+		);
+		return true;
+	}
+
+	/**
+	 * Routes a key typed at the prompt to any `ctx.ui.onTerminalInput`
+	 * listener registered outside a focused terminal surface (F1 §2) — see
+	 * `ExtensionUiController.handlePromptLevelInput`'s doc comment.
+	 */
+	handlePromptLevelInput(data: string): { consumed: boolean } {
+		return this.extensionUi.handlePromptLevelInput(data);
 	}
 
 	private loadCurrentSessionMessages(): void {

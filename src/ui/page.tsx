@@ -332,10 +332,10 @@ export function renderPage(
 						</div>
 					</div>
 
-					{renderCommandMenu()}
+					{renderCommandMenu(state)}
 					{renderCodeThemeDialog()}
 					{renderFontDialog()}
-					{renderHotkeysDialog()}
+					{renderHotkeysDialog(state)}
 					{renderAuthDialog(state.authDialog)}
 					{renderExtensionDialog(state.extensionDialog)}
 					{renderLlamaDialog(state.llamaDialog)}

@@ -181,7 +181,8 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 							!evt.altKey &&
 							!evt.shiftKey &&
 							!window.piUi.pickers.isOpen() &&
-							document.querySelector('[data-send-trigger]')
+							document.querySelector('[data-send-trigger]') &&
+							!window.piUi.extensionKeys.promptLevelInputActive()
 						) {
 							evt.preventDefault();
 							el.blur();

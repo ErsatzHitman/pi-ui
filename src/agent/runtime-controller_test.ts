@@ -135,7 +135,10 @@ function fakeRuntime(
 		scopedModels: [],
 		modelRuntime,
 		promptTemplates: [],
-		extensionRunner: { getRegisteredCommands: () => [] },
+		extensionRunner: {
+			getRegisteredCommands: () => [],
+			getShortcuts: () => new Map(),
+		},
 		resourceLoader: { getSkills: () => ({ skills: [] }) },
 		thinkingLevel: "off",
 		getAvailableThinkingLevels: () => ["off"],
