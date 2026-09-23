@@ -18,6 +18,14 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+
+	/* The flex container's own text-overflow doesn't reach its label span; without this a
+	   long "Waiting for extension input: …" label was cut mid-word on phones. */
+	.prompt-status-message > span {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
 	.prompt-working-status {
 		display: inline-flex;
 		min-width: 0;
