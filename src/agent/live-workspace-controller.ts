@@ -55,6 +55,9 @@ export class LiveWorkspaceController {
 	private retry: RetryState | undefined;
 	private compaction: CompactionState | undefined;
 	private waiting: WaitingState | undefined;
+	/** Pending `custom()` calls, split by whether they take keyboard focus (see `trackCustomPrompt`). */
+	private capturingCustoms = 0;
+	private ambientCustoms = 0;
 	private readonly activeTools = new Map<string, ActiveToolState>();
 	private readonly agents = new Map<string, LiveWorkspaceAgentRow>();
 	private readonly backgroundToolCounts = new Map<string, number>();
@@ -290,6 +293,27 @@ export class LiveWorkspaceController {
 		this.revision += 1;
 	}
 
+	/**
+	 * Counts a pending `custom()` call until the returned release runs. The SDK reports every
+	 * outermost `custom()` as a UI prompt, including a long-lived non-capturing overlay (a side
+	 * popup the user can stash and bring back) — which leaves the turn "waiting for extension
+	 * input" for as long as it lives, even though nothing is waiting on the user. A `custom`
+	 * wait therefore only counts while a capturing `custom()` is pending.
+	 */
+	trackCustomPrompt(capturing: boolean): () => void {
+		if (capturing) this.capturingCustoms += 1;
+		else this.ambientCustoms += 1;
+		this.revision += 1;
+		let released = false;
+		return () => {
+			if (released) return;
+			released = true;
+			if (capturing) this.capturingCustoms -= 1;
+			else this.ambientCustoms -= 1;
+			this.revision += 1;
+		};
+	}
+
 	recordModelSelect(modelId: string, source: string): void {
 		this.pushActivity("model", `Model changed to ${modelId} (${source})`, false);
 		this.revision += 1;
@@ -374,7 +398,11 @@ export class LiveWorkspaceController {
 	}
 
 	private turnState(): LiveWorkspaceTurnState | undefined {
-		if (this.waiting) {
+		const ambientCustomOnly =
+			this.waiting?.kind === "custom" &&
+			this.capturingCustoms === 0 &&
+			this.ambientCustoms > 0;
+		if (this.waiting && !ambientCustomOnly) {
 			return {
 				phase: "waiting-for-extension",
 				waitingKind: this.waiting.kind,

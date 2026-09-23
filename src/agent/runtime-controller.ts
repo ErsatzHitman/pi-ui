@@ -277,6 +277,14 @@ export class RuntimeController {
 				this.liveWorkspace.recordChannel(channel, payload);
 				this.publishLiveWorkspace({ channels: true });
 			},
+			onCustomPrompt: (capturing) => {
+				const release = this.liveWorkspace.trackCustomPrompt(capturing);
+				this.publishLiveWorkspace();
+				return () => {
+					release();
+					this.publishLiveWorkspace();
+				};
+			},
 		});
 		this.liveWorkspaceFrames.setDisplayHz(minimumDisplayHz);
 		this.foregroundGeneration = this.backgroundSessions.allocateGeneration();

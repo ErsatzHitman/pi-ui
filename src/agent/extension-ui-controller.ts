@@ -23,6 +23,7 @@ import type { JsonValue } from "../utils/json-types.ts";
 import { isString } from "../utils/type-guards.ts";
 import { PiUiBridgeDecoder, PiUiElementStore } from "./pi-ui-bridge.ts";
 import {
+	resolveOverlayOptions,
 	TerminalSurfaceController,
 	type CustomComponentFactory,
 } from "./terminal-surface/terminal-surface-controller.ts";
@@ -89,6 +90,12 @@ export type ExtensionUiControllerHooks = {
 	 * reported preference.
 	 */
 	colorScheme?: () => TerminalSurfaceColorScheme;
+	/**
+	 * Called when a `custom()` call starts, with whether it takes keyboard focus (an inline
+	 * component or a capturing overlay) or not (a `nonCapturing` overlay); the returned
+	 * function runs once it settles.
+	 */
+	onCustomPrompt?: (capturing: boolean) => () => void;
 };
 
 /** Bridges pi extension UI requests to backend-owned web state. */
@@ -577,6 +584,7 @@ export class ExtensionUiController {
 			// resolution regardless of `T`.
 			return Promise.resolve(undefined as T);
 		}
+		const release = this.hooks.onCustomPrompt?.(!isNonCapturingOverlay(options));
 		return this.#terminalSurfaces
 			.mountCustom<T>({
 				id: crypto.randomUUID(),
@@ -586,6 +594,7 @@ export class ExtensionUiController {
 				onHandle: options?.onHandle,
 				colorScheme: this.colorScheme(),
 			})
+			.finally(() => release?.())
 			.catch((error) => {
 				// `mountCustom` itself never rejects (it catches the factory's
 				// own failures); this only guards synchronous throws before its
@@ -732,3 +741,11 @@ function widgetSurfaceId(key: string): string {
 
 const footerSurfaceId = "footer";
 const headerSurfaceId = "header";
+
+/** A `custom()` overlay shown with `nonCapturing` (static or from an options factory). */
+function isNonCapturingOverlay(options: CustomOptions): boolean {
+	return (
+		options?.overlay === true &&
+		resolveOverlayOptions(options.overlayOptions)?.nonCapturing === true
+	);
+}

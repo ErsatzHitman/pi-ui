@@ -88,6 +88,28 @@ test("waiting-for-extension-UI phase takes priority and clears on prompt end", (
 	assertEquals(controller.snapshot(input).turn, { phase: "running" });
 });
 
+test("a non-capturing custom() overlay alone does not count as waiting for input", () => {
+	const { controller, input } = fixture();
+	const releaseAmbient = controller.trackCustomPrompt(false);
+	controller.recordUiPromptStart("custom", undefined);
+	assertEquals(controller.snapshot(input).turn, undefined);
+
+	// A capturing custom() (inline, or a focus-taking overlay) is a real wait.
+	const releaseCapturing = controller.trackCustomPrompt(true);
+	assertEquals(controller.snapshot(input).turn, {
+		phase: "waiting-for-extension",
+		waitingKind: "custom",
+		waitingTitle: undefined,
+	});
+	releaseCapturing();
+	releaseCapturing();
+	assertEquals(controller.snapshot(input).turn, undefined);
+
+	releaseAmbient();
+	controller.recordUiPromptEnd();
+	assertEquals(controller.snapshot(input).turn, undefined);
+});
+
 test("tracks active tools with a human-readable summary and clears on completion", () => {
 	const { controller, input } = fixture();
 

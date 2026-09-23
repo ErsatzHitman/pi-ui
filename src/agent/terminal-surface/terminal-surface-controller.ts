@@ -428,7 +428,7 @@ function isOverlayOptionsFactory(
 	return typeof overlayOptions === "function";
 }
 
-function resolveOverlayOptions(
+export function resolveOverlayOptions(
 	overlayOptions: OverlayOptions | (() => OverlayOptions) | undefined,
 ): OverlayOptions | undefined {
 	if (isOverlayOptionsFactory(overlayOptions)) {
