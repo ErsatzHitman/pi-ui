@@ -299,9 +299,25 @@ export class ExtensionUiController {
 		return this.#hiddenThinkingLabel;
 	}
 
-	/** Routes a raw terminal byte sequence to a mounted surface. `false` if `id` is unknown. */
+	/**
+	 * Routes a raw terminal byte sequence to a mounted surface. `ctx.ui.onTerminalInput`
+	 * listeners see it first, like the TUI's input pipeline: one may rewrite the data or
+	 * consume it. `false` if `id` is unknown.
+	 */
 	handleTerminalSurfaceInput(id: string, data: string): boolean {
-		return this.#terminalSurfaces.handleInput(id, data);
+		let forwarded = data;
+		for (const handler of this.#terminalInputHandlers) {
+			let result: ReturnType<TerminalInputHandler>;
+			try {
+				result = handler(forwarded);
+			} catch (error) {
+				console.error("Extension terminal input handler failed", error);
+				continue;
+			}
+			if (result?.consume) return true;
+			if (result?.data !== undefined) forwarded = result.data;
+		}
+		return this.#terminalSurfaces.handleInput(id, forwarded);
 	}
 
 	/** Applies a client-measured grid resize to a mounted surface. `false` if `id` is unknown. */

@@ -28,6 +28,7 @@ import { renderPiUiSheets } from "./pi-ui-elements.tsx";
 import { renderSessionPicker, renderWorkspaceDialogMenu } from "./pickers.tsx";
 import { renderPromptBox } from "./prompt-box.tsx";
 import type { AppRenderSnapshot } from "./render-state.ts";
+import { renderTerminalSurfaceOverlays } from "./terminal-surface.tsx";
 import { renderSessionSidebar } from "./session-sidebar.tsx";
 import { previousSessionAction, renderSessionTransition } from "./session-transition.tsx";
 import { syncHtml } from "./sync-html.ts";
@@ -336,6 +337,7 @@ export function renderPage(
 					{renderExtensionDialog(state.extensionDialog)}
 					{renderLlamaDialog(state.llamaDialog)}
 					{renderPiUiSheets(state)}
+					{renderTerminalSurfaceOverlays(state)}
 
 					<dialog
 						id="workspace-dialog"

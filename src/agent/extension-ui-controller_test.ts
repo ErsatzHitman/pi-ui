@@ -424,3 +424,37 @@ test("setWidget/setFooter/setHeader component factories mount persistent termina
 	controller.cancelAll();
 	assertEquals(store.snapshot().terminalSurfaces, []);
 });
+
+test("onTerminalInput listeners see terminal-surface input first and may rewrite or consume it", async () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+	const received: string[] = [];
+	const result = ui.custom(
+		(_tui, _theme, _keybindings, done) =>
+			({
+				render: () => ["surface"],
+				handleInput: (data: string) => {
+					received.push(data);
+					if (data === "q") done("closed" as never);
+				},
+				invalidate: () => {},
+			}) as never,
+		{ overlay: true },
+	);
+	await Promise.resolve();
+	await Promise.resolve();
+	const [surface] = store.snapshot().terminalSurfaces;
+	assertExists(surface);
+
+	const unsubscribe = ui.onTerminalInput((data) =>
+		data === "x" ? { consume: true } : data === "y" ? { data: "q" } : undefined,
+	);
+	assertEquals(controller.handleTerminalSurfaceInput(surface.id, "a"), true);
+	assertEquals(controller.handleTerminalSurfaceInput(surface.id, "x"), true);
+	assertEquals(received, ["a"]);
+	assertEquals(controller.handleTerminalSurfaceInput(surface.id, "y"), true);
+	assertEquals(received, ["a", "q"]);
+	assertEquals(await result, "closed");
+	unsubscribe();
+});

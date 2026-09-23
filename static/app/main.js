@@ -33,6 +33,11 @@ import {
 	startSessionPerformanceMeasurement,
 } from "./session-performance.js";
 import { bindStreamReconnect } from "./stream-reconnect.js";
+import {
+	encodeTerminalKey,
+	encodeTerminalPaste,
+	encodeTerminalWheel,
+} from "./terminal-keys.js";
 import { bindTooltips } from "./tooltips.js";
 import { bindVimScroll } from "./vim-scroll.js";
 import { windowFocus } from "./window-focus.js";
@@ -70,6 +75,11 @@ window.piUi = {
 	sessionPerformance: {
 		observe: readTransitionState,
 		start: startSessionPerformanceMeasurement,
+	},
+	terminal: {
+		encodeKey: encodeTerminalKey,
+		encodePaste: encodeTerminalPaste,
+		encodeWheel: encodeTerminalWheel,
 	},
 	windowFocus,
 	workspaceReview: { applyOpen: () => {} },

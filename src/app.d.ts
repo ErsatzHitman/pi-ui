@@ -81,6 +81,11 @@ interface PiUiNamespace {
 		applyOpen(open: boolean): void;
 		requestNotificationPermission(): void;
 	};
+	terminal: {
+		encodeKey(event: KeyboardEvent): string | undefined;
+		encodePaste(text: string): string;
+		encodeWheel(event: WheelEvent): string | undefined;
+	};
 	shouldAbortOnEscape(event: KeyboardEvent): boolean;
 }
 

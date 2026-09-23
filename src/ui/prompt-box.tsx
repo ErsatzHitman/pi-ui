@@ -12,6 +12,7 @@ import { renderModelPicker, renderThinkingPicker } from "./prompt-pickers.tsx";
 import { renderPromptStart } from "./prompt-start.tsx";
 import { renderPromptStatus } from "./prompt-status.tsx";
 import { syncHtml } from "./sync-html.ts";
+import { renderTerminalSurfacePersistent } from "./terminal-surface.tsx";
 
 export function renderPromptBox(state: AppStateSnapshot): string {
 	return syncHtml(
@@ -84,6 +85,7 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 			>
 				{renderExtensionWidgets(state, "aboveEditor")}
 				{renderPiUiWidgets(state)}
+				{renderTerminalSurfacePersistent(state)}
 				<div class="prompt-editor-row">
 					<textarea
 						id="prompt-input"

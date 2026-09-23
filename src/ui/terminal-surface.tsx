@@ -22,7 +22,14 @@ import { syncHtml } from "./sync-html.ts";
  * changing them.
  */
 
-const persistentKinds = new Set<TerminalSurface["kind"]>(["widget", "footer", "header"]);
+// Non-overlay `custom()` surfaces ("inline") take the TUI editor's place there; in the browser they
+// render with the other persistent surfaces just above the prompt editor.
+const persistentKinds = new Set<TerminalSurface["kind"]>([
+	"inline",
+	"widget",
+	"footer",
+	"header",
+]);
 
 export function renderTerminalSurfaceOverlays(
 	state: Pick<AppStateSnapshot, "terminalSurfaces">,
@@ -96,11 +103,26 @@ function renderTerminalSurfaceBlock(surface: TerminalSurface): string {
 	);
 }
 
+/** A Datastar expression posting `data` (an expression) to this surface's input route. */
+function postTerminalInput(surfaceId: string, data: string): string {
+	return `@post('${endpoints.terminalSurfaceInput}', { payload: { surfaceId: ${JSON.stringify(surfaceId)}, data: ${data} } })`;
+}
+
 function renderTerminalSurfaceBody(surface: TerminalSurface): string {
+	// Keys, pastes and wheel gestures are encoded client-side into the terminal byte
+	// sequences a pi-tui `Component` expects (static/app/terminal-keys.js) and forwarded
+	// to the focused component through the input route.
+	const onKeydown = `const data = window.piUi.terminal.encodeKey(evt); if (data !== undefined) { evt.preventDefault(); evt.stopPropagation(); ${postTerminalInput(surface.id, "data")} }`;
+	const onPaste = `evt.preventDefault(); ${postTerminalInput(surface.id, "window.piUi.terminal.encodePaste(evt.clipboardData?.getData('text') ?? '')")}`;
+	const onWheel = `const data = window.piUi.terminal.encodeWheel(evt); if (data !== undefined) { evt.preventDefault(); ${postTerminalInput(surface.id, "data")} }`;
 	return syncHtml(
 		<pre
 			class="terminal-surface-body"
 			data-terminal-surface-body={surface.id}
+			autofocus={surface.kind === "overlay"}
+			data-on:keydown={onKeydown}
+			data-on:paste={onPaste}
+			{...{ "data-on:wheel__throttle.100ms": onWheel }}
 			data-cols={surface.cols}
 			data-rows={surface.rows}
 			data-revision={surface.revision}
