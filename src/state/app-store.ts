@@ -29,6 +29,7 @@ import {
 } from "../workspace-review-types.ts";
 import {
 	TranscriptState,
+	type FinishedAssistantIds,
 	type TranscriptMessage,
 	type TranscriptMessageInput,
 	type TranscriptMessageOptions,
@@ -371,14 +372,43 @@ export class AppStore {
 	extensionChannels: ExtensionChannelSnapshot[] = [];
 	terminalSurfaces: TerminalSurface[] = [];
 	/**
-	 * The browser client's actual `prefers-color-scheme`, reported once per connection and on
-	 * change (see `pi-ui-elements.tsx`'s sheet-mount script) and read by `ExtensionUiController`
-	 * for a terminal surface's real `Theme` and `ctx.ui.theme`'s `colorScheme`. Defaults to
-	 * `"dark"` — pi-coding-agent's own default and this app's previous always-dark behavior —
-	 * until a client actually reports otherwise (round-2 audit m9). Never part of the render
-	 * snapshot: it drives extension-facing behavior only, not any rendered HTML here.
+	 * Per-tab reports of the browser's actual `prefers-color-scheme`, keyed by the page's
+	 * stable per-connection client id (`page.tsx`'s `displayClientId`, the same id the SSE
+	 * stream and display-refresh Hz reporting already use) — reported once per connection and
+	 * on change (see `pi-ui-elements.tsx`'s sheet-mount script). A request that carries no
+	 * client id (an older client, or a direct test) falls back to `legacyClientColorSchemeKey`,
+	 * matching this store's previous single-scalar behavior exactly.
+	 *
+	 * Round-4 O4: this used to be a single mutable scalar any tab could overwrite, so whichever
+	 * tab last reported "won" for every other tab's terminal surfaces too, even a tab that had
+	 * since disconnected. Tracking per client (and clearing an entry on disconnect — see
+	 * `clearClientColorScheme`, called from `UiRenderer.createStream`'s disconnect callback)
+	 * stops a closed tab from permanently poisoning the scheme for tabs that are still open.
+	 * Two *simultaneously open* tabs with different real schemes can still only get one theme
+	 * baked into a broadcast terminal-surface render — `DatastarClientHub` sends every client
+	 * the same HTML — so this can't make that specific case exact without rendering each
+	 * client's surfaces separately, which is out of scope here; it fixes the staleness bug.
 	 */
-	clientColorScheme: "light" | "dark" = "dark";
+	private readonly clientColorSchemesByClient = new Map<string, "light" | "dark">();
+	static readonly legacyClientColorSchemeKey = "__legacy__";
+	private mostRecentColorSchemeClientId: string | undefined;
+
+	/**
+	 * The scheme used for extension-facing behavior with no specific client to target (a
+	 * terminal surface's real `Theme` at `custom()` mount time isn't tied to any one browser
+	 * request — see `ExtensionUiController.colorScheme()`). Resolves to the most recently
+	 * reported still-connected client's scheme, or `"dark"` — pi-coding-agent's own default and
+	 * this app's original always-dark behavior — once every reporting client has disconnected
+	 * (round-2 audit m9; round-4 O4). Never part of the render snapshot: it drives
+	 * extension-facing behavior only, not any rendered HTML here.
+	 */
+	get clientColorScheme(): "light" | "dark" {
+		const current =
+			this.mostRecentColorSchemeClientId !== undefined
+				? this.clientColorSchemesByClient.get(this.mostRecentColorSchemeClientId)
+				: undefined;
+		return current ?? "dark";
+	}
 	extensionWorkingIndicator: AppExtensionWorkingIndicator | undefined;
 	extensionWorkingMessage: string | undefined;
 	extensionWorkingVisible = true;
@@ -577,9 +607,10 @@ export class AppStore {
 		if (!previousId) this.presentation?.streamingMessageStarted(id);
 		else this.presentation?.streamingMessageChanged();
 	}
-	finishAssistant(): void {
+	finishAssistant(): FinishedAssistantIds {
 		const ids = this.transcript.finishAssistant();
 		this.presentation?.assistantFinished(ids);
+		return ids;
 	}
 	snapshotChat(): AppChatSnapshot {
 		return this.transcript.snapshot();
@@ -838,11 +869,30 @@ export class AppStore {
 		}
 	}
 	/**
-	 * Records the browser client's actual light/dark preference (see `clientColorScheme`).
-	 * No commit: nothing rendered here depends on it, only extension-facing behavior does.
+	 * Records one client's actual light/dark preference (see `clientColorScheme`). No commit:
+	 * nothing rendered here depends on it, only extension-facing behavior does.
 	 */
-	setClientColorScheme(value: "light" | "dark"): void {
-		this.clientColorScheme = value;
+	setClientColorScheme(
+		value: "light" | "dark",
+		clientId: string = AppStore.legacyClientColorSchemeKey,
+	): void {
+		this.clientColorSchemesByClient.set(clientId, value);
+		this.mostRecentColorSchemeClientId = clientId;
+	}
+	/**
+	 * Forgets a client's reported color scheme once its SSE connection closes (see
+	 * `UiRenderer.createStream`'s disconnect callback), so a tab that's no longer open can't
+	 * keep overriding `clientColorScheme` for the tabs that still are (round-4 O4).
+	 */
+	clearClientColorScheme(clientId: string): void {
+		this.clientColorSchemesByClient.delete(clientId);
+		if (this.mostRecentColorSchemeClientId === clientId) {
+			// Fall back to another still-connected client's report, if any — arbitrary but
+			// deterministic (Map iteration order is insertion order), not "the most recent"
+			// since that ordering isn't tracked once the true most-recent client is gone.
+			const remaining = [...this.clientColorSchemesByClient.keys()];
+			this.mostRecentColorSchemeClientId = remaining.at(-1);
+		}
 	}
 	/**
 	 * Replaces the full terminal-surface list (see `TerminalSurfaceController`).
