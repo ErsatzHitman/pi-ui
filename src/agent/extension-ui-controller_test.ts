@@ -47,6 +47,51 @@ test("extension UI cancels dialogs on abort and inactive runtimes", async () => 
 	);
 });
 
+test("extension UI dialogs auto-dismiss as cancelled after their timeout option elapses", async () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	const confirmed = ui.confirm("Continue?", "Auto-dismisses", { timeout: 5 });
+	assertEquals(store.extensionDialog?.kind, "confirm");
+
+	assertEquals(await confirmed, false);
+	assertEquals(store.extensionDialog, undefined);
+
+	// The next dialog opens normally — the timed-out one didn't leave the
+	// queue stuck.
+	const nextSelect = ui.select("Pick", ["a", "b"]);
+	assertEquals(store.extensionDialog?.kind, "select");
+	const selectId = store.extensionDialog?.id ?? "";
+	assertEquals(controller.respond(selectId, "a", false), true);
+	assertEquals(await nextSelect, "a");
+});
+
+test("extension UI a queued (not yet active) dialog's timeout still cancels it once shown", async () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	// The first dialog stays active (no timeout) while the second, timed-out
+	// one waits in the queue — its timer is already running even though it
+	// isn't the visible dialog yet.
+	const first = ui.confirm("First", "Blocks the queue");
+	const second = ui.confirm("Second", "Times out", { timeout: 5 });
+	assertEquals(store.extensionDialog?.title, "First");
+
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	// Still queued behind `first`, unaffected by `second`'s elapsed timer.
+	assertEquals(store.extensionDialog?.title, "First");
+
+	const firstId = store.extensionDialog?.id ?? "";
+	assertEquals(controller.respond(firstId, "confirm", false), true);
+	assertEquals(await first, true);
+	// `second` was already cancelled by its own timeout while queued, so it
+	// never becomes the active dialog.
+	assertEquals(await second, false);
+	assertEquals(store.extensionDialog, undefined);
+});
+
 test("extension UI degrades TUI-only capabilities instead of throwing", async () => {
 	const ui = new ExtensionUiController(new AppStore()).context(
 		() => true,

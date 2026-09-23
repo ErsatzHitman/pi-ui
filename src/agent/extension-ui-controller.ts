@@ -329,7 +329,16 @@ export class ExtensionUiController {
 		return true;
 	}
 
-	cancelAll(): void {
+	/**
+	 * Rejects every pending/active dialog (as a cancel) without touching any
+	 * other extension UI state. A command handler that throws mid-dialog
+	 * (e.g. after calling `select()` but before it resolves) otherwise
+	 * leaves that dialog queued forever — nothing will ever call
+	 * `respond()`/`abort()` for it — blocking every dialog queued behind it.
+	 * `bindSessionExtensions()`'s `onError` calls this so the queue recovers
+	 * from a throwing command.
+	 */
+	cancelPendingDialogs(): void {
 		const pending = [this.#active, ...this.#queue].filter(
 			(dialog): dialog is PendingDialog => dialog !== undefined,
 		);
@@ -339,6 +348,11 @@ export class ExtensionUiController {
 			this.cleanup(dialog);
 			dialog.respond(undefined, true);
 		}
+		this.store.setExtensionDialog(undefined);
+	}
+
+	cancelAll(): void {
+		this.cancelPendingDialogs();
 		this.#statuses.clear();
 		this.#widgets.clear();
 		this.#componentWidgetKeys.clear();

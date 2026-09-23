@@ -919,6 +919,29 @@ test("RuntimeController keeps a backgrounded session's PIUI elements and restore
 	await controller.dispose();
 });
 
+test("RuntimeController cancels a pending extension dialog on session switch", async () => {
+	const state = new AppStore();
+	const [a, b] = streamingRuntimes();
+	const controller = await activate(state, [a, b]);
+	const uiA = a.extensionBindings[0]?.uiContext;
+	if (!uiA) throw new Error("missing uiContext for runtime a");
+
+	const selected = uiA.select("Pick one", ["x", "y"]);
+	assertEquals(state.extensionDialog?.kind, "select");
+
+	assertEquals(await controller.resumeSession("/sessions/b.jsonl"), {
+		status: "success",
+	});
+
+	// The dialog left pending on the now-backgrounded runtime resolves as
+	// cancelled instead of hanging forever, and the foreground view (now
+	// `b`'s) no longer shows it.
+	assertEquals(await selected, undefined);
+	assertEquals(state.extensionDialog, undefined);
+
+	await controller.dispose();
+});
+
 test("RuntimeController tracks the previous session for alternate jumps", async () => {
 	const state = new AppStore();
 	const [a, b] = streamingRuntimes();

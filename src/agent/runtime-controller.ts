@@ -959,13 +959,21 @@ export class RuntimeController {
 			agentDir: this.dependencies.getAgentDir(),
 			sessionManager: this.dependencies.createSessionManager(cwd, this.sessionDir),
 		});
+		const isActive = () => replacement === this.runtime;
 		try {
 			await replacement.session.bindExtensions({
 				mode: "rpc",
-				uiContext: this.extensionUi.context(
-					() => replacement === this.runtime,
-					replacement,
-				),
+				uiContext: this.extensionUi.context(isActive, replacement),
+				// See `bindSessionExtensions()` for why this is needed at all.
+				onError: (error) => {
+					if (!isActive()) return;
+					this.state.appendMessage(
+						"notice",
+						`Extension command failed: ${error.error}`,
+						{ state: "error" },
+					);
+					this.extensionUi.cancelPendingDialogs();
+				},
 			});
 		} catch (error) {
 			await replacement.dispose();
@@ -1814,15 +1822,29 @@ export class RuntimeController {
 		const runtime = this.runtime;
 		const generation = this.foregroundGeneration;
 		const session = runtime.session;
+		const isActive = () =>
+			runtime === this.runtime && generation === this.foregroundGeneration;
 		await sessionPerformance.measure("extensionBind", () =>
 			session.bindExtensions({
 				mode: "rpc",
-				uiContext: this.extensionUi.context(
-					() =>
-						runtime === this.runtime &&
-						generation === this.foregroundGeneration,
-					runtime,
-				),
+				uiContext: this.extensionUi.context(isActive, runtime),
+				// The SDK catches a thrown command handler internally (the prompt
+				// itself still resolves normally) and reports it only here, so
+				// without this it is silently swallowed: no error notice, and any
+				// dialog the command opened before throwing is left stuck forever
+				// with nothing left to ever respond to it. Surfacing it and
+				// recovering the dialog queue only applies while this runtime is
+				// still the foreground one — a backgrounded session's own error
+				// isn't user-facing right now.
+				onError: (error) => {
+					if (!isActive()) return;
+					this.state.appendMessage(
+						"notice",
+						`Extension command failed: ${error.error}`,
+						{ state: "error" },
+					);
+					this.extensionUi.cancelPendingDialogs();
+				},
 				commandContextActions: {
 					waitForIdle: () => session.waitForIdle(),
 					newSession: (options) => runtime.newSession(options),
