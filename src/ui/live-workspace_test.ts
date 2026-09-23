@@ -234,6 +234,12 @@ test("renderDelegateLedgerPanel reports absence and lists found delegations", ()
 	assertStringIncludes(html, 'data-live-workspace-elapsed="1000"');
 });
 
+test("the usage tab shows an empty state before any turn has spent tokens", () => {
+	const html = renderLiveWorkspaceData(snapshot(), { tab: "usage" }, emptyUsage);
+	assertStringIncludes(html, "No usage recorded yet.");
+	assertFalse(html.includes('class="live-workspace-usage-grid"'));
+});
+
 test("the usage tab renders a context meter and per-window quota limits", () => {
 	const usage: AppUsage = {
 		text: "$1.230 • 12,000 tokens",

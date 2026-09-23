@@ -259,6 +259,12 @@
 		padding: 1rem 0.5rem;
 		color: var(--text-muted);
 	}
+	.session-sidebar-empty {
+		margin: 0;
+		padding: 1.5rem 1rem;
+		text-align: center;
+		color: var(--text-muted);
+	}
 	.session-page-trigger {
 		display: flex;
 		min-height: 2rem;
