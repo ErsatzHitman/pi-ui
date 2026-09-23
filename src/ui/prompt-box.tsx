@@ -199,8 +199,13 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 						) {
 							evt.preventDefault();
 							if ($prompt.trim() === '/copy') {
-								window.piUi.pickers.copyLastMessage();
 								window.piUi.prompt.clear();
+								// Only the browser can reach the clipboard; when there is
+								// nothing to copy, fall through to the server so it can
+								// show a notice instead of silently doing nothing.
+								if (!window.piUi.pickers.copyLastMessage()) {
+									@post('${endpoints.prompt}', { payload: { prompt: '/copy' } });
+								}
 								return;
 							}
 							window.piUi.messageScroll.scrollBottom();

@@ -15,6 +15,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 
+// `type: "text"` embeds this at build time (same as the JSON import below), so
+// it stays available in a compiled `bun build --compile` binary, unlike a
+// runtime `readFileSync` into node_modules.
+import agentChangelogText from "../../node_modules/@earendil-works/pi-coding-agent/CHANGELOG.md" with { type: "text" };
 import { exportSessionToHtml } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/export-html/index.js";
 import { resolveModelScopeFromModels } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/model-resolver.js";
 import { exportSessionToJsonl } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-export.js";
@@ -140,6 +144,37 @@ const piUiEventCommandName = "pi_ui_event";
 const changelogUrl = "https://github.com/hyperpuncher/pi-ui/releases";
 const agentChangelogUrl =
 	"https://github.com/earendil-works/pi-coding-agent/blob/main/CHANGELOG.md";
+const CHANGELOG_MAX_LINES = 40;
+
+/**
+ * Extracts the body of one `## [version] - date` entry from a "Keep a
+ * Changelog"-style CHANGELOG.md: the installed version's entry when found,
+ * otherwise the first (newest) one. Returns `undefined` for anything that
+ * doesn't parse, rather than dumping the raw file. Capped in size — some
+ * entries run long — so `/changelog` never posts an oversized notice.
+ */
+function latestChangelogEntry(
+	text: string,
+	installedVersion?: string,
+): string | undefined {
+	const headingPattern = /^## \[([^\]]+)\][^\n]*$/gm;
+	const headings: { version: string; start: number; end: number }[] = [];
+	let match: RegExpExecArray | null;
+	while ((match = headingPattern.exec(text))) {
+		headings.push({ version: match[1], start: match.index, end: -1 });
+	}
+	if (headings.length === 0) return undefined;
+	for (let i = 0; i < headings.length; i++) {
+		headings[i].end = i + 1 < headings.length ? headings[i + 1].start : text.length;
+	}
+	const entry =
+		headings.find((heading) => heading.version === installedVersion) ?? headings[0];
+	const lines = text.slice(entry.start, entry.end).trimEnd().split("\n");
+	const truncated = lines.length > CHANGELOG_MAX_LINES;
+	const shown = lines.slice(0, CHANGELOG_MAX_LINES);
+	if (truncated) shown.push("…");
+	return shown.join("\n");
+}
 
 type BackgroundSession = {
 	runtime: AgentSessionRuntime;
@@ -516,7 +551,9 @@ export class RuntimeController {
 			case "copy":
 				// Handled client-side (copies the last assistant message to the clipboard)
 				// before the prompt ever reaches the server — see static/app/pickers.js.
-				// A no-op here is the correct fallback for any caller that posts it anyway.
+				// The client only forwards here when the clipboard copy failed (nothing
+				// to copy yet), so give that case real feedback instead of a silent no-op.
+				this.state.appendMessage("notice", "Nothing to copy yet.");
 				return;
 			case "name":
 				void this.dispatchNameCommand(args);
@@ -620,7 +657,12 @@ export class RuntimeController {
 			this.state.appendMessage("notice", "Temporary sessions cannot be renamed.");
 			return;
 		}
-		await this.renameSession(path, title);
+		// renameSession() already reports its own failures; only /name needs a
+		// success confirmation — the session dialog's inline rename shows the
+		// new title in place instead, so that caller doesn't want this message.
+		if (await this.renameSession(path, title)) {
+			this.state.appendMessage("system", `Session renamed to "${title}".`);
+		}
 	}
 
 	private showSessionInfo(): void {
@@ -644,6 +686,13 @@ export class RuntimeController {
 				`pi-ui release notes: ${changelogUrl}\n` +
 				`pi-coding-agent changelog: ${agentChangelogUrl}`,
 		);
+		const body = latestChangelogEntry(agentChangelogText, agentPackageJson.version);
+		if (body) {
+			this.state.appendMessage("notice", body, {
+				format: "pre",
+				noticeTone: "info",
+			});
+		}
 	}
 
 	private async cloneSession(): Promise<SessionTransitionResult> {
