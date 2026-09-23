@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 
-import { assertEquals, assertExists } from "#testing/assertions";
+import { assert, assertEquals, assertExists } from "#testing/assertions";
 
 import { piUiMarker } from "../extension-surface-types.ts";
 import { PiUiBridgeDecoder, PiUiElementStore } from "./pi-ui-bridge.ts";
@@ -213,12 +213,13 @@ test("PiUiElementStore applies set/patch/append/remove/channel ops", () => {
 		}),
 		true,
 	);
+	const shownGeneration = element.openGeneration;
 	element = store.elements()[0]!;
 	assertEquals(element.data, { text: "updated" });
 	assertEquals(element.revision, 2);
 	// `patch` bumps `revision` but must NOT bump `openGeneration` — it's a content update to
 	// an already-shown element, not a deliberate re-show (round-2 audit M4).
-	assertEquals(element.openGeneration, 1);
+	assertEquals(element.openGeneration, shownGeneration);
 
 	assertEquals(
 		store.apply({ op: "append", id: "panel", ns: "advisor", data: "line one" }),
@@ -231,7 +232,7 @@ test("PiUiElementStore applies set/patch/append/remove/channel ops", () => {
 	element = store.elements()[0]!;
 	assertEquals(element.data.lines, ["line one", "line two"]);
 	// `append` likewise must not bump `openGeneration`.
-	assertEquals(element.openGeneration, 1);
+	assertEquals(element.openGeneration, shownGeneration);
 
 	assertEquals(
 		store.apply({ op: "channel", channel: "subagents:fleet", payload: { jobs: 1 } }),
@@ -257,14 +258,13 @@ test("re-`set`ing an existing element bumps openGeneration, unlike patch/append 
 	});
 	const first = store.elements()[0]!;
 	assertEquals(first.revision, 1);
-	assertEquals(first.openGeneration, 1);
 
 	store.apply({ op: "patch", id: "sheet", ns: "btw", patch: { text: "streaming" } });
 	const patched = store.elements()[0]!;
 	assertEquals(patched.revision, 2);
 	assertEquals(
 		patched.openGeneration,
-		1,
+		first.openGeneration,
 		"a patch must not look like a fresh (re)show",
 	);
 
@@ -276,7 +276,22 @@ test("re-`set`ing an existing element bumps openGeneration, unlike patch/append 
 	});
 	const reset = store.elements()[0]!;
 	assertEquals(reset.revision, 3);
-	assertEquals(reset.openGeneration, 3);
+	assert(reset.openGeneration > first.openGeneration);
+});
+
+test("a new store never reuses an openGeneration a browser may have dismissed", () => {
+	// Dismissals persist in the browser's localStorage by (dialog id, openGeneration), so a
+	// fresh store (new session, /reload, server restart) must not start the count over.
+	const show = () => {
+		const store = new PiUiElementStore();
+		store.apply({
+			op: "set",
+			el: { id: "panel", ns: "btw", kind: "panel", placement: "sheet" },
+		});
+		return store.elements()[0]!.openGeneration;
+	};
+	const earlier = show();
+	assert(show() > earlier);
 });
 
 test("PiUiElementStore ignores patch/append targeting an element that was never set", () => {

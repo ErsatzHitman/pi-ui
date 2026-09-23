@@ -274,6 +274,7 @@ export class PiUiElementStore {
 		// `set`/`upsert` is a deliberate (re)show — both `revision` and `openGeneration` bump
 		// together here (unlike `#patch`/`#append` below, which only bump `revision`).
 		const revision = this.#nextRevision();
+		const openGeneration = nextOpenGeneration();
 		this.#elements.set(key, {
 			id,
 			ns,
@@ -284,7 +285,7 @@ export class PiUiElementStore {
 			durable: el.durable === true,
 			data,
 			revision,
-			openGeneration: revision,
+			openGeneration,
 			updatedAt: Date.now(),
 		});
 		return true;
@@ -357,6 +358,20 @@ export class PiUiElementStore {
 		this.#revision += 1;
 		return this.#revision;
 	}
+}
+
+let lastOpenGeneration = 0;
+
+/**
+ * A browser remembers a dismissed sheet by its dialog id and `openGeneration`
+ * (`piUiDismissedStorageKey`, in localStorage), and that memory outlives this store — a new
+ * session, `/reload`, a server restart. A per-store counter restarting at 1 therefore made a
+ * brand-new sheet (the first `/btw` after a restart) look already dismissed, so it never
+ * opened. Wall-clock milliseconds, forced strictly increasing within the process, never repeat.
+ */
+function nextOpenGeneration(): number {
+	lastOpenGeneration = Math.max(Date.now(), lastOpenGeneration + 1);
+	return lastOpenGeneration;
 }
 
 function elementKey(ns: string, id: string): string {
