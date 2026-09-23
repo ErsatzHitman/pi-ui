@@ -188,9 +188,25 @@ async function postJson(url, body) {
 	}
 }
 
+/** Per-surface input not yet posted; sends are serialized so keystrokes can't arrive out of order. */
+const queuedInput = new Map();
+const sendingSurfaces = new Set();
+
+async function flushInput(surfaceId) {
+	sendingSurfaces.add(surfaceId);
+	while (queuedInput.has(surfaceId)) {
+		const data = queuedInput.get(surfaceId);
+		queuedInput.delete(surfaceId);
+		await postJson(endpoints.terminalSurfaceInput, { surfaceId, data });
+	}
+	sendingSurfaces.delete(surfaceId);
+}
+
 function sendInput(surfaceId, data) {
 	if (!surfaceId || !data) return;
-	postJson(endpoints.terminalSurfaceInput, { surfaceId, data });
+	// Keys typed while a post is in flight are batched into the next one, in order.
+	queuedInput.set(surfaceId, (queuedInput.get(surfaceId) ?? "") + data);
+	if (!sendingSurfaces.has(surfaceId)) void flushInput(surfaceId);
 }
 
 const pendingResize = new Map();

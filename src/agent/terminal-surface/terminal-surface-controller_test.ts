@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 
-import type { Component, OverlayHandle } from "@earendil-works/pi-tui";
+import type { Component, OverlayHandle, OverlayOptions } from "@earendil-works/pi-tui";
 
 import { assertEquals, assertExists, assertStringIncludes } from "#testing/assertions";
 
@@ -229,4 +229,29 @@ test("a factory that throws resolves undefined and never leaves a mounted surfac
 	});
 	assertEquals(result, undefined);
 	assertEquals(controller.snapshot(), []);
+});
+
+test("overlay options are sanitized before they reach the store", async () => {
+	const { controller } = makeController();
+	void controller.mountCustom<string>({
+		id: "hostile",
+		overlay: true,
+		colorScheme: "dark",
+		// SAFETY: simulates an extension ignoring the declared option types at runtime.
+		overlayOptions: {
+			width: "10px;background:url(x)",
+			maxHeight: "50%",
+			offsetX: Number.NaN,
+			minWidth: "5;color:red",
+		} as unknown as OverlayOptions,
+		factory: () => staticComponent(["x"]),
+	});
+	await flush();
+	const [surface] = controller.snapshot();
+	assertExists(surface);
+	assertEquals(surface.overlayOptions?.width, undefined);
+	assertEquals(surface.overlayOptions?.maxHeight, "50%");
+	assertEquals(surface.overlayOptions?.offsetX, undefined);
+	assertEquals(surface.overlayOptions?.minWidth, undefined);
+	controller.disposeAll();
 });

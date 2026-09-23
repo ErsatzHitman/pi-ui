@@ -126,22 +126,22 @@ test("tui shim handleInput routes to input listeners before the focused componen
 	shim.setFocus(target);
 
 	const unsubscribe = shim.addInputListener((data) => {
-		if (data === "swallow") return { consume: true };
-		if (data === "rewrite") return { data: "rewritten" };
+		if (data === "\u001b[A") return { consume: true };
+		if (data === "\u001b[B") return { data: "rewritten" };
 		return undefined;
 	});
 
-	shim.handleInput("swallow");
+	shim.handleInput("\u001b[A");
 	assertEquals(seen, []);
-	shim.handleInput("rewrite");
+	shim.handleInput("\u001b[B");
 	assertEquals(seen, ["rewritten"]);
-	shim.handleInput("plain");
-	assertEquals(seen, ["rewritten", "plain"]);
+	shim.handleInput("x");
+	assertEquals(seen, ["rewritten", "x"]);
 
 	unsubscribe();
-	shim.handleInput("swallow");
-	// The listener was removed, so "swallow" now reaches the component untouched.
-	assertEquals(seen, ["rewritten", "plain", "swallow"]);
+	shim.handleInput("\u001b[A");
+	// The listener was removed, so the up arrow now reaches the component untouched.
+	assertEquals(seen, ["rewritten", "x", "\u001b[A"]);
 });
 
 test("tui shim handleInput falls back to the topmost overlay, then the last root child", () => {
@@ -169,4 +169,33 @@ test("tui shim requestRender/renderNow forward force through to the callback", (
 	shim.requestRender();
 	shim.renderNow();
 	assertEquals(renders, [false, true]);
+});
+
+test("tui shim splits batched input into single key sequences and re-renders after each", () => {
+	const { shim, renders } = makeShim();
+	const received: string[] = [];
+	const target: FixtureComponent = {
+		...fixture("input"),
+		handleInput: (data) => received.push(data),
+	};
+	shim.addChild(target);
+	shim.setFocus(target);
+	renders.length = 0;
+	shim.handleInput("\u001b[B\u001b[Bx\r");
+	assertEquals(received, ["\u001b[B", "\u001b[B", "x", "\r"]);
+	assertEquals(renders.length, 4);
+});
+
+test("tui shim delivers a lone Esc immediately and keeps bracketed paste whole", () => {
+	const { shim } = makeShim();
+	const received: string[] = [];
+	const target: FixtureComponent = {
+		...fixture("input"),
+		handleInput: (data) => received.push(data),
+	};
+	shim.addChild(target);
+	shim.setFocus(target);
+	shim.handleInput("\u001b");
+	shim.handleInput("\u001b[200~a\nb\u001b[201~");
+	assertEquals(received, ["\u001b", "\u001b[200~a\nb\u001b[201~"]);
 });

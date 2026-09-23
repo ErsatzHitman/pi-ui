@@ -79,6 +79,7 @@ const knownAnchors = new Set([
 	"center",
 ]);
 
+/** Options are sanitized to finite numbers and `N%` strings by the controller before they get here. */
 function sizeValue(value: number | string | undefined, unit: string): string | undefined {
 	if (value === undefined) return undefined;
 	return isString(value) ? value : `${value}${unit}`;

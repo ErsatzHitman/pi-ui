@@ -13,7 +13,7 @@ import {
 } from "@earendil-works/pi-tui";
 
 import { StreamingFrameScheduler } from "../../state/streaming-frame-scheduler.ts";
-import { isNumber } from "../../utils/type-guards.ts";
+import { isNumber, isString } from "../../utils/type-guards.ts";
 import { ansiLineToHtml } from "./ansi-to-html.ts";
 import {
 	clampTerminalSize,
@@ -426,17 +426,33 @@ function toTerminalSurfaceOverlayOptions(
 ): TerminalSurfaceOverlayOptions | undefined {
 	if (!options) return {};
 	return {
-		width: options.width,
-		minWidth: options.minWidth,
-		maxHeight: options.maxHeight,
+		width: sizeOption(options.width),
+		minWidth: cellOption(options.minWidth),
+		maxHeight: sizeOption(options.maxHeight),
 		anchor: options.anchor,
-		offsetX: options.offsetX,
-		offsetY: options.offsetY,
-		row: options.row,
-		col: options.col,
-		margin: isNumber(options.margin)
-			? options.margin
-			: (options.margin?.top ?? options.margin?.left),
+		offsetX: cellOption(options.offsetX),
+		offsetY: cellOption(options.offsetY),
+		row: sizeOption(options.row),
+		col: sizeOption(options.col),
+		margin: cellOption(
+			isNumber(options.margin)
+				? options.margin
+				: (options.margin?.top ?? options.margin?.left),
+		),
 		nonCapturing: options.nonCapturing,
 	};
+}
+
+/**
+ * Extensions are untrusted at runtime whatever their declared types say, and
+ * these values end up in a `style` attribute, so only finite numbers and
+ * pi-tui's `N%` size strings survive.
+ */
+function cellOption(value: number | undefined): number | undefined {
+	return isNumber(value) ? value : undefined;
+}
+
+function sizeOption(value: number | string | undefined): number | string | undefined {
+	if (isNumber(value)) return cellOption(value);
+	return isString(value) && /^\d+(?:\.\d+)?%$/.test(value) ? value : undefined;
 }
