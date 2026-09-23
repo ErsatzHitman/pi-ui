@@ -55,6 +55,7 @@ type ChunkBuffer = { total: number; parts: Map<number, string>; bytes: number };
  */
 export class PiUiBridgeDecoder {
 	readonly #chunks = new Map<string, ChunkBuffer>();
+	#lastMessage: string | undefined;
 
 	/** True when `message` carries the PIUI marker prefix, before any decoding. */
 	static isPiUiMessage(message: string): boolean {
@@ -68,6 +69,13 @@ export class PiUiBridgeDecoder {
 	 */
 	decode(message: string): PiUiOp | undefined {
 		if (!message.startsWith(piUiMarker)) return undefined;
+		// `lib/bridge.ts`'s `notifyRaw()` hands every payload to `ui.notify()` twice (through
+		// `ui.notify(msg, "info")` and again through `ctxRef.ui.notify(msg)`, which is the same
+		// UI context). Every payload carries a fresh `agentSeq` (and every chunk a unique
+		// id + index), so an identical consecutive message is always that duplicate — applying
+		// it again would, for example, append every log line twice.
+		if (message === this.#lastMessage) return undefined;
+		this.#lastMessage = message;
 		const body = message.slice(piUiMarker.length);
 		if (body.length > maxDecodedMessageBytes) return undefined;
 		const parsed = safeParseJsonObject(body);
@@ -79,6 +87,7 @@ export class PiUiBridgeDecoder {
 	/** Clears any in-flight chunk reassembly buffers, e.g. on session switch. */
 	reset(): void {
 		this.#chunks.clear();
+		this.#lastMessage = undefined;
 	}
 
 	#reassemble(chunk: JsonObject): PiUiOp | undefined {

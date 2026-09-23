@@ -96,6 +96,31 @@ test("PiUiBridgeDecoder decodes every documented op shape", () => {
 	});
 });
 
+test("PiUiBridgeDecoder drops lib/bridge.ts's back-to-back duplicate delivery", () => {
+	const decoder = new PiUiBridgeDecoder();
+	const first = piui({
+		v: 1,
+		agentSeq: 7,
+		op: "append",
+		id: "log",
+		ns: "wf",
+		data: "a",
+	});
+	const next = piui({
+		v: 1,
+		agentSeq: 8,
+		op: "append",
+		id: "log",
+		ns: "wf",
+		data: "a",
+	});
+
+	assertEquals(decoder.decode(first)?.op, "append");
+	assertEquals(decoder.decode(first), undefined);
+	// The same line appended again is a new payload (fresh agentSeq), so it still applies.
+	assertEquals(decoder.decode(next)?.op, "append");
+});
+
 test("PiUiBridgeDecoder reassembles chunked payloads in and out of order", () => {
 	const decoder = new PiUiBridgeDecoder();
 	const original = { v: 1, op: "set", el: { id: "big", ns: "n", kind: "log" } };
