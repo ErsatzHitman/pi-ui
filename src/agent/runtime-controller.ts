@@ -16,15 +16,19 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 
 import { exportSessionToHtml } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/export-html/index.js";
 import { resolveModelScopeFromModels } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/model-resolver.js";
-import type { PiUiActionRequest } from "../extension-surface-types.ts";
 import { exportSessionToJsonl } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-export.js";
 import agentPackageJson from "../../node_modules/@earendil-works/pi-coding-agent/package.json" with { type: "json" };
+import type { PiUiActionRequest } from "../extension-surface-types.ts";
 import { sessionPerformance } from "../perf/session-performance.ts";
 import {
 	type AppSlashCommand,
 	AppStore,
 	type BackgroundSessionStatus,
 } from "../state/app-store.ts";
+import {
+	minimumDisplayHz,
+	StreamingFrameScheduler,
+} from "../state/streaming-frame-scheduler.ts";
 import { TranscriptState } from "../state/transcript-state.ts";
 import {
 	notifySessionDone,
@@ -52,7 +56,12 @@ import {
 import { detectCacheMiss, formatCacheMissNotice } from "./cache-miss.ts";
 import { ExtensionUiController } from "./extension-ui-controller.ts";
 import { LiveWorkspaceController } from "./live-workspace-controller.ts";
-import { createLiveWorkspaceHostExtension } from "./live-workspace-host-extension.ts";
+import {
+	createLiveWorkspaceHostExtension,
+	createLiveWorkspaceHostOrigin,
+	type LiveWorkspaceHostOrigin,
+	type LiveWorkspaceHostSink,
+} from "./live-workspace-host-extension.ts";
 import { LlamaController } from "./llama-controller.ts";
 import { llamaProviderExtension } from "./llama-provider-extension.ts";
 import { ModelController } from "./model-controller.ts";
@@ -97,6 +106,13 @@ import { type TreeNavigationResult, TreeProjector } from "./tree-projector.ts";
 import { UsageController } from "./usage-controller.ts";
 
 const extensionFactories = [llamaProviderExtension];
+
+/**
+ * Which Live Workspace host-extension instance was loaded into which session. Each runtime
+ * gets its own host extension so updates from background runtimes can be told apart and
+ * dropped (background sessions must never bleed into the foreground pane).
+ */
+const liveWorkspaceOrigins = new WeakMap<object, LiveWorkspaceHostOrigin>();
 const modelCatalogForceIntervalMs = 30 * 60 * 1000;
 // pi-ui's own commands that aren't part of pi's SDK `BUILTIN_SLASH_COMMANDS` catalog
 // (see builtin-commands.ts) — kept separate so the SDK's 24 built-ins stay a faithful,
@@ -193,6 +209,9 @@ export class RuntimeController {
 	private readonly dependencies: RuntimeControllerDependencies;
 	private readonly sessionDir: string | undefined;
 	private readonly autoTitlesInFlight = new Set<string>();
+	private readonly liveWorkspaceFrames = new StreamingFrameScheduler<true>(() =>
+		this.commitLiveWorkspace(),
+	);
 
 	private constructor(
 		private runtime: AgentSessionRuntime,
@@ -206,7 +225,15 @@ export class RuntimeController {
 		this.dependencies =
 			activationOptions.dependencies ?? runtimeControllerDependencies;
 		this.sessionDir = sessionDir;
-		this.extensionUi = new ExtensionUiController(state);
+		this.extensionUi = new ExtensionUiController(state, {
+			// PIUI `channel` ops and the `pi.events` tap feed ONE channel store (the
+			// LiveWorkspaceController, published into `AppStore.extensionChannels`).
+			onChannel: (channel, payload) => {
+				this.liveWorkspace.recordChannel(channel, payload);
+				this.publishLiveWorkspace({ channels: true });
+			},
+		});
+		this.liveWorkspaceFrames.setDisplayHz(minimumDisplayHz);
 		this.foregroundGeneration = this.backgroundSessions.allocateGeneration();
 		this.foregroundObservedRunning = runtime.session.isStreaming;
 		this.models = new ModelController(
@@ -277,15 +304,21 @@ export class RuntimeController {
 		// creates, forks, resumes, or switches to, so the same host extension — and
 		// therefore the same LiveWorkspaceController — backs the pane across all of them.
 		const liveWorkspace = new LiveWorkspaceController();
-		const sessionExtensionFactories = [
-			...extensionFactories,
-			createLiveWorkspaceHostExtension(liveWorkspace),
-		];
+		// The controller instance is created below; host-extension updates that arrive before
+		// it exists (none should, since extensions bind after construction) are dropped.
+		let owner: RuntimeController | undefined;
+		const liveWorkspaceSink: LiveWorkspaceHostSink = (origin, update) =>
+			owner?.applyLiveWorkspaceHostUpdate(origin, update);
 		const createRuntime: CreateAgentSessionRuntimeFactory = async ({
 			cwd,
 			sessionManager,
 			sessionStartEvent,
 		}) => {
+			const liveWorkspaceOrigin = createLiveWorkspaceHostOrigin();
+			const sessionExtensionFactories = [
+				...extensionFactories,
+				createLiveWorkspaceHostExtension(liveWorkspaceSink, liveWorkspaceOrigin),
+			];
 			const services = await sessionPerformance.measure(
 				"runtimeServicesCreate",
 				() =>
@@ -330,6 +363,7 @@ export class RuntimeController {
 						: [createBunReadToolDefinition(cwd)],
 				}),
 			);
+			liveWorkspaceOrigins.set(session.session, liveWorkspaceOrigin);
 			return {
 				...session,
 				services,
@@ -353,6 +387,7 @@ export class RuntimeController {
 				options,
 				liveWorkspace,
 			);
+			owner = host;
 			host.bindRuntimeCallbacks(runtime);
 			await host.bindSessionExtensions();
 			return host;
@@ -393,8 +428,12 @@ export class RuntimeController {
 			// registered extension command, or a skill (state.slashCommands, kept in sync by
 			// syncSlashCommands()) is a typo or a command from an extension that isn't
 			// loaded — report it instead of sending it to the model as plain chat text.
+			// parseSlashCommand() lowercases the name, while extension, skill, and prompt
+			// template names keep their registered case — compare case-insensitively.
 			if (
-				!this.state.slashCommands.some((command) => command.name === parsed.name)
+				!this.state.slashCommands.some(
+					(command) => command.name.toLowerCase() === parsed.name,
+				)
 			) {
 				this.state.appendMessage(
 					"notice",
@@ -1176,7 +1215,7 @@ export class RuntimeController {
 
 	clearLiveWorkspaceActivity(): void {
 		this.liveWorkspace.clearActivity();
-		this.publishLiveWorkspace();
+		this.publishLiveWorkspace({ immediate: true });
 	}
 
 	async compact(customInstructions?: string): Promise<boolean> {
@@ -1326,13 +1365,23 @@ export class RuntimeController {
 	 */
 	async dispatchExtensionUiAction(request: PiUiActionRequest): Promise<boolean> {
 		const session = this.runtime.session;
-		const command = session.extensionRunner.getCommand(piUiEventCommandName);
-		if (!command) return false;
+		// Every bridge-aware extension may register its own `pi_ui_event`; the SDK then
+		// suffixes invocation names (`pi_ui_event:1`, `:2`, ...), so match on the base
+		// name and deliver to all of them — each bridge only fires handlers it registered.
+		const commands = session.extensionRunner
+			.getRegisteredCommands()
+			.filter((command) => command.name === piUiEventCommandName);
+		if (commands.length === 0) return false;
 		const args = Buffer.from(JSON.stringify(request), "utf8").toString("base64url");
-		try {
-			await command.handler(args, session.extensionRunner.createCommandContext());
-		} catch (error) {
-			console.error("Extension pi_ui_event handler failed", error);
+		for (const command of commands) {
+			try {
+				await command.handler(
+					args,
+					session.extensionRunner.createCommandContext(),
+				);
+			} catch (error) {
+				console.error("Extension pi_ui_event handler failed", error);
+			}
 		}
 		return true;
 	}
@@ -1365,6 +1414,7 @@ export class RuntimeController {
 
 	private async disposeOwnedRuntimes(): Promise<void> {
 		this.extensionUi.cancelAll();
+		this.liveWorkspaceFrames.clear();
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
 		this.catalog.dispose();
@@ -1549,8 +1599,9 @@ export class RuntimeController {
 		if (event.type === "agent_settled") backgroundSession.observedRunning = false;
 		const sessionPath =
 			backgroundSession.runtime.session.sessionManager.getSessionFile();
-		this.liveWorkspace.recordEvent(event, { background: true, sessionPath });
-		this.publishLiveWorkspace();
+		if (this.liveWorkspace.recordEvent(event, { background: true, sessionPath })) {
+			this.publishLiveWorkspace();
+		}
 		const outcome = this.reduceEvent(
 			event,
 			backgroundSession.state,
@@ -1581,8 +1632,36 @@ export class RuntimeController {
 		}
 	}
 
-	/** Publishes the current LiveWorkspaceController snapshot into AppStore. */
-	private publishLiveWorkspace(): void {
+	/**
+	 * Applies a Live Workspace host-extension update, but only when it came from the
+	 * foreground runtime's host extension instance.
+	 */
+	private applyLiveWorkspaceHostUpdate(
+		origin: LiveWorkspaceHostOrigin,
+		update: (controller: LiveWorkspaceController) => void,
+	): void {
+		if (liveWorkspaceOrigins.get(this.runtime.session) !== origin) return;
+		update(this.liveWorkspace);
+		this.publishLiveWorkspace({ channels: true });
+	}
+
+	/**
+	 * Publishes the LiveWorkspaceController snapshot into AppStore. Raw session events are
+	 * high-frequency (tool output deltas, queue updates), so ordinary publishes coalesce
+	 * through a dedicated low-rate frame scheduler; lifecycle boundaries pass `immediate`.
+	 * Channel snapshots go to the single `AppStore.extensionChannels` field.
+	 */
+	private publishLiveWorkspace(
+		options: { immediate?: boolean; channels?: boolean } = {},
+	): void {
+		if (options.channels) {
+			this.state.setExtensionChannels(this.liveWorkspace.channelSnapshots());
+		}
+		if (options.immediate) this.liveWorkspaceFrames.flush(true);
+		else this.liveWorkspaceFrames.schedule(true);
+	}
+
+	private commitLiveWorkspace(): void {
 		this.state.setLiveWorkspace(
 			this.liveWorkspace.snapshot({
 				queuedSteering: this.state.queuedSteeringMessages.length,
@@ -1660,7 +1739,7 @@ export class RuntimeController {
 			this.state.setTemporarySession(!session.sessionManager.isPersisted());
 			if (resetToolState) clearSessionEventToolState(this.tools);
 			this.liveWorkspace.resetForegroundSession();
-			this.publishLiveWorkspace();
+			this.publishLiveWorkspace({ immediate: true, channels: true });
 			this.unsubscribe = session.subscribe((event) => this.handleEvent(event));
 			this.state.setActivityText(
 				session.isStreaming || this.foregroundObservedRunning
@@ -1764,8 +1843,11 @@ export class RuntimeController {
 				);
 				this.updateSessionCatalogFromEvent(event, this.runtime);
 				this.scheduleAutoTitleAfterUserMessage(this.runtime, event);
-				this.liveWorkspace.recordEvent(event, { background: false });
-				this.publishLiveWorkspace();
+				if (this.liveWorkspace.recordEvent(event, { background: false })) {
+					this.publishLiveWorkspace({
+						immediate: event.type === "agent_settled",
+					});
+				}
 				if (this.foregroundObservedRunning && !this.state.activityText) {
 					this.state.setActivityText("Working...");
 				}
@@ -1910,7 +1992,12 @@ export class RuntimeController {
 		}));
 		const extensions = session.extensionRunner
 			.getRegisteredCommands()
-			.filter((command) => !systemSlashCommandNames.has(command.name))
+			.filter(
+				(command) =>
+					!systemSlashCommandNames.has(command.name) &&
+					// Internal PIUI reverse channel, invoked via dispatchExtensionUiAction().
+					command.name !== piUiEventCommandName,
+			)
 			.map((command) => ({
 				name: command.invocationName,
 				description: command.description ?? "",

@@ -1503,3 +1503,63 @@ test("RuntimeController forwards a registered extension slash command to the mod
 	]);
 	await controller.dispose();
 });
+
+test("RuntimeController forwards a mixed-case extension slash command instead of reporting it unknown", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	fake.runtime.session.extensionRunner.getRegisteredCommands = () => [
+		{
+			name: "FixtureCmd",
+			invocationName: "FixtureCmd",
+			description: "Mixed-case command",
+			sourceInfo: {
+				path: "/extensions/fixture.ts",
+				source: "fixture",
+				scope: "project",
+				origin: "top-level",
+			},
+			handler: async () => {},
+		},
+	];
+	const controller = await activate(state, [fake], "/workspace");
+
+	assertEquals(await controller.prompt("/FixtureCmd hello"), true);
+
+	assertEquals(fake.promptInputs, [
+		{ text: "/FixtureCmd hello", streamingBehavior: undefined },
+	]);
+	await controller.dispose();
+});
+
+test("RuntimeController hides the internal pi_ui_event reverse channel from the slash catalog", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const sourceInfo = {
+		path: "/extensions/bridge.ts",
+		source: "bridge",
+		scope: "project" as const,
+		origin: "top-level" as const,
+	};
+	fake.runtime.session.extensionRunner.getRegisteredCommands = () => [
+		{
+			name: "pi_ui_event",
+			invocationName: "pi_ui_event",
+			description: "Internal bridge",
+			sourceInfo,
+			handler: async () => {},
+		},
+		{
+			name: "visible",
+			invocationName: "visible",
+			description: "Visible command",
+			sourceInfo,
+			handler: async () => {},
+		},
+	];
+	const controller = await activate(state, [fake], "/workspace");
+
+	const names = state.slashCommands.map((command) => command.name);
+	assertEquals(names.includes("pi_ui_event"), false);
+	assertEquals(names.includes("visible"), true);
+	await controller.dispose();
+});
