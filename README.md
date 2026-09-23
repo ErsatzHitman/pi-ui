@@ -275,8 +275,9 @@ pi-ui hosts pi extensions in `rpc` mode and renders their UI natively instead of
   reusing pi-ui's own components — no per-extension code.
 - Extensions that call `custom()`, `setWidget`, `setFooter`/`setHeader`, or read keyboard input
   through `onTerminalInput` get a **terminal surface**: a headless TUI host renders their ANSI
-  output as themed HTML (light and dark) inside a dialog or an inline panel below the editor, and
-  forwards browser keys (including modifiers, arrows, and paste) back to the extension.
+  output as themed HTML (light and dark) inside a dialog, or an inline panel above the editor (a
+  footer or a below-editor widget renders after it instead), and forwards browser keys (including
+  modifiers, arrows, and paste) back to the extension.
 - Slash commands — every built-in plus every extension-registered command — get argument
   completions and native handling (pickers, dialogs, or notices) instead of being sent to the
   model as chat text.
