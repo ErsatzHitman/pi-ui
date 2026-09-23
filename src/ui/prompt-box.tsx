@@ -114,6 +114,14 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 									});
 								}
 							`,
+							// Aborting the previous controller before creating a fresh one (rather
+							// than passing requestCancellation: "auto", which only dedupes by
+							// method+URL) guarantees a slower, older completions response can
+							// never land after — and overwrite — a newer one: its fetch is
+							// cancelled synchronously, in this same handler, before the next
+							// request is ever issued. See argument-completions.ts for the
+							// matching result-count cap (the other half of the stale/unbounded
+							// completions gap).
 							"data-on:pi-ui-argument-query__debounce.20ms": `
 								if (typeof evt.detail?.command === 'string') {
 									$_argumentSearchController?.abort?.();
@@ -150,7 +158,10 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 							$_argumentSearchController = '';
 							$_argumentPickerOpen = false;
 						`}
-						data-effect={`if ($_sessionTransitionStatus !== 'loading') {
+						data-effect={`if (
+							$_sessionTransitionStatus !== 'loading' &&
+							!window.matchMedia('(pointer: coarse)').matches
+						) {
 							el.focus({ preventScroll: true });
 							el.selectionStart = el.value.length;
 							el.selectionEnd = el.value.length;

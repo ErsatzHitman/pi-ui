@@ -7,7 +7,8 @@ export type TranscriptMessageRole =
 	| "thought"
 	| "compaction"
 	| "summary"
-	| "skill";
+	| "skill"
+	| "custom";
 
 export type TranscriptMessageTitlePart = {
 	text: string;
@@ -42,6 +43,12 @@ export type TranscriptMessage = {
 	 * labelling every notice "Warning:" (see r1-audit #24).
 	 */
 	noticeTone?: "info" | "warning" | "error";
+	/**
+	 * Generic collapsible payload for `role: "custom"` messages (an extension's
+	 * `pi.sendMessage`/`pi.appendEntry` `details`/`data`), pre-formatted as text by the
+	 * caller (see `tool-presentation.ts`'s `summarizeValue`). Never LLM context.
+	 */
+	details?: string;
 };
 
 export type TranscriptMessageOptions = Pick<
@@ -53,6 +60,7 @@ export type TranscriptMessageOptions = Pick<
 	| "format"
 	| "attachments"
 	| "noticeTone"
+	| "details"
 >;
 
 export type TranscriptMessageInput = Omit<TranscriptMessage, "id">;

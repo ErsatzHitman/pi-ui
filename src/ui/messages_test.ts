@@ -134,6 +134,49 @@ test("system messages make share URLs actionable and escape text", () => {
 	assertStringIncludes(html, 'target="_blank"');
 });
 
+test("custom messages render their customType as the label and markdown content", () => {
+	const html = renderMessage({
+		id: "custom-1",
+		presentationState: "plain",
+		presentationVersion: 1,
+		role: "custom",
+		text: "**bold** status",
+		meta: "deploy_status",
+		timestamp: new Date(0),
+	});
+	assertStringIncludes(html, "deploy_status");
+	assertStringIncludes(html, "<strong>bold</strong>");
+	assertStringExcludes(html, "Details");
+});
+
+test("custom messages with details render a nested collapsible with escaped text", () => {
+	const html = renderMessage({
+		id: "custom-2",
+		presentationState: "plain",
+		presentationVersion: 1,
+		role: "custom",
+		text: "build failed",
+		meta: "ci_result",
+		details: '<script>alert("x")</script>\nexit code 1',
+		timestamp: new Date(0),
+	});
+	assertStringIncludes(html, "Details");
+	assertStringIncludes(html, "&lt;script&gt;");
+	assertStringExcludes(html, "<script>");
+});
+
+test("a custom message without a customType falls back to a generic label", () => {
+	const html = renderMessage({
+		id: "custom-3",
+		presentationState: "plain",
+		presentationVersion: 1,
+		role: "custom",
+		text: "hi",
+		timestamp: new Date(0),
+	});
+	assertStringIncludes(html, "custom");
+});
+
 test("bodyless tools show only their title", () => {
 	const html = renderMessage(tool());
 	assertStringIncludes(html, "Read file");

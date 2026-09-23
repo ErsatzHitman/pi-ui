@@ -1381,7 +1381,7 @@ test("RuntimeController rejects an invalid /thinking level without prompting the
 	await controller.dispose();
 });
 
-test("RuntimeController reports the current model for a bare /model", async () => {
+test("RuntimeController opens the model picker for a bare /model, without prompting the model", async () => {
 	const state = new AppStore();
 	const fake = fakeRuntime();
 	const controller = await activate(state, [fake], "/workspace");
@@ -1397,18 +1397,20 @@ test("RuntimeController reports the current model for a bare /model", async () =
 		],
 		"anthropic/opus",
 	);
+	let opened = false;
+	state.requestOpenModelPicker = () => {
+		opened = true;
+	};
 
 	assertEquals(await controller.prompt("/model"), true);
 	await new Promise((resolve) => setTimeout(resolve, 0));
 
 	assertEquals(fake.promptInputs, []);
-	const text = state.messages.at(-1)?.text ?? "";
-	assertEquals(text.includes("Current model: anthropic/opus"), true);
-	assertEquals(text.includes("anthropic/opus"), true);
+	assertEquals(opened, true);
 	await controller.dispose();
 });
 
-test("RuntimeController summarizes scoped models for /scoped-models", async () => {
+test("RuntimeController opens the model picker for /scoped-models, without prompting the model", async () => {
 	const state = new AppStore();
 	const fake = fakeRuntime();
 	const controller = await activate(state, [fake], "/workspace");
@@ -1431,12 +1433,16 @@ test("RuntimeController summarizes scoped models for /scoped-models", async () =
 		],
 		"anthropic/opus",
 	);
+	let opened = false;
+	state.requestOpenModelPicker = () => {
+		opened = true;
+	};
 
 	assertEquals(await controller.prompt("/scoped-models"), true);
 	await new Promise((resolve) => setTimeout(resolve, 0));
 
 	assertEquals(fake.promptInputs, []);
-	assertEquals(state.messages.at(-1)?.text.includes("anthropic/opus"), true);
+	assertEquals(opened, true);
 	await controller.dispose();
 });
 

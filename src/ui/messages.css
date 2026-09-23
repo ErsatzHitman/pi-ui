@@ -493,6 +493,13 @@
 		color: var(--text-muted);
 		font-size: var(--text-base);
 	}
+	.context-details-nested {
+		margin-block-start: 0.5rem;
+	}
+	.context-summary-nested {
+		font-size: var(--text-sm);
+		opacity: 0.85;
+	}
 
 	.tool-header {
 		display: flex;

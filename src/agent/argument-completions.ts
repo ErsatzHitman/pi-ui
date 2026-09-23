@@ -14,8 +14,19 @@ import type { AppModel, AppThinkingLevel } from "../state/app-store.ts";
 /** Extension commands get this long to answer before their completions are dropped. */
 export const argumentCompletionsTimeoutMs = 2000;
 
+// An extension's getArgumentCompletions (or a huge model/thinking-level catalog) could
+// return an unbounded list; the picker renders every row into the DOM on every keystroke,
+// so cap it defensively rather than trusting every current and future caller to do so.
+export const argumentCompletionsResultLimit = 100;
+
 function matchesQuery(candidate: string, query: string): boolean {
 	return query === "" || candidate.toLowerCase().includes(query.toLowerCase());
+}
+
+function capCompletions(items: readonly AutocompleteItem[]): readonly AutocompleteItem[] {
+	return items.length > argumentCompletionsResultLimit
+		? items.slice(0, argumentCompletionsResultLimit)
+		: items;
 }
 
 function modelCompletions(
@@ -78,8 +89,9 @@ export async function resolveArgumentCompletions(
 ): Promise<readonly AutocompleteItem[]> {
 	const name = commandName.trim().toLowerCase();
 	if (!name) return [];
-	if (name === "model") return modelCompletions(models, argumentPrefix);
-	if (name === "thinking") return thinkingCompletions(thinkingLevels, argumentPrefix);
+	if (name === "model") return capCompletions(modelCompletions(models, argumentPrefix));
+	if (name === "thinking")
+		return capCompletions(thinkingCompletions(thinkingLevels, argumentPrefix));
 
 	const command = runtime.session.extensionRunner
 		.getRegisteredCommands()
@@ -90,7 +102,7 @@ export async function resolveArgumentCompletions(
 			Promise.resolve(command.getArgumentCompletions(argumentPrefix)),
 			argumentCompletionsTimeoutMs,
 		);
-		return result ?? [];
+		return capCompletions(result ?? []);
 	} catch {
 		return [];
 	}

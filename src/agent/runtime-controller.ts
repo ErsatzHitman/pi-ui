@@ -21,6 +21,7 @@ import { resolvePath as canonicalizeSessionPath } from "../../node_modules/@eare
 import agentPackageJson from "../../node_modules/@earendil-works/pi-coding-agent/package.json" with { type: "json" };
 import type { PiUiActionRequest } from "../extension-surface-types.ts";
 import { sessionPerformance } from "../perf/session-performance.ts";
+import { endpoints } from "../server/routes/endpoints.ts";
 import {
 	type AppSlashCommand,
 	AppStore,
@@ -474,10 +475,12 @@ export class RuntimeController {
 	private dispatchBuiltinCommand(name: BuiltinCommandName, args: string): void {
 		switch (name) {
 			case "settings":
-			case "hotkeys":
-				// No separate settings/hotkeys screen exists; both open the command palette,
-				// which already lists every command with its shortcut.
+				// No separate settings screen exists; opens the command palette, which
+				// lists every preference-changing command (theme, fonts, model, ...).
 				this.state.openCommandDialog();
+				return;
+			case "hotkeys":
+				this.state.openHotkeysDialog();
 				return;
 			case "model":
 				void this.dispatchModelCommand(args);
@@ -559,15 +562,7 @@ export class RuntimeController {
 	private async dispatchModelCommand(args: string): Promise<void> {
 		const ref = args.trim();
 		if (!ref) {
-			const current = this.state.currentModel ?? "(none)";
-			const available =
-				this.state.models
-					.map((model) => `${model.provider}/${model.id}`)
-					.join(", ") || "(none configured)";
-			this.state.appendMessage(
-				"notice",
-				`Current model: ${current}\nUse /model <provider/model> to switch. Available: ${available}`,
-			);
+			this.state.requestOpenModelPicker();
 			return;
 		}
 		if (await this.setModel(ref)) {
@@ -596,15 +591,10 @@ export class RuntimeController {
 	}
 
 	private dispatchScopedModelsCommand(): void {
-		const scoped = this.state.models.filter((model) => model.scoped);
-		const summary =
-			scoped.length > 0
-				? scoped.map((model) => `${model.provider}/${model.id}`).join(", ")
-				: "(cycling through all configured models)";
-		this.state.appendMessage(
-			"notice",
-			`Models enabled for Ctrl+P cycling: ${summary}\nToggle scoping from the model picker.`,
-		);
+		// The model picker (prompt-pickers.tsx) already has a per-row star toggle for
+		// exactly this ("scoped for Ctrl+P cycling"), so it doubles as /scoped-models'
+		// picker rather than needing a separate scope-only UI.
+		this.state.requestOpenModelPicker();
 	}
 
 	private async dispatchNameCommand(args: string): Promise<void> {
@@ -689,19 +679,26 @@ export class RuntimeController {
 		const sessionManager = this.runtime.session.sessionManager;
 		const cwd = sessionManager.getCwd();
 		const trimmed = argPath?.trim();
-		const jsonl = trimmed ? extname(trimmed).toLowerCase() === ".jsonl" : false;
-		const target = trimmed
-			? isAbsolute(trimmed)
-				? trimmed
-				: resolvePath(cwd, trimmed)
-			: resolvePath(cwd, `${this.exportDefaultBasename()}.html`);
+		// The exported file always lands directly inside the workspace cwd, ignoring any
+		// directory components the caller supplied (`basename` only) — unlike the TUI,
+		// this UI can be reached from other devices on a LAN (see the server's --host
+		// docs), so `/export <path>` must never be able to write a file anywhere else the
+		// server process can reach. This also lets the download link below reuse the
+		// existing, already-workspace-scoped workspace file download route.
+		const requestedName = trimmed ? basename(trimmed) : undefined;
+		const jsonl = requestedName
+			? extname(requestedName).toLowerCase() === ".jsonl"
+			: false;
+		const filename = requestedName || `${this.exportDefaultBasename()}.html`;
+		const target = resolvePath(cwd, filename);
 		try {
 			const outputPath = jsonl
 				? exportSessionToJsonl(sessionManager, target)
 				: await exportSessionToHtml(sessionManager, undefined, target);
+			const downloadUrl = `${endpoints.workspaceFileContent}?download=1&path=${encodeURIComponent(basename(outputPath))}`;
 			this.state.appendMessage(
 				"system",
-				`Exported session to ${formatHomePath(outputPath)}`,
+				`Exported session to ${formatHomePath(outputPath)}\n${downloadUrl}`,
 			);
 		} catch (error) {
 			this.state.appendMessage(

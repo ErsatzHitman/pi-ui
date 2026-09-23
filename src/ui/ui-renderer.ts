@@ -568,6 +568,13 @@ export class UiRenderer implements AppStorePresentation {
 				scripts.add(
 					"requestAnimationFrame(() => document.getElementById('model-select-input')?.focus())",
 				);
+			if (effect.type === "open-model-picker") {
+				// Same script the switch-model keybind runs (prompt-pickers.tsx): clicking
+				// the popovertarget trigger opens the native popover and reuses its own
+				// open handler (which also refreshes the model list) rather than
+				// duplicating that logic here.
+				scripts.add("document.getElementById('model-select-trigger')?.click();");
+			}
 			if (effect.type === "dialog") {
 				scripts.add(
 					effect.open

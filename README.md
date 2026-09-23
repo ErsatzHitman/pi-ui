@@ -114,6 +114,26 @@ bun ci
 bun run dev
 ```
 
+## server options
+
+pi-ui listens on `127.0.0.1:31415` by default. `pi-ui --help` prints every option; the ones
+relevant to reaching pi-ui from another device (a phone, another computer on the same LAN):
+
+```sh
+pi-ui --host 0.0.0.0 --auth-token <a long random token>
+```
+
+- `--host <hostname>` / `PI_UI_HOST` — binds a specific interface. Anything other than
+  `127.0.0.1`, `::1`, or `localhost` makes pi-ui reachable from other devices on that
+  network — full access to your sessions, workspace files, and provider credentials.
+- `--auth-token <token>` / `PI_UI_AUTH_TOKEN` — opt-in bearer token pi-ui then requires on
+  every request. Without it, `--host` on anything but loopback is unauthenticated: pi-ui
+  starts anyway (a warning is printed) but does **not** require one — pass a token whenever
+  you bind beyond loopback. Open `http://<host>:<port>/?token=<token>` once per browser; a
+  cookie remembers it after that, so links, the SSE stream, and later visits don't need it
+  in the URL again.
+- `--port <port>` / `PI_UI_PORT` — listen port.
+
 ## configuration
 
 pi-ui stores its configuration in:

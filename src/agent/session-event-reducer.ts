@@ -172,6 +172,9 @@ export function reduceSessionEvent(
 				if (message.attachments?.length) {
 					options.attachments = message.attachments;
 				}
+				if (message.details !== undefined) {
+					options.details = message.details;
+				}
 				state.appendMessage(message.role, message.text, options);
 			}
 			break;
