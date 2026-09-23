@@ -19,6 +19,7 @@ import {
 	bindPickers,
 	closePickers,
 	completeSlashCommand,
+	copyLastAssistantMessage,
 	isFileOpen,
 	isOpen as isPickerOpen,
 	syncPickerSelection,
@@ -53,6 +54,7 @@ window.piUi = {
 	pickers: {
 		close: closePickers,
 		complete: completeSlashCommand,
+		copyLastMessage: copyLastAssistantMessage,
 		fuzzyMatch,
 		isFileOpen,
 		isOpen: isPickerOpen,

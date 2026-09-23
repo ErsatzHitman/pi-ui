@@ -21,6 +21,8 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 				prompt: state.promptEditorText,
 				_filePickerOpen: false,
 				_fileSearchController: "",
+				_argumentPickerOpen: false,
+				_argumentSearchController: "",
 				_slashPickerOpen: false,
 				_promptSubmitting: false,
 				fileQuery: "",
@@ -28,6 +30,7 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 			data-on:pointerdown__outside="window.piUi.pickers.close()"
 			data-effect="
 				$_filePickerOpen;
+				$_argumentPickerOpen;
 				$_slashPickerOpen;
 				$prompt;
 				window.piUi.pickers.sync(true);
@@ -51,6 +54,14 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 					data-show="$_filePickerOpen"
 				>
 					<div id="file-picker-results" aria-live="polite" />
+				</div>
+				<div
+					id="prompt-argument-popover"
+					class="prompt-picker-popover"
+					style="display: none;"
+					data-show="$_argumentPickerOpen"
+				>
+					<div id="argument-picker-results" aria-live="polite" />
 				</div>
 			</div>
 			{renderPromptQueue(state)}
@@ -101,6 +112,19 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 									});
 								}
 							`,
+							"data-on:pi-ui-argument-query__debounce.20ms": `
+								if (typeof evt.detail?.command === 'string') {
+									$_argumentSearchController?.abort?.();
+									$_argumentSearchController = new AbortController();
+									@get('${endpoints.commandArgumentCompletions}', {
+										payload: {
+											argumentCommand: evt.detail.command,
+											argumentPrefix: evt.detail.prefix,
+										},
+										requestCancellation: $_argumentSearchController,
+									});
+								}
+							`,
 							"data-on:keydown__window": keybindAction(
 								"focus-prompt",
 								`el.focus({ preventScroll: true });
@@ -118,6 +142,11 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 							$_fileSearchController?.abort?.();
 							$_fileSearchController = '';
 							$_filePickerOpen = false;
+						`}
+						data-on:pi-ui-argument-close={`
+							$_argumentSearchController?.abort?.();
+							$_argumentSearchController = '';
+							$_argumentPickerOpen = false;
 						`}
 						data-effect={`if ($_sessionTransitionStatus !== 'loading') {
 							el.focus({ preventScroll: true });
@@ -154,6 +183,11 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 							!window.piUi.pickers.isOpen()
 						) {
 							evt.preventDefault();
+							if ($prompt.trim() === '/copy') {
+								window.piUi.pickers.copyLastMessage();
+								window.piUi.prompt.clear();
+								return;
+							}
 							window.piUi.messageScroll.scrollBottom();
 							const submittedPrompt = $prompt;
 							$_promptSubmitting = true;

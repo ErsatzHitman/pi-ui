@@ -16,6 +16,7 @@ export type RouteRuntime = Pick<
 	| "deleteSession"
 	| "dispatchExtensionUiAction"
 	| "forkSessionToWorkspace"
+	| "getArgumentCompletions"
 	| "getWorkspacePath"
 	| "listSessions"
 	| "logout"

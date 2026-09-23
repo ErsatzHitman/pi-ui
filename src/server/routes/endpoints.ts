@@ -73,6 +73,7 @@ export const endpoints = {
 	extensionUiResponse: "/extensions/ui/respond",
 	extensionUiEditor: "/extensions/ui/editor",
 	extensionUiAction: "/extensions/ui/action",
+	commandArgumentCompletions: "/commands/argument-completions",
 	treeOpen: "/tree/open",
 	treeNavigate: "/tree/navigate",
 	filesSearch: "/files/search",

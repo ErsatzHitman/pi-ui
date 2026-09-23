@@ -2,6 +2,7 @@ import { focusPromptEnd, promptInput, setPromptValue } from "./prompt.js";
 
 let activeFilePrefix;
 let filePickerSuppressUntilInput = false;
+let activeArgumentQuery;
 let slashCommandFilter;
 
 export function extractFilePrefix(value, cursor) {
@@ -9,6 +10,15 @@ export function extractFilePrefix(value, cursor) {
 	const token = /(?:^|[\s"'=])(@(?:"[^"]*|[^\s"'=]*))$/.exec(before)?.[1];
 	if (!token) return undefined;
 	return { start: cursor - token.length, end: cursor, query: token.slice(1) };
+}
+
+// "/name rest of the line" up to the caret, single line only (a slash command's name is
+// always the prompt's first token). Mirrors extractFilePrefix's shape/contract.
+export function extractArgumentQuery(value, cursor) {
+	const before = value.slice(0, cursor);
+	const match = /^\/(\S+)[ \t]([^\n]*)$/.exec(before);
+	if (!match) return undefined;
+	return { command: match[1].toLowerCase(), prefix: match[2] };
 }
 
 export function completeFileValue(inputValue, match, value) {
@@ -28,8 +38,12 @@ export function isFileOpen() {
 	return isPopoverVisible("prompt-file-popover");
 }
 
+export function isArgumentOpen() {
+	return isPopoverVisible("prompt-argument-popover");
+}
+
 export function isOpen() {
-	return isFileOpen() || isSlashOpen();
+	return isFileOpen() || isSlashOpen() || isArgumentOpen();
 }
 
 export function bindPickers(options) {
@@ -56,6 +70,7 @@ function syncFromPrompt(event) {
 	if (event.target !== promptInput() || event.isComposing) return;
 	filePickerSuppressUntilInput = false;
 	queueFileSearch(event.target);
+	queueArgumentSearch(event.target);
 }
 
 function queueFileSearch(input) {
@@ -80,11 +95,61 @@ function queueFileSearch(input) {
 	);
 }
 
+// Argument completions apply to whatever the extension/built-in returned for the whole
+// remaining argument text (not a sub-token), so the picker only re-queries when the
+// command name or the trailing argument text actually changed.
+function queueArgumentSearch(input) {
+	if (document.activeElement !== input) return;
+	// A "@file" mention inside the argument text takes the file picker instead.
+	if (extractFilePrefix(input.value, input.selectionStart)) {
+		closeArgumentPicker();
+		return;
+	}
+	const match = extractArgumentQuery(input.value, input.selectionStart);
+	if (!match) {
+		closeArgumentPicker();
+		return;
+	}
+	if (
+		activeArgumentQuery?.command === match.command &&
+		activeArgumentQuery.prefix === match.prefix
+	)
+		return;
+	activeArgumentQuery = match;
+	input.dispatchEvent(
+		new CustomEvent("pi-ui-argument-query", { bubbles: true, detail: match }),
+	);
+}
+
+function closeArgumentPicker() {
+	if (!activeArgumentQuery) return;
+	activeArgumentQuery = undefined;
+	promptInput()?.dispatchEvent(
+		new CustomEvent("pi-ui-argument-close", { bubbles: true }),
+	);
+}
+
+function applyArgumentCompletion(value) {
+	const input = promptInput();
+	if (!input || !activeArgumentQuery) return;
+	const cursor = input.selectionStart;
+	const match = /^(\/\S+[ \t])([^\n]*)$/.exec(input.value.slice(0, cursor));
+	if (!match) return;
+	const before = input.value.slice(0, match[1].length) + value;
+	input.value = before + input.value.slice(cursor);
+	input.selectionStart = before.length;
+	input.selectionEnd = before.length;
+	input.dispatchEvent(new Event("input", { bubbles: true }));
+	input.focus();
+	closeArgumentPicker();
+}
+
 function handleClick(event) {
 	const target = event.target;
 	if (!(target instanceof Element)) return;
 	const slash = target.closest('[data-picker-kind="slash"]');
 	const file = target.closest('[data-picker-kind="file"]');
+	const argument = target.closest('[data-picker-kind="argument"]');
 	if (target.closest("[data-file-trigger]")) {
 		event.preventDefault();
 		insertFilePrefix();
@@ -93,6 +158,9 @@ function handleClick(event) {
 	} else if (file instanceof HTMLElement) {
 		event.preventDefault();
 		applyFileCompletion(file.dataset.pickerValue ?? "");
+	} else if (argument instanceof HTMLElement) {
+		event.preventDefault();
+		applyArgumentCompletion(argument.dataset.pickerValue ?? "");
 	}
 }
 
@@ -112,7 +180,11 @@ function handleKeydown(event) {
 		closePickers(true);
 		return;
 	}
-	const selector = isFileOpen() ? "[data-file-row]" : "[data-slash-row]";
+	const selector = isFileOpen()
+		? "[data-file-row]"
+		: isArgumentOpen()
+			? "[data-argument-row]"
+			: "[data-slash-row]";
 	if (event.code === "ArrowDown" || event.code === "ArrowUp") {
 		event.preventDefault();
 		selectPickerRow(selector, event.code === "ArrowDown" ? 1 : -1);
@@ -141,6 +213,19 @@ export function completeSlashCommand(name) {
 	closePickers();
 }
 
+// Native `/copy` handling: the SDK's built-in copies the last assistant message to the
+// clipboard, a browser-only capability the backend can't perform for itself — so this
+// (and its callers in prompt-box.tsx / pickers.tsx) intercept "/copy" entirely client-side
+// and never send it to the server. `RuntimeController.prompt()` still no-ops "/copy" too,
+// as a defensive fallback for any caller that posts it anyway.
+export function copyLastAssistantMessage() {
+	const nodes = document.querySelectorAll(".message-assistant .markdown-content");
+	const text = nodes[nodes.length - 1]?.textContent?.trim();
+	if (!text) return false;
+	navigator.clipboard?.writeText(text)?.catch?.(() => {});
+	return true;
+}
+
 function insertFilePrefix() {
 	const input = promptInput();
 	if (!input) return;
@@ -156,6 +241,7 @@ function insertFilePrefix() {
 
 export function closePickers(suppressUntilInput = false) {
 	closeFilePicker(suppressUntilInput);
+	closeArgumentPicker();
 	promptInput()?.dispatchEvent(
 		new CustomEvent("pi-ui-picker-close", { bubbles: true }),
 	);
@@ -234,9 +320,11 @@ export function syncPickerSelection(reset = false) {
 		if (!input) return;
 		const listId = isFileOpen()
 			? "file-picker-list"
-			: isSlashOpen()
-				? "slash-picker-list"
-				: undefined;
+			: isArgumentOpen()
+				? "argument-picker-list"
+				: isSlashOpen()
+					? "slash-picker-list"
+					: undefined;
 		if (reset && listId) {
 			if (listId === "slash-picker-list") rankSlashCommands(input.value);
 			document.getElementById(listId).scrollTop = 0;

@@ -308,6 +308,78 @@ test.skipIf(!fdPath)(
 	},
 );
 
+test("argument completions route renders picker results from the active runtime", async () => {
+	const calls: Array<{ command: string; argumentPrefix: string }> = [];
+	const context = fakeContext({
+		host: fakeHost({
+			getArgumentCompletions: async (command, argumentPrefix) => {
+				calls.push({ command, argumentPrefix });
+				return [
+					{
+						value: "anthropic/opus",
+						label: "anthropic/opus",
+						description: "Opus",
+					},
+				];
+			},
+		}),
+	});
+	const router = createRouter(context);
+
+	const response = await router.fetch(
+		signalGet(endpoints.commandArgumentCompletions, {
+			argumentCommand: "model",
+			argumentPrefix: "op",
+		}),
+	);
+	assertEquals(response.status, 200);
+	assertEquals(response.headers.get("content-type"), "text/event-stream");
+	assertEquals(calls, [{ command: "model", argumentPrefix: "op" }]);
+	const body = await response.text();
+	assertStringIncludes(body, 'id="argument-picker-results"');
+	assertStringIncludes(body, "anthropic/opus");
+	assertStringIncludes(body, "datastar-patch-elements");
+	assertStringIncludes(body, '"_argumentPickerOpen":true');
+});
+
+test("argument completions route reports no results and requires a command", async () => {
+	const context = fakeContext({
+		host: fakeHost({ getArgumentCompletions: async () => [] }),
+	});
+	const router = createRouter(context);
+
+	const empty = await router.fetch(
+		signalGet(endpoints.commandArgumentCompletions, {
+			argumentCommand: "unknown",
+			argumentPrefix: "",
+		}),
+	);
+	assertStringIncludes(await empty.text(), '"_argumentPickerOpen":false');
+
+	assertEquals(
+		(
+			await router.fetch(
+				signalGet(endpoints.commandArgumentCompletions, { argumentPrefix: "x" }),
+			)
+		).status,
+		400,
+	);
+});
+
+test("argument completions route returns 503 when no runtime is available", async () => {
+	const context = fakeContext();
+	context.resources.host = undefined;
+	const router = createRouter(context);
+
+	const response = await router.fetch(
+		signalGet(endpoints.commandArgumentCompletions, {
+			argumentCommand: "model",
+			argumentPrefix: "",
+		}),
+	);
+	assertEquals(response.status, 503);
+});
+
 test("workspace search returns matching directories", async () => {
 	const workspace = await makeTempDir();
 	try {
@@ -1181,6 +1253,7 @@ function fakeHost(overrides: Partial<RuntimeResource> = {}): RuntimeResource {
 		dispatchExtensionUiAction: async () => true,
 		dispose: async () => {},
 		forkSessionToWorkspace: async () => ({ status: "success" }),
+		getArgumentCompletions: async () => [],
 		getWorkspacePath: () => process.cwd(),
 		listSessions: async () => {},
 		logout: () => true,
