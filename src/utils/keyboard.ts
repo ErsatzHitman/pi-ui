@@ -115,10 +115,10 @@ export function shortcutMatchExpression(
 // declaration carries no open-dictionary type annotation — `formatKeyId` below indexes it
 // with an arbitrary token straight from `keyId.split("+")`.
 const keyIdTokenLabels = new Map<string, string>([
-	["ctrl", "Ctrl"],
-	["alt", "Alt"],
-	["shift", "Shift"],
-	["super", "Cmd"],
+	["ctrl", "ctrl"],
+	["alt", "alt"],
+	["shift", "shift"],
+	["super", "cmd"],
 	["escape", "Esc"],
 	["esc", "Esc"],
 	["enter", "Enter"],
@@ -140,8 +140,8 @@ const keyIdTokenLabels = new Map<string, string>([
 ]);
 
 /**
- * A display label for a pi-tui `KeyId` string (`"alt+o"` → `"Alt O"`,
- * `"ctrl+shift+p"` → `"Ctrl Shift P"`, `"escape"` → `"Esc"`) — a plain
+ * A display label for a pi-tui `KeyId` string (`"alt+o"` → `"alt O"`,
+ * `"ctrl+shift+p"` → `"ctrl shift P"`, `"escape"` → `"Esc"`) — a plain
  * `Map` lookup rather than routing through `ShortcutSpec` (which only
  * covers pi-ui's own narrower letter/digit/`/`/`^` catalog and would drop
  * every special key an extension shortcut is free to use). Only used for
