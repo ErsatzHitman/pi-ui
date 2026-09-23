@@ -321,6 +321,7 @@ export function renderPage(
 								state.liveWorkspace,
 								state.liveWorkspacePreferences,
 								state.usage,
+								state,
 							)}
 						</div>
 					</div>

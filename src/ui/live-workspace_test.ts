@@ -188,25 +188,56 @@ test("the activity tab disables Clear once the log is empty", () => {
 });
 
 test("the extensions tab falls back to raw JSON for an untyped channel payload", () => {
-	const html = renderLiveWorkspaceData(
-		snapshot({
-			channels: [
-				{
-					channel: "workflow:progress",
-					payload: { active: true, name: "Refactor" },
-					updatedAt: 100,
-				},
-			],
-		}),
-		{ tab: "extensions" },
-		emptyUsage,
-	);
+	const html = renderLiveWorkspaceData(snapshot(), { tab: "extensions" }, emptyUsage, {
+		extensionElements: [],
+		extensionChannels: [
+			{
+				channel: "workflow:progress",
+				payload: { active: true, name: "Refactor" },
+				updatedAt: 100,
+			},
+		],
+	});
 	assertStringIncludes(html, "workflow:progress");
 	assertStringIncludes(html, "&quot;active&quot;: true");
 	assertStringIncludes(html, "Refactor");
 });
 
-test("the extensions tab reports no activity when no channel has been observed", () => {
+test("the extensions tab reuses the shared PIUI renderer and links sheets to their dialog", () => {
+	const html = renderLiveWorkspaceData(snapshot(), { tab: "extensions" }, emptyUsage, {
+		extensionElements: [
+			{
+				id: "fleet",
+				ns: "subagents",
+				kind: "roster",
+				placement: "pinned",
+				title: "Fleet",
+				data: { rows: [{ label: "scout", status: "running" }] },
+				revision: 1,
+				updatedAt: 1,
+			},
+			{
+				id: "review",
+				ns: "workflow",
+				kind: "panel",
+				placement: "sheet",
+				title: "Review plan",
+				data: {},
+				revision: 1,
+				updatedAt: 1,
+			},
+		],
+		extensionChannels: [],
+	});
+	assertStringIncludes(html, 'class="piui-element piui-element-roster"');
+	assertStringIncludes(html, "Fleet");
+	assertStringIncludes(html, 'commandfor="piui-sheet-workflow-review"');
+	assertStringIncludes(html, "Review plan");
+	// The sheet's own <dialog> lives in #piui-sheets; the tab must not duplicate it.
+	assertFalse(html.includes("<dialog"));
+});
+
+test("the extensions tab reports no activity when nothing has been observed", () => {
 	const html = renderLiveWorkspaceData(snapshot(), { tab: "extensions" }, emptyUsage);
-	assertStringIncludes(html, "No extension channel activity observed yet.");
+	assertStringIncludes(html, "No extension UI or channel activity observed yet.");
 });

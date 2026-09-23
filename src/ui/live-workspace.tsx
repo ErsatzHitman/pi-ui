@@ -1,4 +1,9 @@
 import { toggleLiveWorkspaceAction } from "../commands/actions.ts";
+import {
+	isPiUiSheetElement,
+	type PiUiElement,
+	piUiDialogId,
+} from "../extension-surface-types.ts";
 import { activeKeybind, keybindAction, keybindAria } from "../keybinds.ts";
 import {
 	liveWorkspaceRatioDefault,
@@ -17,8 +22,20 @@ import { formatTokens } from "../utils/format.ts";
 import { Icon } from "./icon.tsx";
 import { Activity, Bot, Gauge, List, X } from "./icons.ts";
 import { ShortcutKbd, ShortcutTooltip } from "./keyboard.tsx";
+import { renderPiUiElement } from "./pi-ui-elements.tsx";
 import { resumeSessionAction } from "./session-transition.tsx";
 import { syncHtml } from "./sync-html.ts";
+
+/** Extension state the Extensions tab reads straight from AppStore (one source of truth). */
+export type LiveWorkspaceExtensions = Pick<
+	AppStateSnapshot,
+	"extensionElements" | "extensionChannels"
+>;
+
+const noExtensions: LiveWorkspaceExtensions = {
+	extensionElements: [],
+	extensionChannels: [],
+};
 
 const tabLabels: Record<LiveWorkspaceTab, string> = {
 	now: "Now",
@@ -118,6 +135,7 @@ export function renderLiveWorkspace(
 	snapshot: LiveWorkspaceSnapshot,
 	preferences: LiveWorkspacePreferences,
 	usage: AppUsage,
+	extensions: LiveWorkspaceExtensions = noExtensions,
 ): string {
 	return syncHtml(
 		<section
@@ -184,7 +202,7 @@ export function renderLiveWorkspace(
 				</button>
 			</header>
 			<div class="live-workspace-body raised-surface">
-				{renderLiveWorkspaceData(snapshot, preferences, usage)}
+				{renderLiveWorkspaceData(snapshot, preferences, usage, extensions)}
 			</div>
 		</section>,
 	);
@@ -195,6 +213,7 @@ export function renderLiveWorkspaceData(
 	snapshot: LiveWorkspaceSnapshot,
 	preferences: LiveWorkspacePreferences,
 	usage: AppUsage,
+	extensions: LiveWorkspaceExtensions = noExtensions,
 ): string {
 	const tab = preferences.tab ?? "now";
 	return syncHtml(
@@ -237,7 +256,7 @@ export function renderLiveWorkspaceData(
 				data-show="$liveWorkspacePreferences.tab === 'extensions'"
 				style={tab === "extensions" ? undefined : "display: none"}
 			>
-				{renderExtensionsTab(snapshot)}
+				{renderExtensionsTab(extensions)}
 			</section>
 		</div>,
 	);
@@ -497,32 +516,85 @@ function renderActivityTab(snapshot: LiveWorkspaceSnapshot): string {
 	);
 }
 
-function renderExtensionsTab(snapshot: LiveWorkspaceSnapshot): string {
-	if (snapshot.channels.length === 0) {
+function renderExtensionsTab(extensions: LiveWorkspaceExtensions): string {
+	const elements = extensions.extensionElements.filter(
+		(element) => element.kind !== "composer",
+	);
+	const inline = elements.filter((element) => !isPiUiSheetElement(element));
+	const sheets = elements.filter(isPiUiSheetElement);
+	const channels = extensions.extensionChannels;
+	if (elements.length === 0 && channels.length === 0) {
 		return syncHtml(
 			<p class="fine-print live-workspace-empty">
-				No extension channel activity observed yet.
+				No extension UI or channel activity observed yet.
 			</p>,
 		);
 	}
 	return syncHtml(
-		<ul class="live-workspace-channel-list">
-			{snapshot.channels.map((channel) => (
-				<li class="live-workspace-channel-row">
-					<header>
-						<span class="live-workspace-channel-name" safe>
-							{channel.channel}
-						</span>
-						<span
-							class="fine-print live-workspace-activity-time"
-							data-live-workspace-elapsed={channel.updatedAt}
-						/>
-					</header>
-					<pre class="live-workspace-channel-payload" safe>
-						{JSON.stringify(channel.payload, null, 2)}
-					</pre>
-				</li>
-			))}
-		</ul>,
+		<div class="live-workspace-panel">
+			{inline.length > 0 && (
+				<>
+					<h3 class="live-workspace-section-heading">Extension UI</h3>
+					<div class="piui-widgets live-workspace-piui-elements">
+						{inline.map((element) => renderPiUiElement(element))}
+					</div>
+				</>
+			)}
+			{sheets.length > 0 && (
+				<>
+					<h3 class="live-workspace-section-heading">Extension panels</h3>
+					<ul class="live-workspace-channel-list">
+						{sheets.map((element) => renderSheetRow(element))}
+					</ul>
+				</>
+			)}
+			{channels.length > 0 && (
+				<>
+					<h3 class="live-workspace-section-heading">Channels</h3>
+					<ul class="live-workspace-channel-list">
+						{channels.map((channel) => (
+							<li class="live-workspace-channel-row">
+								<header>
+									<span class="live-workspace-channel-name" safe>
+										{channel.channel}
+									</span>
+									<span
+										class="fine-print live-workspace-activity-time"
+										data-live-workspace-elapsed={channel.updatedAt}
+									/>
+								</header>
+								<pre class="live-workspace-channel-payload" safe>
+									{JSON.stringify(channel.payload, null, 2)}
+								</pre>
+							</li>
+						))}
+					</ul>
+				</>
+			)}
+		</div>,
+	);
+}
+
+/** Sheet elements already own a `<dialog>` (see pi-ui-elements.tsx); this row reopens it. */
+function renderSheetRow(element: PiUiElement): string {
+	return syncHtml(
+		<li class="live-workspace-agent-row">
+			<span class="live-workspace-agent-label" safe>
+				{element.title ?? element.id}
+			</span>
+			<span class="fine-print live-workspace-agent-status" safe>
+				{element.ns}
+			</span>
+			<button
+				type="button"
+				class="btn"
+				data-variant="outline"
+				data-size="xs"
+				commandfor={piUiDialogId(element)}
+				command="show-modal"
+			>
+				Open
+			</button>
+		</li>,
 	);
 }

@@ -61,35 +61,43 @@ export class LiveWorkspaceController {
 	private activity: LiveWorkspaceActivityEntry[] = [];
 	private nextActivityId = 0;
 
-	/** Feeds one raw session event. Never throws — a malformed event is logged, not fatal. */
-	recordEvent(event: AgentSessionEvent, context: LiveWorkspaceEventContext): void {
+	/**
+	 * Feeds one raw session event and reports whether any tracked state changed. Events the
+	 * pane does not track (e.g. every streamed `message_update` delta) are true no-ops: the
+	 * revision is left alone so `AppStore.setLiveWorkspace` can skip the re-render entirely.
+	 * Never throws — a malformed event is logged, not fatal.
+	 */
+	recordEvent(event: AgentSessionEvent, context: LiveWorkspaceEventContext): boolean {
+		let changed: boolean;
 		try {
-			if (context.background)
-				this.recordBackgroundEvent(event, context.sessionPath);
-			else this.recordForegroundEvent(event);
+			changed = context.background
+				? this.recordBackgroundEvent(event, context.sessionPath)
+				: this.recordForegroundEvent(event);
 		} catch (error) {
 			this.pushActivity(
 				"error",
 				`Live Workspace could not record an event: ${errorText(error)}`,
 				context.background,
 			);
+			changed = true;
 		}
-		this.revision += 1;
+		if (changed) this.revision += 1;
+		return changed;
 	}
 
-	private recordForegroundEvent(event: AgentSessionEvent): void {
+	private recordForegroundEvent(event: AgentSessionEvent): boolean {
 		switch (event.type) {
 			case "agent_start":
 				this.running = true;
 				this.retry = undefined;
 				this.compaction = undefined;
-				break;
+				return true;
 			case "agent_settled":
 				this.running = false;
 				this.retry = undefined;
 				this.compaction = undefined;
 				this.waiting = undefined;
-				break;
+				return true;
 			case "auto_retry_start":
 				this.retry = {
 					attempt: event.attempt,
@@ -101,7 +109,7 @@ export class LiveWorkspaceController {
 					`Retrying (${event.attempt}/${event.maxAttempts}) after: ${event.errorMessage}`,
 					false,
 				);
-				break;
+				return true;
 			case "auto_retry_end":
 				this.retry = undefined;
 				if (!event.success) {
@@ -111,7 +119,7 @@ export class LiveWorkspaceController {
 						false,
 					);
 				}
-				break;
+				return true;
 			case "compaction_start":
 				this.compaction = { reason: event.reason };
 				this.pushActivity(
@@ -119,7 +127,7 @@ export class LiveWorkspaceController {
 					`Compacting context (${event.reason})`,
 					false,
 				);
-				break;
+				return true;
 			case "compaction_end":
 				this.compaction = undefined;
 				this.pushActivity(
@@ -127,43 +135,38 @@ export class LiveWorkspaceController {
 					event.aborted ? "Compaction aborted" : "Compaction finished",
 					false,
 				);
-				break;
+				return true;
 			case "turn_end":
 				this.pushActivity("turn", "Turn finished", false);
-				break;
+				return true;
 			case "session_info_changed":
-				if (event.name) {
-					this.pushActivity(
-						"session",
-						`Session renamed to "${event.name}"`,
-						false,
-					);
-				}
-				break;
+				if (!event.name) return false;
+				this.pushActivity("session", `Session renamed to "${event.name}"`, false);
+				return true;
 			case "thinking_level_changed":
 				this.pushActivity(
 					"model",
 					`Thinking level changed to ${event.level}`,
 					false,
 				);
-				break;
+				return true;
 			case "summarization_retry_scheduled":
 				this.pushActivity(
 					"retry",
 					`Summarization retry scheduled (${event.attempt}/${event.maxAttempts})`,
 					false,
 				);
-				break;
+				return true;
 			case "summarization_retry_attempt_start":
 				this.pushActivity(
 					"retry",
 					`Summarization retry attempt started (${event.source})`,
 					false,
 				);
-				break;
+				return true;
 			case "summarization_retry_finished":
 				this.pushActivity("retry", "Summarization retry finished", false);
-				break;
+				return true;
 			case "tool_execution_start":
 				this.activeTools.set(event.toolCallId, {
 					toolName: event.toolName,
@@ -176,37 +179,48 @@ export class LiveWorkspaceController {
 						(event.args ?? null) as JsonValue,
 					),
 				});
-				break;
+				return true;
 			case "tool_execution_update": {
 				const tool = this.activeTools.get(event.toolCallId);
-				if (tool) tool.preview = summarizePartialResult(event.partialResult);
-				break;
+				if (!tool) return false;
+				const preview = summarizePartialResult(event.partialResult);
+				if (preview === tool.preview) return false;
+				tool.preview = preview;
+				return true;
 			}
 			case "tool_execution_end":
-				this.activeTools.delete(event.toolCallId);
-				break;
+				return this.activeTools.delete(event.toolCallId);
+			// The Now tab shows queued steering/follow-up counts read from AppStore.
+			case "queue_update":
+				return true;
 			default:
-				break;
+				return false;
 		}
 	}
 
 	private recordBackgroundEvent(
 		event: AgentSessionEvent,
 		sessionPath: string | undefined,
-	): void {
-		if (!sessionPath) return;
+	): boolean {
+		if (!sessionPath) return false;
 		if (event.type === "tool_execution_start") {
 			this.backgroundToolCounts.set(
 				sessionPath,
 				(this.backgroundToolCounts.get(sessionPath) ?? 0) + 1,
 			);
-		} else if (event.type === "tool_execution_end") {
+			return true;
+		}
+		if (event.type === "tool_execution_end") {
 			const count = (this.backgroundToolCounts.get(sessionPath) ?? 0) - 1;
 			if (count > 0) this.backgroundToolCounts.set(sessionPath, count);
 			else this.backgroundToolCounts.delete(sessionPath);
-		} else if (event.type === "agent_settled") {
-			this.pushActivity("background", "Background session settled", true);
+			return true;
 		}
+		if (event.type === "agent_settled") {
+			this.pushActivity("background", "Background session settled", true);
+			return true;
+		}
+		return false;
 	}
 
 	/** Registers or updates a pi-ui background session row (see runtime-controller.ts `BackgroundSession`). */
@@ -243,10 +257,11 @@ export class LiveWorkspaceController {
 	}
 
 	/**
-	 * Clears the Now tab's turn phase and active-tool list when a different session becomes
-	 * the foreground session, so the previous session's state never bleeds into the new one.
-	 * Background rosters, extension channels, and the activity log are cross-session state and
-	 * are intentionally left alone.
+	 * Clears foreground-scoped state when a different session becomes the foreground session,
+	 * so the previous session's state never bleeds into the new one: the Now tab's turn phase
+	 * and active tools, plus extension channels and the roster rows derived from them (each
+	 * runtime has its own extensions and event bus, which re-publish for the new session).
+	 * Background-session rows and the activity log are cross-session state and are kept.
 	 */
 	resetForegroundSession(): void {
 		this.running = false;
@@ -254,6 +269,10 @@ export class LiveWorkspaceController {
 		this.compaction = undefined;
 		this.waiting = undefined;
 		this.activeTools.clear();
+		this.channels.clear();
+		for (const [id, row] of this.agents) {
+			if (row.kind === "channel-entry") this.agents.delete(id);
+		}
 		this.revision += 1;
 	}
 
@@ -269,6 +288,7 @@ export class LiveWorkspaceController {
 
 	recordModelSelect(modelId: string, source: string): void {
 		this.pushActivity("model", `Model changed to ${modelId} (${source})`, false);
+		this.revision += 1;
 	}
 
 	recordThinkingSelect(level: string, previousLevel: string): void {
@@ -278,6 +298,7 @@ export class LiveWorkspaceController {
 			`Thinking level changed from ${previousLevel} to ${level}`,
 			false,
 		);
+		this.revision += 1;
 	}
 
 	/**
@@ -295,6 +316,11 @@ export class LiveWorkspaceController {
 		}
 		for (const row of rows) this.agents.set(row.id, row);
 		this.revision += 1;
+	}
+
+	/** Latest payload per extension channel, published into the single `AppStore.extensionChannels`. */
+	channelSnapshots(): ExtensionChannelSnapshot[] {
+		return [...this.channels.values()];
 	}
 
 	clearActivity(): void {
@@ -324,7 +350,6 @@ export class LiveWorkspaceController {
 			queuedSteering: input.queuedSteering,
 			queuedFollowUp: input.queuedFollowUp,
 			agents,
-			channels: [...this.channels.values()],
 			activity: [...this.activity].toReversed(),
 		};
 	}

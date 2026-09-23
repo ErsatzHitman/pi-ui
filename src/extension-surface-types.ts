@@ -75,6 +75,11 @@ export function piUiSlug(value: string): string {
 	return value.replaceAll(/[^a-zA-Z0-9_-]/g, "_");
 }
 
+/** Whether an element renders as a native `<dialog>` sheet rather than inline. */
+export function isPiUiSheetElement(element: Pick<PiUiElement, "placement">): boolean {
+	return element.placement === "sheet" || element.placement === "screen";
+}
+
 /** The `<dialog>` element id a `sheet`/`screen`-placement element renders under. */
 export function piUiDialogId(element: Pick<PiUiElement, "id" | "ns">): string {
 	return `piui-sheet-${piUiSlug(element.ns)}-${piUiSlug(element.id)}`;

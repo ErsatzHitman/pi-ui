@@ -242,9 +242,65 @@ test("never throws on a malformed extension channel payload", () => {
 	const circular: CircularHolder = {};
 	circular.self = circular;
 	controller.recordChannel("subagents:fleet", circular as unknown as JsonValue);
-	assertEquals(controller.snapshot(input).channels.at(-1)?.payload, {
+	assertEquals(controller.channelSnapshots().at(-1)?.payload, {
 		unrepresentable: true,
 	});
+});
+
+test("only bumps the revision when an event changes tracked state", () => {
+	const { controller, input } = fixture();
+	const before = controller.snapshot(input).revision;
+
+	const changed = controller.recordEvent(
+		agentSessionEventStub({ type: "message_update" }),
+		{ background: false },
+	);
+	assertEquals(changed, false);
+	assertEquals(controller.snapshot(input).revision, before);
+
+	assertEquals(
+		controller.recordEvent(agentSessionEventStub({ type: "agent_start" }), {
+			background: false,
+		}),
+		true,
+	);
+	assertEquals(controller.snapshot(input).revision, before + 1);
+});
+
+test("an unchanged streaming tool preview does not count as a change", () => {
+	const { controller } = fixture();
+	controller.recordEvent(
+		agentSessionEventStub({
+			type: "tool_execution_start",
+			toolCallId: "t1",
+			toolName: "bash",
+			args: {},
+		}),
+		{ background: false },
+	);
+	const update = agentSessionEventStub({
+		type: "tool_execution_update",
+		toolCallId: "t1",
+		toolName: "bash",
+		args: {},
+		partialResult: "line 1",
+	});
+	assertEquals(controller.recordEvent(update, { background: false }), true);
+	assertEquals(controller.recordEvent(update, { background: false }), false);
+});
+
+test("a foreground session switch clears channels and channel-derived rows but keeps background sessions", () => {
+	const { controller, input } = fixture();
+	controller.setBackgroundSession("bg.jsonl", "running", "~/bg", 1);
+	controller.recordChannel("workflow:progress", { active: true, name: "Plan" });
+	assertEquals(controller.snapshot(input).agents.length, 2);
+
+	controller.resetForegroundSession();
+	assertEquals(controller.channelSnapshots(), []);
+	assertEquals(
+		controller.snapshot(input).agents.map((agent) => agent.kind),
+		["background-session"],
+	);
 });
 
 test("passes through the caller-supplied queued message counts", () => {

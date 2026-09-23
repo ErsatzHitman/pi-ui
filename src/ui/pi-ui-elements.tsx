@@ -1,4 +1,5 @@
 import {
+	isPiUiSheetElement,
 	type PiUiAction,
 	type PiUiElement,
 	piUiDialogId,
@@ -29,7 +30,6 @@ import { syncHtml } from "./sync-html.ts";
  */
 
 const widgetPlacements = new Set(["pinned", "inline"]);
-const sheetPlacements = new Set(["sheet", "screen"]);
 
 export function renderPiUiStatusChips(
 	state: Pick<AppStateSnapshot, "extensionElements">,
@@ -73,7 +73,7 @@ export function renderPiUiSheets(
 	return syncHtml(
 		<div id="piui-sheets">
 			{state.extensionElements
-				.filter((element) => sheetPlacements.has(element.placement))
+				.filter(isPiUiSheetElement)
 				.map((element) => renderPiUiSheetDialog(element))}
 		</div>,
 	);
@@ -84,7 +84,7 @@ export function piUiSheetIds(
 	state: Pick<AppStateSnapshot, "extensionElements">,
 ): readonly string[] {
 	return state.extensionElements
-		.filter((element) => sheetPlacements.has(element.placement))
+		.filter(isPiUiSheetElement)
 		.map((element) => dialogId(element));
 }
 

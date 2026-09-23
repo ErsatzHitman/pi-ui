@@ -183,3 +183,27 @@ test("extension UI intercepts PIUI bridge payloads instead of showing them as no
 	assertEquals(state.extensionElements, []);
 	assertEquals(state.extensionChannels, []);
 });
+
+test("extension UI hands PIUI channel ops to the channel owner when one is configured", () => {
+	const store = new AppStore();
+	const received: Array<[string, unknown]> = [];
+	const controller = new ExtensionUiController(store, {
+		onChannel: (channel, payload) => received.push([channel, payload]),
+	});
+	const ui = controller.context(() => true);
+
+	ui.notify(
+		`${piUiMarker}${JSON.stringify({
+			v: 1,
+			op: "channel",
+			channel: "workflow:progress",
+			payload: { active: true },
+		})}`,
+		"info",
+	);
+
+	assertEquals(received, [["workflow:progress", { active: true }]]);
+	// The owner publishes channels; the controller must not write a second copy.
+	assertEquals(store.snapshot().extensionChannels, []);
+	assertEquals(store.snapshot().messages, []);
+});

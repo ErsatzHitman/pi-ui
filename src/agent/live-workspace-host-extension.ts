@@ -12,7 +12,30 @@ const tappedChannels = [
 	"workflow:progress",
 	"pi-goal:status",
 	"panel:state",
+	"fleet:handoff",
 ] as const;
+
+/**
+ * Identifies which runtime a host-extension instance was loaded into. Every runtime gets its
+ * own host extension (and its own `pi.events` bus), so the sink can drop updates from
+ * background runtimes — background sessions must never bleed into the foreground pane.
+ */
+export type LiveWorkspaceHostOrigin = Readonly<{
+	readonly kind: "live-workspace-origin";
+}>;
+
+export function createLiveWorkspaceHostOrigin(): LiveWorkspaceHostOrigin {
+	return { kind: "live-workspace-origin" };
+}
+
+/**
+ * Receives host-extension updates. The owner decides whether `origin` is the foreground
+ * runtime, applies `update` to the shared controller, and publishes the result.
+ */
+export type LiveWorkspaceHostSink = (
+	origin: LiveWorkspaceHostOrigin,
+	update: (controller: LiveWorkspaceController) => void,
+) => void;
 
 /**
  * Hidden inline extension that taps cross-cutting session state for the Live Workspace pane:
@@ -25,38 +48,44 @@ const tappedChannels = [
  * into the pi SDK (AGENTS.md non-negotiable).
  */
 export function createLiveWorkspaceHostExtension(
-	controller: LiveWorkspaceController,
+	sink: LiveWorkspaceHostSink,
+	origin: LiveWorkspaceHostOrigin,
 ): InlineExtension {
 	return {
 		name: liveWorkspaceHostId,
-		factory: (api) => registerLiveWorkspaceHost(api, controller),
+		factory: (api) => registerLiveWorkspaceHost(api, sink, origin),
 		hidden: true,
 	};
 }
 
 function registerLiveWorkspaceHost(
 	api: ExtensionAPI,
-	controller: LiveWorkspaceController,
+	sink: LiveWorkspaceHostSink,
+	origin: LiveWorkspaceHostOrigin,
 ): void {
+	const send = (update: (controller: LiveWorkspaceController) => void) =>
+		guard(() => sink(origin, update));
 	for (const channel of tappedChannels) {
 		api.events.on(channel, (payload) => {
 			// SAFETY: `pi.events` payloads are genuinely unstructured extension output.
 			// `recordChannel` re-serializes through `asDisplayableJson` regardless of this
 			// claimed shape, so a value that isn't really JSON-safe still degrades safely.
-			guard(() => controller.recordChannel(channel, payload as JsonValue));
+			send((controller) => controller.recordChannel(channel, payload as JsonValue));
 		});
 	}
 	api.on("ui_prompt_start", (event) => {
-		guard(() => controller.recordUiPromptStart(event.kind, event.title));
+		send((controller) => controller.recordUiPromptStart(event.kind, event.title));
 	});
 	api.on("ui_prompt_end", () => {
-		guard(() => controller.recordUiPromptEnd());
+		send((controller) => controller.recordUiPromptEnd());
 	});
 	api.on("model_select", (event) => {
-		guard(() => controller.recordModelSelect(event.model.id, event.source));
+		send((controller) => controller.recordModelSelect(event.model.id, event.source));
 	});
 	api.on("thinking_level_select", (event) => {
-		guard(() => controller.recordThinkingSelect(event.level, event.previousLevel));
+		send((controller) =>
+			controller.recordThinkingSelect(event.level, event.previousLevel),
+		);
 	});
 }
 

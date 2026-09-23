@@ -3,6 +3,7 @@ import { appCommandCatalog } from "../commands/catalog.ts";
 import {
 	type ExtensionChannelSnapshot,
 	type PiUiElement,
+	isPiUiSheetElement,
 	piUiDialogId,
 } from "../extension-surface-types.ts";
 import { activeKeybind } from "../keybinds.ts";
@@ -288,9 +289,6 @@ function uniqueStrings(values: string[]): string[] {
 	const unique = new Set(values);
 	unique.delete("");
 	return [...unique];
-}
-function isPiUiSheetElement(element: PiUiElement): boolean {
-	return element.placement === "sheet" || element.placement === "screen";
 }
 
 /** Mutable authoritative application state. It has no renderer or transport dependency. */
@@ -731,6 +729,8 @@ export class AppStore {
 			this.extensionElements.filter(isPiUiSheetElement).map(piUiDialogId),
 		);
 		this.extensionElements = elements.map((element) => structuredClone(element));
+		// The Live Workspace Extensions tab renders these elements too.
+		this.presentation?.liveWorkspaceChanged();
 		this.commit();
 		for (const element of elements.filter(isPiUiSheetElement)) {
 			const id = piUiDialogId(element);
@@ -746,6 +746,7 @@ export class AppStore {
 	}
 	setExtensionChannels(channels: ExtensionChannelSnapshot[]): void {
 		this.extensionChannels = channels.map((channel) => structuredClone(channel));
+		this.presentation?.liveWorkspaceChanged();
 		this.commit();
 	}
 	setExtensionWorking(options: {

@@ -1,4 +1,3 @@
-import type { ExtensionChannelSnapshot } from "./extension-surface-types.ts";
 import { isBoolean, isNumber, isRecord, type JsonRecord } from "./utils/type-guards.ts";
 
 /** Internal tabs of the Live Workspace pane, all pre-rendered and toggled via `data-show`. */
@@ -107,15 +106,19 @@ export type LiveWorkspaceActivityEntry = Readonly<{
 	background: boolean;
 }>;
 
+/**
+ * Pane-specific aggregate state. Extension channel payloads are deliberately NOT part of this
+ * snapshot: both sources (the `pi.events` tap and PIUI `channel` ops) feed the single
+ * `AppStore.extensionChannels` field, which the Extensions tab reads directly.
+ */
 export type LiveWorkspaceSnapshot = Readonly<{
-	/** Bumped on every change; lets `AppStore.setLiveWorkspace` no-op on an unchanged snapshot. */
+	/** Bumped only on a real change; lets `AppStore.setLiveWorkspace` no-op on an unchanged snapshot. */
 	revision: number;
 	turn: LiveWorkspaceTurnState | undefined;
 	activeTools: readonly LiveWorkspaceActiveTool[];
 	queuedSteering: number;
 	queuedFollowUp: number;
 	agents: readonly LiveWorkspaceAgentRow[];
-	channels: readonly ExtensionChannelSnapshot[];
 	activity: readonly LiveWorkspaceActivityEntry[];
 }>;
 
@@ -126,7 +129,6 @@ export const emptyLiveWorkspaceSnapshot: LiveWorkspaceSnapshot = {
 	queuedSteering: 0,
 	queuedFollowUp: 0,
 	agents: [],
-	channels: [],
 	activity: [],
 };
 

@@ -18,6 +18,7 @@ import type {
 	AppExtensionWorkingIndicator,
 	AppStore,
 } from "../state/app-store.ts";
+import type { JsonValue } from "../utils/json-types.ts";
 import { isString } from "../utils/type-guards.ts";
 import { PiUiBridgeDecoder, PiUiElementStore } from "./pi-ui-bridge.ts";
 
@@ -61,6 +62,15 @@ type PendingDialog = {
 	timer?: ReturnType<typeof setTimeout>;
 };
 
+export type ExtensionUiControllerHooks = {
+	/**
+	 * Receives PIUI `channel` ops. When set, the owner stores channel snapshots (so PIUI
+	 * channels and the `pi.events` tap share one store) and this controller does not
+	 * write `AppStore.extensionChannels` itself.
+	 */
+	onChannel?: (channel: string, payload: JsonValue) => void;
+};
+
 /** Bridges pi extension UI requests to backend-owned web state. */
 export class ExtensionUiController {
 	readonly #queue: PendingDialog[] = [];
@@ -89,7 +99,10 @@ export class ExtensionUiController {
 	#headerFactory: HeaderFactory | undefined;
 	#editorComponentFactory: EditorFactory | undefined;
 
-	constructor(private readonly store: AppStore) {}
+	constructor(
+		private readonly store: AppStore,
+		private readonly hooks: ExtensionUiControllerHooks = {},
+	) {}
 
 	context(isActive: () => boolean): ExtensionUIContext {
 		return {
@@ -263,7 +276,8 @@ export class ExtensionUiController {
 		this.store.setExtensionStatuses([]);
 		this.store.setExtensionWidgets([]);
 		this.store.setExtensionElements([]);
-		this.store.setExtensionChannels([]);
+		// With an `onChannel` owner, channels are cleared by that owner on session switch.
+		if (!this.hooks.onChannel) this.store.setExtensionChannels([]);
 		this.syncWorking();
 		this.store.setDocumentTitle("pi-ui");
 	}
@@ -282,12 +296,16 @@ export class ExtensionUiController {
 			// element updates, never user-facing text, so they must NEVER reach
 			// the transcript as a notice, whether or not they decode cleanly.
 			const op = this.#piUiDecoder.decode(message);
-			if (op) {
-				this.#piUiElements.apply(op);
+			if (!op) return;
+			if (op.op === "channel" && this.hooks.onChannel) {
+				this.hooks.onChannel(op.channel, op.payload);
+				return;
+			}
+			this.#piUiElements.apply(op);
+			if (op.op === "channel") {
+				this.store.setExtensionChannels(this.#piUiElements.channels());
+			} else {
 				this.store.setExtensionElements(this.#piUiElements.elements());
-				if (op.op === "channel") {
-					this.store.setExtensionChannels(this.#piUiElements.channels());
-				}
 			}
 			return;
 		}
