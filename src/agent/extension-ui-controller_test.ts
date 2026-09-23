@@ -41,9 +41,16 @@ test("extension UI cancels dialogs on abort and inactive runtimes", async () => 
 test("extension UI degrades TUI-only capabilities instead of throwing", async () => {
 	const ui = new ExtensionUiController(new AppStore()).context(() => true);
 
-	// custom() matches the SDK's real RPC-mode contract: resolves undefined,
-	// it must never throw into the extension's command handler.
-	assertEquals(await ui.custom(() => ({ render: () => [] }) as never), undefined);
+	// custom() mounts a real terminal surface and never throws into the
+	// extension's command handler; it resolves once the component calls
+	// `done()` (here, synchronously from the factory itself).
+	assertEquals(
+		await ui.custom((_tui, _theme, _keybindings, done) => {
+			done(undefined as never);
+			return { render: () => [] } as never;
+		}),
+		undefined,
+	);
 
 	// onTerminalInput registers and returns a working unsubscribe function.
 	let seen: string | undefined;
@@ -266,4 +273,73 @@ test("a background session's PIUI elements survive a round trip to the foregroun
 	// backgrounded) is a no-op rather than clobbering anything.
 	controller.restorePiUiElements([]);
 	assertEquals(store.extensionElements.length, 1);
+});
+
+function staticComponent(lines: string[]) {
+	return { render: () => lines, invalidate: () => {} };
+}
+
+test("custom() overlay wiring mounts a terminal surface, routes input, and resolves via done()", async () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true);
+
+	let seenInput: string | undefined;
+	const resultPromise = ui.custom(
+		(_tui, _theme, _keybindings, done) =>
+			({
+				render: () => ["picker"],
+				handleInput: (data: string) => {
+					seenInput = data;
+					done("chosen" as never);
+				},
+				invalidate: () => {},
+			}) as never,
+		{ overlay: true },
+	);
+	// Let the internal await settle before the surface shows up in the store.
+	await Promise.resolve();
+	await Promise.resolve();
+
+	const [surface] = store.snapshot().terminalSurfaces;
+	assertExists(surface);
+	assertEquals(surface.kind, "overlay");
+
+	assertEquals(controller.handleTerminalSurfaceInput(surface.id, "\r"), true);
+	assertEquals(seenInput, "\r");
+	assertEquals(await resultPromise, "chosen");
+	// done() disposes the surface: it disappears from the store.
+	assertEquals(store.snapshot().terminalSurfaces, []);
+
+	// An id nobody mounted routes to nothing, rather than throwing.
+	assertEquals(controller.handleTerminalSurfaceInput("no-such-surface", "x"), false);
+	assertEquals(controller.resizeTerminalSurface("no-such-surface", 80, 24), false);
+});
+
+test("setWidget/setFooter/setHeader component factories mount persistent terminal surfaces", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true);
+
+	ui.setWidget("panel", () => staticComponent(["widget line"]) as never);
+	let kinds = store.snapshot().terminalSurfaces.map((s) => s.kind);
+	assertEquals(kinds, ["widget"]);
+
+	ui.setFooter(() => staticComponent(["footer line"]) as never);
+	ui.setHeader(() => staticComponent(["header line"]) as never);
+	kinds = store
+		.snapshot()
+		.terminalSurfaces.map((s) => s.kind)
+		.sort();
+	assertEquals(kinds, ["footer", "header", "widget"]);
+
+	// Clearing the footer/header (undefined factory) disposes their surfaces.
+	ui.setFooter(undefined);
+	ui.setHeader(undefined);
+	kinds = store.snapshot().terminalSurfaces.map((s) => s.kind);
+	assertEquals(kinds, ["widget"]);
+
+	// cancelAll() (session switch/background) tears every terminal surface down.
+	controller.cancelAll();
+	assertEquals(store.snapshot().terminalSurfaces, []);
 });

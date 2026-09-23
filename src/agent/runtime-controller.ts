@@ -1357,6 +1357,16 @@ export class RuntimeController {
 		return this.extensionUi.respond(requestId, response, cancelled);
 	}
 
+	/** Routes a raw terminal byte sequence to a mounted terminal surface. */
+	handleTerminalSurfaceInput(surfaceId: string, data: string): boolean {
+		return this.extensionUi.handleTerminalSurfaceInput(surfaceId, data);
+	}
+
+	/** Applies a client-measured grid resize to a mounted terminal surface. */
+	resizeTerminalSurface(surfaceId: string, cols: number, rows: number): boolean {
+		return this.extensionUi.resizeTerminalSurface(surfaceId, cols, rows);
+	}
+
 	/**
 	 * Routes a user action on a rendered PIUI element (a button click, a form
 	 * submit) back to the extension that owns it, by invoking its

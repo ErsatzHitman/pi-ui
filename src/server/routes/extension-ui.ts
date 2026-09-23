@@ -1,7 +1,9 @@
 import type { JsonValue } from "../../utils/json-types.ts";
 import {
+	ActionInputError,
 	booleanField,
 	jsonSizeField,
+	nonnegativeIntegerField,
 	readActionSignals,
 	requiredString,
 	stringField,
@@ -10,6 +12,14 @@ import { datastarResponse } from "../datastar.ts";
 import type { RouteMap } from "../route.ts";
 import { requireHost, type RouteContext } from "./context.ts";
 import { endpoints } from "./endpoints.ts";
+
+/**
+ * A raw terminal byte sequence (a keystroke, an escape sequence, pasted
+ * text) forwarded to a mounted `pi-tui` component. Generous enough for a
+ * bracketed paste of a large clipboard value, small enough that a
+ * misbehaving client can't use this route to buffer unbounded memory.
+ */
+const maxTerminalInputBytes = 64 * 1024;
 
 /**
  * Defensive caps on an untrusted PIUI action request (a click from an
@@ -64,6 +74,31 @@ export const extensionUiRoutes = {
 				}),
 				value,
 			});
+			return datastarResponse();
+		},
+	},
+	[endpoints.terminalSurfaceInput]: {
+		POST: async (request, context) => {
+			const signals = await readActionSignals(request);
+			const data = stringField(signals, "data");
+			if (Buffer.byteLength(data, "utf8") > maxTerminalInputBytes) {
+				throw new ActionInputError("data is too large.");
+			}
+			requireHost(context).handleTerminalSurfaceInput(
+				requiredString(signals, "surfaceId", { maxLength: maxElementIdLength }),
+				data,
+			);
+			return datastarResponse();
+		},
+	},
+	[endpoints.terminalSurfaceResize]: {
+		POST: async (request, context) => {
+			const signals = await readActionSignals(request);
+			requireHost(context).resizeTerminalSurface(
+				requiredString(signals, "surfaceId", { maxLength: maxElementIdLength }),
+				nonnegativeIntegerField(signals, "cols"),
+				nonnegativeIntegerField(signals, "rows"),
+			);
 			return datastarResponse();
 		},
 	},

@@ -34,6 +34,11 @@ import { renderPromptStatus } from "./prompt-status.tsx";
 import type { AppRenderSnapshot } from "./render-state.ts";
 import { renderSessionSidebarContent } from "./session-sidebar.tsx";
 import { renderSessionTransition } from "./session-transition.tsx";
+import {
+	renderTerminalSurfaceOverlays,
+	renderTerminalSurfacePersistent,
+	terminalSurfaceOverlayIds,
+} from "./terminal-surface.tsx";
 import { renderToolbar } from "./toolbar.tsx";
 import { renderTreePicker } from "./tree-picker.tsx";
 import { renderWorkspaceReviewData } from "./workspace-review.tsx";
@@ -373,6 +378,8 @@ export class UiRenderer implements AppStorePresentation {
 			renderExtensionWidgets(snapshot, "belowEditor") +
 			renderPiUiWidgets(snapshot) +
 			renderPiUiSheets(snapshot) +
+			renderTerminalSurfacePersistent(snapshot) +
+			renderTerminalSurfaceOverlays(snapshot) +
 			renderPromptStart(snapshot) +
 			renderSessionTransition(snapshot) +
 			renderDebugOverlay(snapshot)
@@ -472,7 +479,11 @@ export class UiRenderer implements AppStorePresentation {
 			.filter((entry) => Boolean(entry[1]))
 			.map(([id]) => id)
 			.toArray();
-		const ids: readonly string[] = [...staticIds, ...piUiSheetIds(snapshot)];
+		const ids: readonly string[] = [
+			...staticIds,
+			...piUiSheetIds(snapshot),
+			...terminalSurfaceOverlayIds(snapshot),
+		];
 		return ids.map(
 			(id) =>
 				`{ const dialog = document.getElementById('${id}'); if (dialog && !dialog.open) dialog.showModal(); }`,

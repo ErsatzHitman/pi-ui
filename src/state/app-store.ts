@@ -1,4 +1,8 @@
 import type { SessionTransitionState } from "../agent/session-transition-controller.ts";
+import {
+	terminalSurfaceDialogId,
+	type TerminalSurface,
+} from "../agent/terminal-surface/types.ts";
 import { appCommandCatalog } from "../commands/catalog.ts";
 import {
 	type ExtensionChannelSnapshot,
@@ -223,6 +227,7 @@ export type AppStateSnapshot = Readonly<{
 	extensionWidgets: readonly AppExtensionWidget[];
 	extensionElements: readonly PiUiElement[];
 	extensionChannels: readonly ExtensionChannelSnapshot[];
+	terminalSurfaces: readonly TerminalSurface[];
 	extensionWorkingIndicator: AppExtensionWorkingIndicator | undefined;
 	extensionWorkingMessage: string | undefined;
 	extensionWorkingVisible: boolean;
@@ -312,6 +317,7 @@ export class AppStore {
 	extensionWidgets: AppExtensionWidget[] = [];
 	extensionElements: PiUiElement[] = [];
 	extensionChannels: ExtensionChannelSnapshot[] = [];
+	terminalSurfaces: TerminalSurface[] = [];
 	extensionWorkingIndicator: AppExtensionWorkingIndicator | undefined;
 	extensionWorkingMessage: string | undefined;
 	extensionWorkingVisible = true;
@@ -420,6 +426,14 @@ export class AppStore {
 			extensionChannels: this.extensionChannels.map((channel) =>
 				structuredClone(channel),
 			),
+			terminalSurfaces: this.terminalSurfaces.map((surface) => ({
+				...surface,
+				lines: [...surface.lines],
+				cursor: surface.cursor ? { ...surface.cursor } : undefined,
+				overlayOptions: surface.overlayOptions
+					? { ...surface.overlayOptions }
+					: undefined,
+			})),
 			extensionWorkingIndicator: this.extensionWorkingIndicator
 				? {
 						...this.extensionWorkingIndicator,
@@ -741,6 +755,51 @@ export class AppStore {
 				// `setExtensionDialog`'s identical pairing.
 				this.presentation?.pickersChanged();
 				this.presentation?.requestCommit({ type: "dialog", id, open: true });
+			}
+		}
+	}
+	/**
+	 * Replaces the full terminal-surface list (see `TerminalSurfaceController`).
+	 * Mirrors `setExtensionElements`'s "only newly opened dialogs get a
+	 * `showModal()` effect" diffing: an `overlay`-kind surface renders inside
+	 * a `<dialog>`, which needs an explicit open effect the first time it
+	 * appears (and a close effect once it disappears — the extension called
+	 * `done()`/the overlay's `hide()`, or the session switched away).
+	 */
+	setTerminalSurfaces(surfaces: TerminalSurface[]): void {
+		const previousOverlayIds = new Set(
+			this.terminalSurfaces
+				.values()
+				.filter((surface) => surface.kind === "overlay")
+				.map((surface) => surface.id),
+		);
+		const nextOverlayIds = new Set(
+			surfaces
+				.values()
+				.filter((surface) => surface.kind === "overlay")
+				.map((surface) => surface.id),
+		);
+		this.terminalSurfaces = surfaces.map((surface) => structuredClone(surface));
+		this.presentation?.liveWorkspaceChanged();
+		this.commit();
+		for (const id of nextOverlayIds) {
+			if (!previousOverlayIds.has(id)) {
+				this.presentation?.pickersChanged();
+				this.presentation?.requestCommit({
+					type: "dialog",
+					id: terminalSurfaceDialogId(id),
+					open: true,
+				});
+			}
+		}
+		for (const id of previousOverlayIds) {
+			if (!nextOverlayIds.has(id)) {
+				this.presentation?.pickersChanged();
+				this.presentation?.requestCommit({
+					type: "dialog",
+					id: terminalSurfaceDialogId(id),
+					open: false,
+				});
 			}
 		}
 	}
