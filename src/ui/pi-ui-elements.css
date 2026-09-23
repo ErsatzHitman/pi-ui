@@ -14,9 +14,13 @@
 	/*
 	 * The prompt-area host sits inside the absolutely positioned prompt box: without a cap,
 	 * a few pinned elements push the editor (and the top of the stack) off-screen on phones.
+	 * O2: on a short desktop viewport, the full strip at its old cap (40dvh) plus persistent
+	 * terminal surfaces pushed the prompt box tall enough that the slash/file/argument pickers
+	 * (anchored above it) rendered off the top of the viewport; a lower cap leaves them enough
+	 * room while still showing several widgets before scrolling.
 	 */
 	#piui-widgets {
-		max-height: min(40dvh, 24rem);
+		max-height: min(28dvh, 16rem);
 		overflow-y: auto;
 		overscroll-behavior: contain;
 	}
@@ -40,9 +44,15 @@
 		width: 100%;
 		justify-content: space-between;
 	}
+
+	/*
+	 * O8: `--surface-code` (not `--surface-muted`) so a PIUI widget card reads as the same
+	 * surface as the terminal cards it sits next to (`terminal-surface.css`'s `.terminal-surface-grid`)
+	 * instead of a visibly lighter gray in dark mode.
+	 */
 	.piui-element {
 		border-radius: var(--radius-md);
-		background: var(--surface-muted);
+		background: var(--surface-code);
 		padding: 0.5rem 0.625rem;
 		color: var(--text);
 		font-size: var(--text-sm);

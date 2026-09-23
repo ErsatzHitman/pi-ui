@@ -23,7 +23,10 @@
 		inset: 0;
 		z-index: 55;
 		display: block;
-		background: light-dark(oklch(0% 0 none / 25%), oklch(0% 0 none / 45%));
+
+		/* O8: the scrim read as barely visible at the audited alpha; raised a little so the
+		   pane reads as clearly above the chat, matching `.dialog`'s own backdrop weight. */
+		background: light-dark(oklch(0% 0 none / 32%), oklch(0% 0 none / 55%));
 		opacity: 0;
 		transition:
 			opacity 180ms var(--ease-out),

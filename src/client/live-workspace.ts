@@ -12,6 +12,7 @@ import {
 	registerDismissibleSurface,
 } from "../../static/app/history-stack.js";
 import { formatRetryCountdown } from "../live-workspace-types.ts";
+import { isDockedLayout } from "./live-workspace-layout.ts";
 
 const tickIntervalMs = 1000;
 
@@ -150,7 +151,8 @@ function watchTurnPhase(): void {
 	});
 }
 
-function bindLiveWorkspace() {
+/** Exported for tests (O11); production code only ever uses the single instance bound below. */
+export function bindLiveWorkspace() {
 	let open = false;
 	// Whether opening the pane as an overlay pushed a history entry that closing must pop
 	// (A#17: a back press should close the drawer/sheet, not leave the page).
@@ -193,11 +195,18 @@ function bindLiveWorkspace() {
 	// sheet/drawer. Adopt that initial open state here, without moving focus (a cold load
 	// must not steal focus from the prompt).
 	const adoptInitialOpen = () => {
-		if (
-			open ||
-			!document.getElementById("app")?.classList.contains("live-workspace-open")
-		)
-			return false;
+		const app = document.getElementById("app");
+		if (open || !app?.classList.contains("live-workspace-open")) return false;
+		// O10: the persisted `open` preference doesn't distinguish a desktop-docked pane from a
+		// phone/tablet overlay — restoring it as an overlay would cover the chat the instant the
+		// page loads. Only the docked layout auto-restores; elsewhere close it again (without
+		// persisting, so the docked preference survives for next time the window is that wide).
+		if (!isDockedLayout()) {
+			app.dispatchEvent(
+				new CustomEvent("pi-ui-live-workspace-open", { detail: { open: false } }),
+			);
+			return true;
+		}
 		open = true;
 		if (!historyEntry && isOverlayOpen()) {
 			historyEntry = true;

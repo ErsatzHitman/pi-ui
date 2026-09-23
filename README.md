@@ -273,8 +273,9 @@ terminal:
 
 - Extensions that call `custom()`, `setWidget`, `setFooter`/`setHeader`, or read keyboard input
   through `onTerminalInput` get a **terminal surface**: a headless TUI host renders their ANSI
-  output as themed HTML (light and dark) inside a dialog or an inline panel below the editor, and
-  forwards browser keys (including modifiers, arrows, and paste) back to the extension.
+  output as themed HTML (light and dark) inside a dialog, or an inline panel above the editor (a
+  footer or a below-editor widget renders after it instead), and forwards browser keys (including
+  modifiers, arrows, and paste) back to the extension.
 - Extensions gated on `ctx.mode === "tui"` (checking for terminal-only feature support — mcp/
   mcp-auth panels, bash-background and subagents key handling, the jev card, and similar) now see
   `"tui"` and work through the same terminal surface, instead of silently degrading to a text
@@ -284,13 +285,17 @@ terminal:
   reusing pi-ui's own components — no per-extension code. Because `"tui"` binding alone would push
   these extensions onto their `custom()` fallback too (their own live-RPC-client check keys off
   the RPC family of modes), pi-ui sets the `PI_UI_BRIDGE=1` environment variable before any
-  extension loads as a documented host-capability signal. An extension's own bridge helper (or
-  equivalent) can check it — at both its top-level "use the bridge at all" gate and, importantly,
-  its own internal wire-delivery gate, if it has one — to stay on its native HTML path under
-  `"tui"`; see `scratchpad/r4-bridge.patch` (not part of this repo) for the small change one such
-  bridge helper needed (validated live: patching only the top-level gate left the panel silently
-  undelivered). Nothing here requires it, and an extension that doesn't check the marker still
-  works, just as a terminal surface instead.
+  extension loads as a documented host-capability signal. A bridge helper opts in by honouring it
+  at both of its gates — the top-level "use the bridge at all" check and its internal wire-delivery
+  check (patching only the first leaves panels silently undelivered):
+
+  ```ts
+  const hostForcesBridge = () => process.env?.PI_UI_BRIDGE === "1";
+  // bridgeIsLive(ctx): if (hostForcesBridge()) return true;  …existing RPC-mode check
+  // isTui():           if (hostForcesBridge()) return false; …existing "tui" check
+  ```
+
+  Nothing requires it: an extension that ignores the marker still works, as a terminal surface.
 - Slash commands — every built-in plus every extension-registered command — get argument
   completions and native handling (pickers, dialogs, or notices) instead of being sent to the
   model as chat text.
