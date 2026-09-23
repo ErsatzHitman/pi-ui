@@ -412,9 +412,28 @@ export class LiveWorkspaceController {
 	}
 }
 
+/**
+ * A running tool's live output preview. The SDK's `partialResult` is an `AgentToolResult`
+ * (`{ content: [{ type: "text", text }], details }`), not a string: show the tail of its
+ * text blocks — the newest output is what a "what is it doing now" preview is for —
+ * rather than the raw JSON envelope (`{"content":[]}`).
+ */
 function summarizePartialResult(value: JsonValue | undefined): string | undefined {
 	if (value === undefined || value === null) return undefined;
 	if (isString(value)) return truncateForDisplay(value, liveWorkspaceToolPreviewLimit);
+	const content = asRecord(value)?.content;
+	if (Array.isArray(content)) {
+		const text = content
+			.map((block) => asRecord(block))
+			.map((block) =>
+				block?.type === "text" && isString(block.text) ? block.text : "",
+			)
+			.join("");
+		if (!text) return undefined;
+		return text.length > liveWorkspaceToolPreviewLimit
+			? `…${text.slice(-liveWorkspaceToolPreviewLimit)}`
+			: text;
+	}
 	try {
 		return truncateForDisplay(JSON.stringify(value), liveWorkspaceToolPreviewLimit);
 	} catch {

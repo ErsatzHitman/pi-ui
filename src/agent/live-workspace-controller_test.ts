@@ -299,6 +299,38 @@ test("only bumps the revision when an event changes tracked state", () => {
 	assertEquals(controller.snapshot(input).revision, before + 1);
 });
 
+test("a tool's live preview shows the tail of its partial result text, not the raw result JSON", () => {
+	const { controller, input } = fixture();
+	controller.recordEvent(
+		agentSessionEventStub({
+			type: "tool_execution_start",
+			toolCallId: "t1",
+			toolName: "bash",
+			args: { command: "build" },
+		}),
+		{ background: false },
+	);
+	const update = (partialResult: unknown) =>
+		controller.recordEvent(
+			agentSessionEventStub({
+				type: "tool_execution_update",
+				toolCallId: "t1",
+				toolName: "bash",
+				args: {},
+				partialResult,
+			}),
+			{ background: false },
+		);
+	update({ content: [] });
+	assertEquals(controller.snapshot(input).activeTools[0]?.preview, undefined);
+	update({ content: [{ type: "text", text: "step 1\n" }], details: {} });
+	assertEquals(controller.snapshot(input).activeTools[0]?.preview, "step 1\n");
+	update({ content: [{ type: "text", text: `${"x".repeat(500)}LAST` }] });
+	const preview = controller.snapshot(input).activeTools[0]?.preview ?? "";
+	assertStringIncludes(preview, "LAST");
+	assertEquals(preview.startsWith("…"), true);
+});
+
 test("an unchanged streaming tool preview does not count as a change", () => {
 	const { controller } = fixture();
 	controller.recordEvent(
