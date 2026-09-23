@@ -90,7 +90,9 @@
 		background: var(--surface-control);
 	}
 	.hotkeys-row-clickable {
+		width: 100%;
 		cursor: pointer;
+		text-align: start;
 	}
 	.hotkeys-row-content {
 		display: flex;

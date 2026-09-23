@@ -7,6 +7,7 @@ import { assertEquals } from "#testing/assertions";
 
 import {
 	appShortcutToKeyId,
+	browserReservedKeyIds,
 	extensionShortcutKeybindings,
 	findExtensionShortcut,
 	listExtensionShortcuts,
@@ -95,6 +96,26 @@ test("listExtensionShortcuts flags reserved keys unreachable-by-keyboard instead
 			reachableByKeyboard: true,
 		},
 	]);
+});
+
+test("listExtensionShortcuts flags a browser-reserved key unreachable-by-keyboard too", () => {
+	// Round 6 F3: Ctrl+T/W/N etc. never reach page JS at all — a real browser
+	// tab already claims them — so an extension shortcut on one of these is
+	// muted the same way a pi-ui collision is, still invocable by tapping it.
+	const runner = fakeRunner({
+		"ctrl+t": shortcut({ description: "New thing", extensionPath: "/ext/a.ts" }),
+		"ctrl+k": shortcut({ extensionPath: "/ext/b.ts" }),
+	});
+	const infos = listExtensionShortcuts(runner, new Set());
+	assertEquals(infos.find((info) => info.key === "ctrl+t")?.reachableByKeyboard, false);
+	assertEquals(infos.find((info) => info.key === "ctrl+k")?.reachableByKeyboard, true);
+});
+
+test("browserReservedKeyIds covers both the Ctrl and Cmd (super) forms", () => {
+	for (const key of ["ctrl+t", "ctrl+w", "ctrl+n", "super+t", "super+w", "super+n"]) {
+		assertEquals(browserReservedKeyIds.has(key), true);
+	}
+	assertEquals(browserReservedKeyIds.has("alt+o"), false);
 });
 
 test("listExtensionShortcuts returns an empty list only when none are registered", () => {

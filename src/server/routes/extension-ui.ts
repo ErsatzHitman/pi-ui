@@ -1,3 +1,4 @@
+import { clampTerminalSize } from "../../agent/terminal-surface/headless-terminal.ts";
 import type { JsonValue } from "../../utils/json-types.ts";
 import {
 	ActionInputError,
@@ -111,6 +112,28 @@ export const extensionUiRoutes = {
 				enumField(signals, "colorScheme", ["light", "dark"] as const),
 				clientId,
 			);
+			return datastarResponse();
+		},
+	},
+	[endpoints.terminalViewport]: {
+		POST: async (request, context) => {
+			// Round 6 F2: the browser's whole-viewport terminal-cell grid, reported once per
+			// connection and on window resize (`static/app/terminal-keys.js`'s
+			// `reportViewportCells`) so a brand-new terminal surface — which has no grid of its
+			// own to measure yet — can be seeded close to its true size instead of a fixed
+			// 100x30 guess (see `AppStore.clientViewportCells`,
+			// `TerminalSurfaceController`'s `viewportHint`). Same "no host required, tracked
+			// per client" shape as `extensionUiColorScheme` just above, for the same reasons.
+			const signals = await readActionSignals(request);
+			const clientId = optionalString(signals, "clientId");
+			if (clientId !== undefined && !isDisplayClientId(clientId)) {
+				throw new ActionInputError("Invalid clientId.");
+			}
+			const size = clampTerminalSize({
+				columns: nonnegativeIntegerField(signals, "cols"),
+				rows: nonnegativeIntegerField(signals, "rows"),
+			});
+			context.store.setClientViewportCells(size.columns, size.rows, clientId);
 			return datastarResponse();
 		},
 	},

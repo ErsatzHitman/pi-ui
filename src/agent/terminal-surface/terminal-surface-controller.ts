@@ -123,6 +123,21 @@ type Mount = {
 export type TerminalSurfaceControllerOptions = {
 	/** Called with the full current surface list after every coalesced frame commit or disposal. */
 	onUpdate: (surfaces: readonly TerminalSurface[]) => void;
+	/**
+	 * The requesting client's last reported whole-viewport terminal-cell grid
+	 * (`AppStore.clientViewportCells`, via `POST /extensions/terminal/viewport`
+	 * — `static/app/terminal-keys.js`'s `reportViewportCells`), read fresh on
+	 * every new surface rather than captured once, so it reflects the latest
+	 * report even for a surface mounted well after this controller's own
+	 * construction. Round 6 F2: `#create()` falls back to this instead of the
+	 * fixed `defaultTerminalColumns`/`defaultTerminalRows` guess whenever a
+	 * caller doesn't pass its own explicit `cols`/`rows`, so a percentage-width
+	 * overlay's very first published frame is already close to its true size
+	 * instead of visibly resizing once the surface's own resize report lands a
+	 * round trip later. `undefined` (no report yet, or every reporting client
+	 * has disconnected) keeps the previous fixed-default behavior exactly.
+	 */
+	viewportHint?: () => { columns: number; rows: number } | undefined;
 };
 
 /**
@@ -331,9 +346,14 @@ export class TerminalSurfaceController {
 		overlayOptionsResolver: (() => OverlayOptions | undefined) | undefined;
 		belowEditor?: boolean;
 	}): Mount {
+		// Round 6 F2: an explicit `cols`/`rows` (rare — no current caller passes one) always
+		// wins; otherwise seed from the client's last reported viewport (`viewportHint`) rather
+		// than the fixed default, so a fresh surface's first frame is already close to its
+		// true size instead of visibly resizing once its own resize report lands.
+		const hint = this.options.viewportHint?.();
 		const size = clampTerminalSize({
-			columns: params.cols ?? defaultTerminalColumns,
-			rows: params.rows ?? defaultTerminalRows,
+			columns: params.cols ?? hint?.columns ?? defaultTerminalColumns,
+			rows: params.rows ?? hint?.rows ?? defaultTerminalRows,
 		});
 		const terminal = new HeadlessTerminal(size);
 		const tui = new TuiShim(terminal, {

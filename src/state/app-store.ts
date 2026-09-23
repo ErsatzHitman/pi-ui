@@ -103,15 +103,19 @@ export type AppExtensionDialog =
 export type AppExtensionStatus = { key: string; text: string };
 /**
  * A `pi.registerShortcut()` shortcut — see `src/agent/extension-shortcuts.ts`.
- * `reachableByKeyboard` is false when `key` collides with one of pi-ui's own
- * keybinds (`src/keybinds.ts`'s catalog): pi-ui's own bind always wins the
- * keyboard chord (round-5 runtime-validation finding — a real extension's
- * shortcut, valid and unique in the TUI, can still collide with a browser-only
- * pi-ui convenience like "Toggle tool output" that has no TUI equivalent to
- * defer to), but the shortcut itself stays listed and directly invocable —
- * from the `/hotkeys` dialog and the command palette (`command-menu.tsx`) —
- * so it is never silently unreachable, matching F1 §1/§3's requirement that
- * every registered shortcut stays reachable without a physical keyboard.
+ * `reachableByKeyboard` is false for either of two reasons: `key` collides
+ * with one of pi-ui's own keybinds (`src/keybinds.ts`'s catalog) — pi-ui's own
+ * bind always wins the keyboard chord (round-5 runtime-validation finding — a
+ * real extension's shortcut, valid and unique in the TUI, can still collide
+ * with a browser-only pi-ui convenience like "Toggle tool output" that has no
+ * TUI equivalent to defer to) — or `key` is one a real browser tab already
+ * reserves for itself (Round 6 F3 — Ctrl/Cmd+T/W/N, Ctrl+Tab, F5, …:
+ * `extension-shortcuts.ts`'s `browserReservedKeyIds`), so the keydown never
+ * reaches page JavaScript at all. Either way, the shortcut itself stays
+ * listed and directly invocable — from the `/hotkeys` dialog and the command
+ * palette (`command-menu.tsx`) — so it is never silently unreachable,
+ * matching F1 §1/§3's requirement that every registered shortcut stays
+ * reachable without a physical keyboard.
  */
 export type AppExtensionShortcut = {
 	key: string;
@@ -435,6 +439,37 @@ export class AppStore {
 				? this.clientColorSchemesByClient.get(this.mostRecentColorSchemeClientId)
 				: undefined;
 		return current ?? "dark";
+	}
+	/**
+	 * Per-tab reports of the browser's terminal-cell viewport (Round 6 F2), tracked the same
+	 * way — and for the same reason (round-4 O4) — as `clientColorSchemesByClient`: a closed
+	 * tab must not keep seeding every new surface's guessed size for tabs still open.
+	 * `static/app/terminal-keys.js` reports this once per connection and on window resize,
+	 * measured the same way `sendResize()` measures an individual surface's grid, but against
+	 * the whole viewport rather than one surface's box — necessarily an approximation of what
+	 * any *particular* new surface will resolve to once its own `ResizeObserver` fires (a
+	 * dialog's own chrome, an overlay's percentage width, differ per surface), but close enough
+	 * that a fresh surface's first published frame is never off by the wide margin a fixed
+	 * 100-column guess (`defaultTerminalColumns`) was.
+	 */
+	private readonly clientViewportCellsByClient = new Map<
+		string,
+		{ columns: number; rows: number }
+	>();
+	static readonly legacyClientViewportKey = "__legacy_viewport__";
+	private mostRecentViewportClientId: string | undefined;
+	/**
+	 * The most recently reported still-connected client's terminal-cell viewport, used to seed
+	 * a brand-new terminal surface's initial size (`TerminalSurfaceController`'s
+	 * `viewportHint`) instead of a fixed guess. `undefined` before any client has reported one
+	 * (a fresh connection's very first surface, if any mounts before the report arrives) or
+	 * once every reporting client has disconnected — `TerminalSurfaceController` falls back to
+	 * `defaultTerminalColumns`/`defaultTerminalRows` in that case, exactly as before this round.
+	 */
+	get clientViewportCells(): { columns: number; rows: number } | undefined {
+		return this.mostRecentViewportClientId !== undefined
+			? this.clientViewportCellsByClient.get(this.mostRecentViewportClientId)
+			: undefined;
 	}
 	extensionWorkingIndicator: AppExtensionWorkingIndicator | undefined;
 	extensionWorkingMessage: string | undefined;
@@ -934,6 +969,30 @@ export class AppStore {
 			// since that ordering isn't tracked once the true most-recent client is gone.
 			const remaining = [...this.clientColorSchemesByClient.keys()];
 			this.mostRecentColorSchemeClientId = remaining.at(-1);
+		}
+	}
+	/**
+	 * Records one client's reported terminal-cell viewport (see `clientViewportCells`). No
+	 * commit: nothing rendered here depends on it, only a freshly mounted surface's initial
+	 * size does.
+	 */
+	setClientViewportCells(
+		columns: number,
+		rows: number,
+		clientId: string = AppStore.legacyClientViewportKey,
+	): void {
+		this.clientViewportCellsByClient.set(clientId, { columns, rows });
+		this.mostRecentViewportClientId = clientId;
+	}
+	/**
+	 * Forgets a client's reported viewport once its SSE connection closes (see
+	 * `UiRenderer.createStream`'s disconnect callback), mirroring `clearClientColorScheme`.
+	 */
+	clearClientViewportCells(clientId: string): void {
+		this.clientViewportCellsByClient.delete(clientId);
+		if (this.mostRecentViewportClientId === clientId) {
+			const remaining = [...this.clientViewportCellsByClient.keys()];
+			this.mostRecentViewportClientId = remaining.at(-1);
 		}
 	}
 	/**

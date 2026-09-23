@@ -1,3 +1,4 @@
+import { browserReservedKeyIds } from "../agent/extension-shortcuts.ts";
 import { commandActions } from "../commands/actions.ts";
 import { appCommandCatalog, type AppCommandMetadata } from "../commands/catalog.ts";
 import { activeKeybind } from "../keybinds.ts";
@@ -142,7 +143,9 @@ function renderExtensionShortcutRow(item: AppExtensionShortcut): string {
 					data-tooltip={
 						item.reachableByKeyboard
 							? undefined
-							: "This key is already used by pi-ui — tap to run it instead."
+							: browserReservedKeyIds.has(item.key)
+								? "Your browser already uses this key — tap to run it instead."
+								: "This key is already used by pi-ui — tap to run it instead."
 					}
 				>
 					{formatKeyId(item.key)

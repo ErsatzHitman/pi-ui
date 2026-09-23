@@ -3,6 +3,7 @@
 // commands with a catalog entry, leaving out the focus-only keybinds in keybinds.ts's
 // `focusKeybindIds`). This is a plain, always up to date reference: every shortcut
 // pi-ui responds to, searchable, nothing to click.
+import { browserReservedKeyIds } from "../agent/extension-shortcuts.ts";
 import { appCommandCatalog } from "../commands/catalog.ts";
 import { activeKeybind, type FocusKeybindId } from "../keybinds.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
@@ -29,24 +30,30 @@ function ShortcutRef(props: { shortcut: string }) {
 	);
 }
 
+/** Why `KeyIdRef` mutes a `reachable: false` chip — see `AppExtensionShortcut`'s
+ * doc comment for the two cases this distinguishes (Round 6 F3 added the
+ * second one). */
+function unreachableReason(keyId: string): string {
+	return browserReservedKeyIds.has(keyId)
+		? "Your browser already uses this key — click this row to run it instead."
+		: "This key is already used by pi-ui — click this row to run it instead.";
+}
+
 /**
  * Same visual shape as `ShortcutRef`, for a raw pi-tui `KeyId` string
  * (`"alt+o"`) instead of one of pi-ui's own `ShortcutSpec`-shaped binds —
  * see `formatKeyId`'s doc comment. `reachable: false` (the key collides with
- * one of pi-ui's own binds — `AppExtensionShortcut`'s doc comment) mutes the
- * chip and adds a tooltip explaining the row is invoked by clicking it here
- * instead, rather than showing a chord that silently does nothing.
+ * one of pi-ui's own binds, or is one a real browser tab reserves for
+ * itself — `AppExtensionShortcut`'s doc comment) mutes the chip and adds a
+ * tooltip explaining the row is invoked by clicking it here instead, rather
+ * than showing a chord that silently does nothing.
  */
 function KeyIdRef(props: { keyId: string; reachable: boolean }) {
 	return (
 		<span
 			class="shortcut hotkeys-row-shortcut"
 			data-variant={props.reachable ? undefined : "muted"}
-			data-tooltip={
-				props.reachable
-					? undefined
-					: "This key is already used by pi-ui — click this row to run it instead."
-			}
+			data-tooltip={props.reachable ? undefined : unreachableReason(props.keyId)}
 		>
 			{formatKeyId(props.keyId)
 				.split(" ")
@@ -60,10 +67,13 @@ function KeyIdRef(props: { keyId: string; reachable: boolean }) {
 /**
  * `pi.registerShortcut()` shortcuts (F1 §1) — a separate section since they come
  * from whatever extensions the current session loaded, not a fixed catalog.
- * Every row is clickable and invokes the shortcut directly (F1 §3's mobile/
- * touch reachability, extended here too — not just the command palette —
- * since it is also the only invocation path for one `KeyIdRef` marks
- * `reachable: false`).
+ * Every row is a native `<button>` (Round 6 F4: was a clickable `<li>`, unreachable
+ * by keyboard/Tab and invisible to a screen reader as anything but static text)
+ * that invokes the shortcut directly (F1 §3's mobile/touch reachability, extended
+ * here too — not just the command palette — since it is also the only invocation
+ * path for one `KeyIdRef` marks `reachable: false`). The `<li>` wrapper only ever
+ * carries the search filter's `hidden` toggle, keeping the button itself a plain,
+ * always-visible-when-shown row — same visual shape as before (`.hotkeys-row`).
  */
 function ExtensionShortcutsSection(props: {
 	shortcuts: readonly AppExtensionShortcut[];
@@ -76,29 +86,33 @@ function ExtensionShortcutsSection(props: {
 			</li>
 			{props.shortcuts.map((shortcut) => (
 				<li
-					class="hotkeys-row hotkeys-row-clickable"
 					data-attr:hidden={`!${JSON.stringify(`${shortcut.description ?? ""} ${shortcut.extensionPath}`.toLowerCase())}.includes($_hotkeysQuery.trim().toLowerCase())`}
-					data-on:click={`@post('${endpoints.extensionShortcutInvoke}', { payload: { keyId: ${JSON.stringify(shortcut.key)} } })`}
 				>
-					<span class="hotkeys-row-content command-item-content">
-						<span class="command-item-title" safe>
-							{shortcut.description ??
-								formatExtensionName(shortcut.extensionPath)}
-						</span>
-						{shortcut.description && (
-							<span
-								class="command-item-description"
-								title={shortcut.extensionPath}
-								safe
-							>
-								{formatExtensionName(shortcut.extensionPath)}
+					<button
+						type="button"
+						class="hotkeys-row hotkeys-row-clickable"
+						data-on:click={`@post('${endpoints.extensionShortcutInvoke}', { payload: { keyId: ${JSON.stringify(shortcut.key)} } })`}
+					>
+						<span class="hotkeys-row-content command-item-content">
+							<span class="command-item-title" safe>
+								{shortcut.description ??
+									formatExtensionName(shortcut.extensionPath)}
 							</span>
-						)}
-					</span>
-					<KeyIdRef
-						keyId={shortcut.key}
-						reachable={shortcut.reachableByKeyboard}
-					/>
+							{shortcut.description && (
+								<span
+									class="command-item-description"
+									title={shortcut.extensionPath}
+									safe
+								>
+									{formatExtensionName(shortcut.extensionPath)}
+								</span>
+							)}
+						</span>
+						<KeyIdRef
+							keyId={shortcut.key}
+							reachable={shortcut.reachableByKeyboard}
+						/>
+					</button>
 				</li>
 			))}
 		</>

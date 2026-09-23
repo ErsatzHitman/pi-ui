@@ -169,6 +169,8 @@ export class ExtensionUiController {
 	) {
 		this.#terminalSurfaces = new TerminalSurfaceController({
 			onUpdate: (surfaces) => this.store.setTerminalSurfaces([...surfaces]),
+			// Round 6 F2 — see `TerminalSurfaceControllerOptions.viewportHint`'s doc comment.
+			viewportHint: () => this.store.clientViewportCells,
 		});
 	}
 

@@ -190,6 +190,49 @@ function measureCell() {
 	return { width, height };
 }
 
+let viewportReportTimer;
+
+/**
+ * Reports the whole browser viewport's terminal-cell grid to the server (Round 6 F2), once per
+ * connection (`bindTerminalSurfaces`'s own call, below) and on window resize (debounced, same
+ * 120ms as `scheduleResize`'s per-surface debounce) — so `TerminalSurfaceController` can seed a
+ * brand-new surface close to its true size instead of a fixed 100x30 guess, before that
+ * surface's own `ResizeObserver` has ever fired. Necessarily approximate (a surface's own
+ * chrome, an overlay's percentage width, aren't known yet), which is fine: the surface's own
+ * resize report still corrects it once it lands, same as always — this only narrows the gap the
+ * very first published frame opens with. `document.body.dispatchEvent` (not `window`), matching
+ * `display-refresh.js`'s identical pattern, so `page.tsx`'s `data-on:pi-ui-terminal-viewport`
+ * handler (on `<body>`, no `__window` modifier) can embed the server-rendered per-tab client id
+ * a plain JS module has no other way to reach.
+ */
+function reportViewportCells() {
+	const cell = measureCell();
+	if (!cell) return;
+	const cols = Math.max(
+		20,
+		Math.floor(document.documentElement.clientWidth / cell.width),
+	);
+	const rows = Math.max(
+		3,
+		Math.floor(document.documentElement.clientHeight / cell.height),
+	);
+	try {
+		document.body.dispatchEvent(
+			new CustomEvent("pi-ui-terminal-viewport", { detail: { cols, rows } }),
+		);
+	} catch {
+		// Best-effort, same as postJson below: a `document.body` that cannot
+		// dispatch (an exotic embed, or a test's minimal fake DOM that never
+		// needed this event before) just means this one hint is skipped — the
+		// surface's own resize report still corrects its size once it lands.
+	}
+}
+
+function scheduleViewportReport() {
+	clearTimeout(viewportReportTimer);
+	viewportReportTimer = setTimeout(reportViewportCells, 120);
+}
+
 async function postJson(url, body) {
 	try {
 		await fetch(url, {
@@ -503,6 +546,7 @@ function publishScrollbarSize() {
 
 export function bindTerminalSurfaces() {
 	publishScrollbarSize();
+	reportViewportCells();
 	observeNewGrids();
 	const mutationObserver = new MutationObserver((mutations) => {
 		for (const mutation of mutations) {
@@ -556,6 +600,11 @@ export function bindTerminalSurfaces() {
 		window.addEventListener("resize", () => {
 			for (const grid of document.querySelectorAll(gridSelector))
 				scheduleResize(grid);
+			// Round 6 F2: re-report the whole-viewport hint too, so the NEXT surface that
+			// mounts (not any currently mounted one, which the loop above already re-fits
+			// directly) is seeded from the window's current size, not its size when the page
+			// first loaded.
+			scheduleViewportReport();
 		});
 	}
 	document.addEventListener(
