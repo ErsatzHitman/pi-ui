@@ -26,7 +26,10 @@ import { isRecord, isString } from "../utils/type-guards.ts";
  * (its top-level "use the bridge at all" gate) and its own internal
  * wire-delivery gate — both are needed: patching only the former leaves a
  * bridge-aware panel built but silently undelivered, since the delivery gate
- * still thinks it's a literal TUI (see README "extension compatibility").
+ * still thinks it's a literal TUI (see README "extension compatibility"). A
+ * helper must honour it only where it can round-trip (its `pi_ui_event`
+ * reverse channel registered, a ui context to notify through); otherwise a
+ * blocking prompt published into the void would wait forever.
  */
 export type ExtensionsMode = "tui" | "rpc";
 

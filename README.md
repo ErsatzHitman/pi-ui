@@ -288,8 +288,11 @@ terminal:
   extension loads as a documented host-capability signal. A bridge helper opts in by honouring it
   at both of its gates — `bridgeIsLive()` returns `true` and its internal `isTui()` wire-delivery
   check returns `false` when `process.env.PI_UI_BRIDGE === "1"` (patching only the first leaves
-  panels silently undelivered). Nothing requires it: an extension that ignores the marker still
-  works, as a terminal surface.
+  panels silently undelivered). Honour it only where the helper can round-trip an element: its
+  `pi_ui_event` reverse channel is registered and it has a ui context to notify through.
+  Otherwise the extension must keep its TUI path, or a blocking prompt such as `ask_user` is
+  published into a void and waits forever. Nothing requires the marker: an extension that
+  ignores it still works, as a terminal surface.
 - Slash commands — every built-in plus every extension-registered command — get argument
   completions and native handling (pickers, dialogs, or notices) instead of being sent to the
   model as chat text.
