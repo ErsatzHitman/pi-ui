@@ -209,6 +209,7 @@ export class RuntimeController {
 	private readonly dependencies: RuntimeControllerDependencies;
 	private readonly sessionDir: string | undefined;
 	private readonly autoTitlesInFlight = new Set<string>();
+	private liveWorkspaceChannelsDirty = false;
 	private readonly liveWorkspaceFrames = new StreamingFrameScheduler<true>(() =>
 		this.commitLiveWorkspace(),
 	);
@@ -1649,19 +1650,23 @@ export class RuntimeController {
 	 * Publishes the LiveWorkspaceController snapshot into AppStore. Raw session events are
 	 * high-frequency (tool output deltas, queue updates), so ordinary publishes coalesce
 	 * through a dedicated low-rate frame scheduler; lifecycle boundaries pass `immediate`.
-	 * Channel snapshots go to the single `AppStore.extensionChannels` field.
+	 * Channel snapshots go to the single `AppStore.extensionChannels` field on the same
+	 * frames, since extension `pi.events` channels (e.g. `subagents:fleet`) can publish on
+	 * every streamed token of every subagent.
 	 */
 	private publishLiveWorkspace(
 		options: { immediate?: boolean; channels?: boolean } = {},
 	): void {
-		if (options.channels) {
-			this.state.setExtensionChannels(this.liveWorkspace.channelSnapshots());
-		}
+		if (options.channels) this.liveWorkspaceChannelsDirty = true;
 		if (options.immediate) this.liveWorkspaceFrames.flush(true);
 		else this.liveWorkspaceFrames.schedule(true);
 	}
 
 	private commitLiveWorkspace(): void {
+		if (this.liveWorkspaceChannelsDirty) {
+			this.liveWorkspaceChannelsDirty = false;
+			this.state.setExtensionChannels(this.liveWorkspace.channelSnapshots());
+		}
 		this.state.setLiveWorkspace(
 			this.liveWorkspace.snapshot({
 				queuedSteering: this.state.queuedSteeringMessages.length,
