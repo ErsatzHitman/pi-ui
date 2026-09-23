@@ -1,7 +1,8 @@
 import { test } from "bun:test";
 
-import { assertEquals, assertThrows } from "#testing/assertions";
+import { assertEquals, assertExists } from "#testing/assertions";
 
+import { piUiMarker } from "../extension-surface-types.ts";
 import { AppStore } from "../state/app-store.ts";
 import { ExtensionUiController } from "./extension-ui-controller.ts";
 
@@ -37,13 +38,53 @@ test("extension UI cancels dialogs on abort and inactive runtimes", async () => 
 	assertEquals(await controller.context(() => false).confirm("No", "No"), false);
 });
 
-test("extension UI rejects TUI-only capabilities explicitly", () => {
+test("extension UI degrades TUI-only capabilities instead of throwing", async () => {
 	const ui = new ExtensionUiController(new AppStore()).context(() => true);
 
-	assertThrows(() => ui.onTerminalInput(() => undefined), Error, "raw terminal input");
-	assertThrows(() => ui.setToolsExpanded(true), Error, "global tool expansion state");
-	assertEquals({ ...ui }.theme, ui.theme);
-	assertThrows(() => ui.theme.fg("accent", "text"), Error, "TUI themes");
+	// custom() matches the SDK's real RPC-mode contract: resolves undefined,
+	// it must never throw into the extension's command handler.
+	assertEquals(await ui.custom(() => ({ render: () => [] }) as never), undefined);
+
+	// onTerminalInput registers and returns a working unsubscribe function.
+	let seen: string | undefined;
+	const unsubscribe = ui.onTerminalInput((data) => {
+		seen = data;
+		return undefined;
+	});
+	assertExists(unsubscribe);
+	unsubscribe();
+	assertEquals(seen, undefined);
+
+	// setToolsExpanded/getToolsExpanded round-trip through controller-owned state.
+	assertEquals(ui.getToolsExpanded(), false);
+	ui.setToolsExpanded(true);
+	assertEquals(ui.getToolsExpanded(), true);
+
+	// addAutocompleteProvider/setEditorComponent/setFooter/setHeader/
+	// setHiddenThinkingLabel are recorded, not thrown.
+	ui.addAutocompleteProvider((current) => current);
+	ui.setEditorComponent(() => ({ render: () => [] }) as never);
+	assertExists(ui.getEditorComponent());
+	ui.setFooter(() => ({ render: () => [] }) as never);
+	ui.setHeader(() => ({ render: () => [] }) as never);
+	ui.setHiddenThinkingLabel("Thinking hidden");
+
+	// A component-factory setWidget() is recorded, never thrown, and clears any
+	// prior string-line widget under the same key.
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const widgetUi = controller.context(() => true);
+	widgetUi.setWidget("panel", ["line"]);
+	assertEquals(store.extensionWidgets.length, 1);
+	widgetUi.setWidget("panel", () => ({ render: () => [] }) as never);
+	assertEquals(store.extensionWidgets, []);
+
+	// theme is a permissive proxy: styling calls return their text unstyled
+	// instead of throwing, and setTheme() still reports the typed failure.
+	assertEquals(ui.theme.fg("accent", "text"), "text");
+	assertEquals(ui.theme.bold("text"), "text");
+	assertEquals(ui.getAllThemes(), []);
+	assertEquals(ui.getTheme("dark"), undefined);
 	assertEquals(ui.setTheme("dark"), {
 		success: false,
 		error: "TUI themes are unavailable in pi-ui",
@@ -60,7 +101,7 @@ test("extension UI projects status, widgets, working state, and editor text", ()
 		placement: "belowEditor",
 	});
 	ui.setWorkingMessage("Indexing...");
-	ui.setWorkingIndicator({ frames: ["●"] });
+	ui.setWorkingIndicator({ frames: ["●", "○"], intervalMs: 150 });
 	ui.setEditorText("draft");
 	ui.pasteToEditor(" text");
 	ui.notify("Careful", "warning");
@@ -75,7 +116,10 @@ test("extension UI projects status, widgets, working state, and editor text", ()
 		},
 	]);
 	assertEquals(state.extensionWorkingMessage, "Indexing...");
-	assertEquals(state.extensionWorkingIndicator, "●");
+	assertEquals(state.extensionWorkingIndicator, {
+		frames: ["●", "○"],
+		intervalMs: 150,
+	});
 	assertEquals(ui.getEditorText(), "draft text");
 	assertEquals(state.messages.at(-1)?.text, "warning: Careful");
 
@@ -83,4 +127,59 @@ test("extension UI projects status, widgets, working state, and editor text", ()
 	assertEquals(store.extensionStatuses, []);
 	assertEquals(store.extensionWidgets, []);
 	assertEquals(store.extensionWorkingMessage, undefined);
+});
+
+test("extension UI intercepts PIUI bridge payloads instead of showing them as notices", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true);
+
+	ui.notify(
+		`${piUiMarker}${JSON.stringify({
+			v: 1,
+			op: "set",
+			el: {
+				id: "panel",
+				ns: "advisor",
+				kind: "panel",
+				placement: "sheet",
+				title: "Advisor",
+			},
+		})}`,
+		"info",
+	);
+
+	let state = store.snapshot();
+	assertEquals(state.messages, []);
+	assertEquals(state.extensionElements.length, 1);
+	assertEquals(state.extensionElements[0]?.title, "Advisor");
+
+	// Garbage PIUI-prefixed payloads are dropped silently too, never surfaced.
+	ui.notify(`${piUiMarker}not json`, "info");
+	state = store.snapshot();
+	assertEquals(state.messages, []);
+
+	// A channel op updates extensionChannels without touching extensionElements.
+	ui.notify(
+		`${piUiMarker}${JSON.stringify({
+			v: 1,
+			op: "channel",
+			channel: "subagents:fleet",
+			payload: { jobs: [] },
+		})}`,
+		"info",
+	);
+	state = store.snapshot();
+	assertEquals(state.extensionChannels.length, 1);
+	assertEquals(state.extensionChannels[0]?.channel, "subagents:fleet");
+
+	// A normal (non-PIUI) notify still reaches the transcript as before.
+	ui.notify("Plain message", "info");
+	state = store.snapshot();
+	assertEquals(state.messages.at(-1)?.text, "Plain message");
+
+	controller.cancelAll();
+	state = store.snapshot();
+	assertEquals(state.extensionElements, []);
+	assertEquals(state.extensionChannels, []);
 });

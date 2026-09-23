@@ -1,20 +1,56 @@
 import type {
+	AutocompleteProviderFactory,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
+	TerminalInputHandler,
 	Theme,
 	WorkingIndicatorOptions,
 } from "@earendil-works/pi-coding-agent";
 
+/** Not re-exported from the package root; derived from the context methods. */
+type EditorFactory = Parameters<ExtensionUIContext["setEditorComponent"]>[0];
+type FooterFactory = Parameters<ExtensionUIContext["setFooter"]>[0];
+type HeaderFactory = Parameters<ExtensionUIContext["setHeader"]>[0];
+
 import type {
 	AppExtensionDialog,
 	AppExtensionWidget,
+	AppExtensionWorkingIndicator,
 	AppStore,
 } from "../state/app-store.ts";
+import { isString } from "../utils/type-guards.ts";
+import { PiUiBridgeDecoder, PiUiElementStore } from "./pi-ui-bridge.ts";
 
 const defaultWorkingVisible = true;
-// SAFETY: the proxy throws before exposing any property from the placeholder.
-const unsupportedTheme = new Proxy({} as Theme, {
-	get: () => unsupported("TUI themes"),
+
+/**
+ * A `Theme` stand-in for the web UI, where there is no terminal to paint
+ * ANSI escapes into. Every styling method degrades to identity (returns its
+ * text argument unstyled) instead of throwing, so an extension that always
+ * calls `ctx.ui.theme.fg(...)` — rather than gating on `ctx.mode === "tui"` —
+ * still runs to completion. `pi-ui` does not currently expose a way to
+ * recolor extension-authored `Component` trees anyway (see `custom()`
+ * below), so styling calls here are inherently cosmetic no-ops.
+ */
+// SAFETY: every trap below returns a plausible value for its property; no
+// real `Theme` internals (private `fgColors`/`bgColors`/`mode` fields) are
+// ever read through this placeholder.
+const identityTheme = new Proxy({} as Theme, {
+	get(_target, property) {
+		if (property === "name") return "pi-ui";
+		if (property === "sourcePath" || property === "sourceInfo") return undefined;
+		if (property === "getColorMode") return () => "truecolor";
+		if (property === "getFgAnsi" || property === "getBgAnsi") return () => "";
+		if (
+			property === "getThinkingBorderColor" ||
+			property === "getBashModeBorderColor"
+		) {
+			return () => (text: string) => text;
+		}
+		// fg/bg/bold/italic/underline/inverse/strikethrough all take the text to
+		// style as their last argument and otherwise only take style keys.
+		return (...args: unknown[]) => args.findLast(isString) ?? "";
+	},
 });
 
 type PendingDialog = {
@@ -30,10 +66,28 @@ export class ExtensionUiController {
 	readonly #queue: PendingDialog[] = [];
 	readonly #statuses = new Map<string, string>();
 	readonly #widgets = new Map<string, AppExtensionWidget>();
+	/**
+	 * Widget keys an extension mounted a `(tui, theme) => Component` factory
+	 * onto instead of a `string[]`. pi-ui cannot render a live `pi-tui`
+	 * `Component` tree (see `custom()`), so these are recorded for
+	 * diagnostics/future Live Workspace surfacing only — never rendered, and
+	 * any earlier string-line widget under the same key is cleared, matching
+	 * "this key is now a component-only widget" semantics.
+	 */
+	readonly #componentWidgetKeys = new Set<string>();
+	readonly #terminalInputHandlers = new Set<TerminalInputHandler>();
+	readonly #autocompleteProviders: AutocompleteProviderFactory[] = [];
+	readonly #piUiDecoder = new PiUiBridgeDecoder();
+	readonly #piUiElements = new PiUiElementStore();
 	#active: PendingDialog | undefined;
-	#workingIndicator: string | undefined;
+	#workingIndicator: AppExtensionWorkingIndicator | undefined;
 	#workingMessage: string | undefined;
 	#workingVisible = defaultWorkingVisible;
+	#hiddenThinkingLabel: string | undefined;
+	#toolsExpanded = false;
+	#footerFactory: FooterFactory | undefined;
+	#headerFactory: HeaderFactory | undefined;
+	#editorComponentFactory: EditorFactory | undefined;
 
 	constructor(private readonly store: AppStore) {}
 
@@ -45,14 +99,14 @@ export class ExtensionUiController {
 				this.confirm(isActive, title, message, dialogOptions),
 			input: (title, placeholder, dialogOptions) =>
 				this.input(isActive, title, placeholder, dialogOptions),
-			notify: (message, type = "info") => {
-				if (!isActive()) return;
-				this.store.appendMessage(
-					"notice",
-					type === "info" ? message : `${type}: ${message}`,
-				);
+			notify: (message, type = "info") => this.notify(isActive, message, type),
+			onTerminalInput: (handler) => {
+				if (!isActive()) return () => {};
+				this.#terminalInputHandlers.add(handler);
+				return () => {
+					this.#terminalInputHandlers.delete(handler);
+				};
 			},
-			onTerminalInput: () => unsupported("raw terminal input"),
 			setStatus: (key, text) => {
 				if (!isActive()) return;
 				if (text === undefined) this.#statuses.delete(key);
@@ -76,36 +130,53 @@ export class ExtensionUiController {
 			},
 			setWorkingIndicator: (options) => {
 				if (!isActive()) return;
-				this.#workingIndicator = firstWorkingFrame(options);
+				this.#workingIndicator = normalizeWorkingIndicator(options);
 				this.syncWorking();
 			},
 			setHiddenThinkingLabel: (label) => {
-				if (isActive() && label !== undefined) {
-					unsupported("custom thinking labels");
-				}
+				if (!isActive()) return;
+				this.#hiddenThinkingLabel = label;
 			},
 			setWidget: (key, content, options) => {
 				if (!isActive()) return;
-				if (content === undefined) this.#widgets.delete(key);
-				else if (Array.isArray(content)) {
+				if (content === undefined) {
+					this.#widgets.delete(key);
+					this.#componentWidgetKeys.delete(key);
+				} else if (Array.isArray(content)) {
+					this.#componentWidgetKeys.delete(key);
 					this.#widgets.set(key, {
 						key,
 						lines: [...content],
 						placement: options?.placement ?? "aboveEditor",
 					});
-				} else unsupported("component widgets");
+				} else {
+					// A `(tui, theme) => Component` factory: pi-ui has no terminal to
+					// mount it into. Record that the key is now component-owned and
+					// drop any prior string-line rendering for it, without throwing.
+					this.#widgets.delete(key);
+					this.#componentWidgetKeys.add(key);
+				}
 				this.store.setExtensionWidgets(this.#widgets.values().toArray());
 			},
 			setFooter: (factory) => {
-				if (isActive() && factory) unsupported("custom footer components");
+				if (isActive()) this.#footerFactory = factory;
 			},
 			setHeader: (factory) => {
-				if (isActive() && factory) unsupported("custom header components");
+				if (isActive()) this.#headerFactory = factory;
 			},
 			setTitle: (title) => {
 				if (isActive()) this.store.setDocumentTitle(title);
 			},
-			custom: async () => unsupported("custom TUI components"),
+			custom: async <T>() => {
+				// Matches the SDK's own real RPC-mode contract (a headless client
+				// has no terminal to mount a `Component` into): resolve `undefined`
+				// instead of throwing, so a command handler that awaits `custom()`
+				// degrades gracefully rather than crashing. A future terminal-surface
+				// host can replace this with a real headless render.
+				// SAFETY: `undefined` is the documented RPC-mode resolution for
+				// every caller of `custom()`, regardless of `T`.
+				return undefined as T;
+			},
 			pasteToEditor: (text) => {
 				if (!isActive()) return;
 				this.setEditorText(`${this.store.promptEditorText}${text}`);
@@ -115,25 +186,43 @@ export class ExtensionUiController {
 			},
 			getEditorText: () => (isActive() ? this.store.promptEditorText : ""),
 			editor: (title, prefill) => this.editor(isActive, title, prefill),
-			addAutocompleteProvider: () => {
-				if (isActive()) unsupported("autocomplete providers");
+			addAutocompleteProvider: (factory) => {
+				if (isActive()) this.#autocompleteProviders.push(factory);
 			},
 			setEditorComponent: (factory) => {
-				if (isActive() && factory) unsupported("custom editor components");
+				if (isActive()) this.#editorComponentFactory = factory;
 			},
-			getEditorComponent: () => undefined,
-			theme: unsupportedTheme,
+			getEditorComponent: () => this.#editorComponentFactory,
+			theme: identityTheme,
 			getAllThemes: () => [],
 			getTheme: () => undefined,
 			setTheme: () => ({
 				success: false,
 				error: "TUI themes are unavailable in pi-ui",
 			}),
-			getToolsExpanded: () => false,
-			setToolsExpanded: () => {
-				if (isActive()) unsupported("global tool expansion state");
+			getToolsExpanded: () => this.#toolsExpanded,
+			setToolsExpanded: (expanded) => {
+				if (isActive()) this.#toolsExpanded = expanded;
 			},
 		};
+	}
+
+	/**
+	 * The label an extension asked to hide reasoning/thinking blocks behind.
+	 * Recorded (never rendered) for Round 2's terminal-surface host to read.
+	 */
+	getHiddenThinkingLabel(): string | undefined {
+		return this.#hiddenThinkingLabel;
+	}
+
+	/** The most recently registered footer `Component` factory, if any. */
+	getFooterFactory(): FooterFactory | undefined {
+		return this.#footerFactory;
+	}
+
+	/** The most recently registered header `Component` factory, if any. */
+	getHeaderFactory(): HeaderFactory | undefined {
+		return this.#headerFactory;
 	}
 
 	respond(id: string, value: string | undefined, cancelled: boolean): boolean {
@@ -157,14 +246,55 @@ export class ExtensionUiController {
 		}
 		this.#statuses.clear();
 		this.#widgets.clear();
+		this.#componentWidgetKeys.clear();
+		this.#terminalInputHandlers.clear();
+		this.#autocompleteProviders.length = 0;
+		this.#piUiDecoder.reset();
+		this.#piUiElements.clear();
 		this.#workingIndicator = undefined;
 		this.#workingMessage = undefined;
 		this.#workingVisible = defaultWorkingVisible;
+		this.#hiddenThinkingLabel = undefined;
+		this.#toolsExpanded = false;
+		this.#footerFactory = undefined;
+		this.#headerFactory = undefined;
+		this.#editorComponentFactory = undefined;
 		this.store.setExtensionDialog(undefined);
 		this.store.setExtensionStatuses([]);
 		this.store.setExtensionWidgets([]);
+		this.store.setExtensionElements([]);
+		this.store.setExtensionChannels([]);
 		this.syncWorking();
 		this.store.setDocumentTitle("pi-ui");
+	}
+
+	private notify(
+		isActive: () => boolean,
+		message: string,
+		type: "info" | "warning" | "error",
+	): void {
+		if (!isActive()) return;
+		if (PiUiBridgeDecoder.isPiUiMessage(message)) {
+			// Bridge-aware extensions (see `~/.pi/agent/extensions/lib/bridge.ts`)
+			// speak the "Pi UI Bridge" (PIUI) protocol over this same fire-and-
+			// forget `notify()` channel whenever they detect a live RPC-mode
+			// client — which pi-ui always is. These payloads are structured
+			// element updates, never user-facing text, so they must NEVER reach
+			// the transcript as a notice, whether or not they decode cleanly.
+			const op = this.#piUiDecoder.decode(message);
+			if (op) {
+				this.#piUiElements.apply(op);
+				this.store.setExtensionElements(this.#piUiElements.elements());
+				if (op.op === "channel") {
+					this.store.setExtensionChannels(this.#piUiElements.channels());
+				}
+			}
+			return;
+		}
+		this.store.appendMessage(
+			"notice",
+			type === "info" ? message : `${type}: ${message}`,
+		);
 	}
 
 	private select(
@@ -328,13 +458,9 @@ export class ExtensionUiController {
 	}
 }
 
-function firstWorkingFrame(
+function normalizeWorkingIndicator(
 	options: WorkingIndicatorOptions | undefined,
-): string | undefined {
+): AppExtensionWorkingIndicator | undefined {
 	if (!options?.frames) return undefined;
-	return options.frames[0] ?? "";
-}
-
-function unsupported(capability: string): never {
-	throw new Error(`${capability} are not supported by the pi-ui web interface`);
+	return { frames: [...options.frames], intervalMs: options.intervalMs };
 }
