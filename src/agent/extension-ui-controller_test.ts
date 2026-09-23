@@ -121,7 +121,11 @@ test("extension UI projects status, widgets, working state, and editor text", ()
 		intervalMs: 150,
 	});
 	assertEquals(ui.getEditorText(), "draft text");
-	assertEquals(state.messages.at(-1)?.text, "warning: Careful");
+	// The message text itself is exactly what the extension sent (no manual
+	// "warning: " prefix) — severity is conveyed by `noticeTone` instead, so
+	// each level gets its own status-dot color and prefix (r1-audit #24).
+	assertEquals(state.messages.at(-1)?.text, "Careful");
+	assertEquals(state.messages.at(-1)?.noticeTone, "warning");
 
 	controller.cancelAll();
 	assertEquals(store.extensionStatuses, []);
@@ -206,4 +210,60 @@ test("extension UI hands PIUI channel ops to the channel owner when one is confi
 	// The owner publishes channels; the controller must not write a second copy.
 	assertEquals(store.snapshot().extensionChannels, []);
 	assertEquals(store.snapshot().messages, []);
+});
+
+test("notify's info/warning/error levels are distinguished by noticeTone, not text", () => {
+	const store = new AppStore();
+	const ui = new ExtensionUiController(store).context(() => true);
+
+	ui.notify("An info message", "info");
+	ui.notify("A warning message", "warning");
+	ui.notify("An error message", "error");
+
+	const [info, warning, error] = store.messages;
+	assertEquals(info?.text, "An info message");
+	assertEquals(info?.noticeTone, "info");
+	assertEquals(warning?.text, "A warning message");
+	assertEquals(warning?.noticeTone, "warning");
+	assertEquals(error?.text, "An error message");
+	assertEquals(error?.noticeTone, "error");
+});
+
+test("a background session's PIUI elements survive a round trip to the foreground", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true);
+
+	ui.notify(
+		`${piUiMarker}${JSON.stringify({
+			v: 1,
+			op: "set",
+			el: {
+				id: "panel",
+				ns: "advisor",
+				kind: "panel",
+				placement: "sheet",
+				title: "Advisor",
+			},
+		})}`,
+		"info",
+	);
+	assertEquals(store.extensionElements.length, 1);
+
+	// RuntimeController snapshots before backgrounding the session, which
+	// calls cancelAll() (see #23: this used to lose the element for good).
+	const snapshot = controller.snapshotPiUiElements();
+	controller.cancelAll();
+	assertEquals(store.extensionElements, []);
+
+	// ...and restores it when the session returns to the foreground, with no
+	// re-send from the extension.
+	controller.restorePiUiElements(snapshot);
+	assertEquals(store.extensionElements.length, 1);
+	assertEquals(store.extensionElements[0]?.title, "Advisor");
+
+	// Restoring an empty snapshot (the common case: no PIUI activity while
+	// backgrounded) is a no-op rather than clobbering anything.
+	controller.restorePiUiElements([]);
+	assertEquals(store.extensionElements.length, 1);
 });

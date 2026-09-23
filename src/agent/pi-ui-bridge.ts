@@ -36,6 +36,7 @@ const maxChunksPerMessage = 128;
 const maxPendingChunkBuffers = 16;
 const maxElements = 200;
 const maxAppendedEntries = 500;
+const maxChannels = 64;
 
 export type PiUiOp =
 	| { op: "set" | "upsert"; el: JsonObject }
@@ -231,6 +232,25 @@ export class PiUiElementStore {
 		this.#channels.clear();
 	}
 
+	/**
+	 * Replaces the current elements with a previously captured
+	 * {@link elements} snapshot (e.g. a background session's PIUI state,
+	 * restored when it returns to the foreground — see
+	 * `ExtensionUiController.restorePiUiElements`). Channels and the
+	 * revision counter are left untouched: channels are owned by
+	 * `LiveWorkspaceController` once an `onChannel` hook is set, and
+	 * `#revision` only needs to stay monotonic, which it already does
+	 * because restored elements carry their own prior revision numbers.
+	 */
+	restore(elements: readonly PiUiElement[]): void {
+		this.#elements.clear();
+		for (const element of elements) {
+			if (this.#elements.size >= maxElements) break;
+			this.#elements.set(elementKey(element.ns, element.id), element);
+			this.#revision = Math.max(this.#revision, element.revision);
+		}
+	}
+
 	#set(el: JsonObject): boolean {
 		const id = isString(el.id) ? el.id : undefined;
 		const ns = isString(el.ns) ? el.ns : undefined;
@@ -309,6 +329,12 @@ export class PiUiElementStore {
 	}
 
 	#channel(channel: string, payload: JsonValue): boolean {
+		if (!this.#channels.has(channel) && this.#channels.size >= maxChannels) {
+			// Unbounded channel names (an extension keying by job id, for example)
+			// must not grow this map forever; evict the least-recently-updated one.
+			const oldest = this.#channels.keys().next().value;
+			if (oldest !== undefined) this.#channels.delete(oldest);
+		}
 		this.#channels.set(channel, { channel, payload, updatedAt: Date.now() });
 		return true;
 	}

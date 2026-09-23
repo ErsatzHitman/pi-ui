@@ -18,7 +18,7 @@ import { exportSessionToHtml } from "../../node_modules/@earendil-works/pi-codin
 import { resolveModelScopeFromModels } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/model-resolver.js";
 import { exportSessionToJsonl } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-export.js";
 import agentPackageJson from "../../node_modules/@earendil-works/pi-coding-agent/package.json" with { type: "json" };
-import type { PiUiActionRequest } from "../extension-surface-types.ts";
+import type { PiUiActionRequest, PiUiElement } from "../extension-surface-types.ts";
 import { sessionPerformance } from "../perf/session-performance.ts";
 import {
 	type AppSlashCommand,
@@ -145,6 +145,12 @@ type BackgroundSession = {
 	observedRunning: boolean;
 	tools: SessionEventToolState;
 	unsubscribe: () => void;
+	/**
+	 * This session's PIUI elements (panels, rosters, forms, …) at the moment
+	 * it left the foreground, restored by `activateRuntime` if it returns
+	 * (see `ExtensionUiController.snapshotPiUiElements` — r1-audit #23).
+	 */
+	piUiElements: readonly PiUiElement[];
 };
 
 export type RuntimeControllerDependencies = Readonly<{
@@ -1563,6 +1569,10 @@ export class RuntimeController {
 		const snapshot = this.state.snapshotChat();
 		const backgroundGeneration = this.foregroundGeneration;
 		const backgroundObservedRunning = this.foregroundObservedRunning;
+		// Captured before `unbindSession()` clears the shared `ExtensionUiController`,
+		// so a still-open panel/roster/form survives this session going to background
+		// (see `activateRuntime`, which restores it if the session returns).
+		const piUiElements = this.extensionUi.snapshotPiUiElements();
 		// Invalidate foreground callbacks before replacement creation can await.
 		this.foregroundGeneration = this.backgroundSessions.allocateGeneration();
 		this.foregroundObservedRunning = false;
@@ -1578,6 +1588,7 @@ export class RuntimeController {
 			observedRunning: backgroundObservedRunning,
 			tools: cloneSessionEventToolState(this.tools),
 			unsubscribe: () => {},
+			piUiElements,
 		};
 		backgroundSession.unsubscribe = this.runtime.session.subscribe((event) =>
 			this.handleBackgroundEvent(backgroundSession, event),
@@ -1713,6 +1724,7 @@ export class RuntimeController {
 		if (sessionFile) this.liveWorkspace.removeBackgroundSession(sessionFile);
 		this.bindSessionState({ resetToolState: false, syncSessions: false });
 		this.state.restoreChat(backgroundSession.state.snapshot());
+		this.extensionUi.restorePiUiElements(backgroundSession.piUiElements);
 		this.catalog.mergeCurrentStatuses();
 	}
 

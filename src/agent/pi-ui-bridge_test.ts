@@ -267,3 +267,60 @@ test("PiUiElementStore clear() empties both elements and channels", () => {
 	assertEquals(store.elements(), []);
 	assertEquals(store.channels(), []);
 });
+
+test("PiUiElementStore caps channels and evicts the oldest one", () => {
+	const store = new PiUiElementStore();
+	for (let index = 0; index < 70; index += 1) {
+		store.apply({ op: "channel", channel: `c-${index}`, payload: index });
+	}
+	const channels = store.channels();
+	assertEquals(channels.length <= 64, true);
+	// The oldest channels (c-0, c-1, ...) were evicted; the newest survive.
+	assertEquals(
+		channels.some((channel) => channel.channel === "c-69"),
+		true,
+	);
+	assertEquals(
+		channels.some((channel) => channel.channel === "c-0"),
+		false,
+	);
+});
+
+test("PiUiElementStore.restore() replaces elements for a returning background session", () => {
+	const store = new PiUiElementStore();
+	store.apply({
+		op: "set",
+		el: { id: "a", ns: "n", kind: "status", placement: "status" },
+	});
+	const snapshot = store.elements();
+
+	store.clear();
+	assertEquals(store.elements(), []);
+
+	store.restore(snapshot);
+	assertEquals(store.elements().length, 1);
+	assertEquals(store.elements()[0]?.id, "a");
+
+	// A later patch on a restored element still applies (the restored
+	// revision doesn't wedge the monotonic counter).
+	assertEquals(
+		store.apply({ op: "patch", id: "a", ns: "n", patch: { title: "Now" } }),
+		true,
+	);
+	assertEquals(store.elements()[0]?.title, "Now");
+});
+
+test("PiUiElementStore.restore() respects the element cap", () => {
+	const store = new PiUiElementStore();
+	const elements = Array.from({ length: 250 }, (_unused, index) => ({
+		id: `e-${index}`,
+		ns: "n",
+		kind: "status" as const,
+		placement: "status" as const,
+		data: {},
+		revision: index,
+		updatedAt: 0,
+	}));
+	store.restore(elements);
+	assertEquals(store.elements().length <= 200, true);
+});

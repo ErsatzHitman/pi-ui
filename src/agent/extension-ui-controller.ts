@@ -12,6 +12,7 @@ type EditorFactory = Parameters<ExtensionUIContext["setEditorComponent"]>[0];
 type FooterFactory = Parameters<ExtensionUIContext["setFooter"]>[0];
 type HeaderFactory = Parameters<ExtensionUIContext["setHeader"]>[0];
 
+import type { PiUiElement } from "../extension-surface-types.ts";
 import type {
 	AppExtensionDialog,
 	AppExtensionWidget,
@@ -238,6 +239,30 @@ export class ExtensionUiController {
 		return this.#headerFactory;
 	}
 
+	/**
+	 * Captures this session's PIUI elements before it leaves the foreground
+	 * (e.g. going to background), so `restorePiUiElements` can bring them back
+	 * unchanged if the session returns — otherwise `cancelAll()` (called on
+	 * every session switch) would silently drop a still-open panel/roster/form
+	 * that the extension never re-sent because, from its point of view,
+	 * nothing changed (r1-audit #23).
+	 */
+	snapshotPiUiElements(): PiUiElement[] {
+		return this.#piUiElements.elements();
+	}
+
+	/**
+	 * Restores a snapshot captured by {@link snapshotPiUiElements} and
+	 * republishes it. Only PIUI elements are restored — pending dialogs,
+	 * widgets, and statuses are intentionally not (a session switch still
+	 * cancels those, matching the existing, verified behavior).
+	 */
+	restorePiUiElements(elements: readonly PiUiElement[]): void {
+		if (elements.length === 0) return;
+		this.#piUiElements.restore(elements);
+		this.store.setExtensionElements(this.#piUiElements.elements());
+	}
+
 	respond(id: string, value: string | undefined, cancelled: boolean): boolean {
 		if (this.#active?.dialog.id !== id) return false;
 		const active = this.#active;
@@ -309,10 +334,10 @@ export class ExtensionUiController {
 			}
 			return;
 		}
-		this.store.appendMessage(
-			"notice",
-			type === "info" ? message : `${type}: ${message}`,
-		);
+		// Each level gets its own status-dot color and prefix in the transcript
+		// (renderSystemMessage) instead of every notice reading "Warning: …"
+		// regardless of severity — see r1-audit #24.
+		this.store.appendMessage("notice", message, { noticeTone: type });
 	}
 
 	private select(
