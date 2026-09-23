@@ -78,6 +78,7 @@ export const endpoints = {
 	extensionUiResponse: "/extensions/ui/respond",
 	extensionUiEditor: "/extensions/ui/editor",
 	extensionUiAction: "/extensions/ui/action",
+	extensionUiColorScheme: "/extensions/ui/color-scheme",
 	terminalSurfaceInput: "/extensions/terminal/input",
 	terminalSurfaceResize: "/extensions/terminal/resize",
 	commandArgumentCompletions: "/commands/argument-completions",

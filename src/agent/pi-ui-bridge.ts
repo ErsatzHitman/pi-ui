@@ -271,6 +271,9 @@ export class PiUiElementStore {
 		for (const [field, value] of Object.entries(el)) {
 			if (!envelopeKeys.has(field)) data[field] = value;
 		}
+		// `set`/`upsert` is a deliberate (re)show — both `revision` and `openGeneration` bump
+		// together here (unlike `#patch`/`#append` below, which only bump `revision`).
+		const revision = this.#nextRevision();
 		this.#elements.set(key, {
 			id,
 			ns,
@@ -280,7 +283,8 @@ export class PiUiElementStore {
 			actions: normalizeActions(el.actions),
 			durable: el.durable === true,
 			data,
-			revision: this.#nextRevision(),
+			revision,
+			openGeneration: revision,
 			updatedAt: Date.now(),
 		});
 		return true;

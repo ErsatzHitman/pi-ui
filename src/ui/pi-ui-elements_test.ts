@@ -20,6 +20,7 @@ function element(overrides: Partial<PiUiElement>): PiUiElement {
 		placement: "sheet",
 		data: {},
 		revision: 1,
+		openGeneration: 1,
 		updatedAt: 0,
 		...overrides,
 	};
@@ -35,6 +36,85 @@ test("sheets keep their open state across morphs and reply close on dismiss", ()
 	const html = renderPiUiSheets({ extensionElements: [element({})] });
 	assertStringIncludes(html, 'data-preserve-attr="open"');
 	assertStringIncludes(html, "actionId: &#34;close&#34;");
+});
+
+test("the sheet host reports the browser's real color scheme once and on change (m9)", () => {
+	const html = renderPiUiSheets({ extensionElements: [] });
+	assertStringIncludes(html, "prefers-color-scheme: dark");
+	assertStringIncludes(html, "/extensions/ui/color-scheme");
+	assertStringIncludes(html, "mql.addEventListener");
+});
+
+test("the widget strip renders both the full list and a one-line summary, and the summary opens Live Workspace Extensions (m12)", () => {
+	const widget = element({
+		id: "w1",
+		kind: "widget",
+		placement: "pinned",
+		title: "Build status",
+		data: { lines: ["compiling"] },
+	});
+	const html = renderPiUiWidgets({ extensionElements: [widget] });
+	assertStringIncludes(html, 'class="piui-widgets-list"');
+	assertStringIncludes(html, 'class="btn piui-widgets-summary"');
+	// A single element's summary shows its own title rather than a bare count.
+	assertStringIncludes(html, "Build status");
+	assertStringIncludes(html, "liveWorkspacePreferences.tab = 'extensions'");
+});
+
+test("the widget summary falls back to a count for more than one element", () => {
+	const html = renderPiUiWidgets({
+		extensionElements: [
+			element({
+				id: "w1",
+				kind: "widget",
+				placement: "pinned",
+				data: { lines: [] },
+			}),
+			element({
+				id: "w2",
+				kind: "widget",
+				placement: "inline",
+				data: { lines: [] },
+			}),
+		],
+	});
+	assertStringIncludes(html, "2 extension updates");
+});
+
+test("the widget strip renders nothing (not even the summary) when there are no widgets", () => {
+	const html = renderPiUiWidgets({ extensionElements: [] });
+	assertStringExcludes(html, "piui-widgets-summary");
+	assertStringExcludes(html, "piui-widgets-list");
+});
+
+test("a sheet with no body content shows an empty/loading state instead of blank space", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [element({ kind: "panel", placement: "sheet", data: {} })],
+	});
+	assertStringIncludes(html, "piui-sheet-empty");
+	assertStringIncludes(html, "Waiting for content");
+});
+
+test("a sheet with body content does not show the empty state", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				kind: "panel",
+				placement: "sheet",
+				data: { sections: [{ kind: "status", text: "hello" }] },
+			}),
+		],
+	});
+	assertStringExcludes(html, "piui-sheet-empty");
+});
+
+test("a sheet focuses its first field or action once it opens", () => {
+	const html = renderPiUiSheets({ extensionElements: [element({})] });
+	assertStringIncludes(html, "addEventListener('toggle'");
+	assertStringIncludes(
+		html,
+		"input:not([type=checkbox]), textarea, select, .piui-actions .btn",
+	);
 });
 
 test("forms without a submit action get one carrying valid signal references", () => {

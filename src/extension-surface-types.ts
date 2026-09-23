@@ -48,6 +48,15 @@ export type PiUiElement = {
 	data: JsonObject;
 	/** Monotonic per-element revision, bumped on every set/patch/append. */
 	revision: number;
+	/**
+	 * Monotonic counter bumped only by a genuine `set`/`upsert` (the extension deliberately
+	 * (re)showing this element), never by `patch`/`append` (an incremental content update to an
+	 * already-open sheet). Sheet open/dismissal tracking keys on this instead of `revision` — see
+	 * `piUiDismissedStorageKey` and `AppStore.setExtensionElements` — so a streaming sheet's
+	 * `patch`/`append` frames don't reopen it after the user dismisses it (round-2 audit M4b),
+	 * while an explicit re-`set` of an already-known id does reopen it (M4a).
+	 */
+	openGeneration: number;
 	updatedAt: number;
 };
 
@@ -108,11 +117,13 @@ export function piUiDialogId(element: Pick<PiUiElement, "id" | "ns">): string {
 /**
  * `localStorage` key a browser tab uses to remember that it dismissed a `sheet`/`screen`
  * element (Esc, backdrop, Close) — shared between the sheet's `close` handler (which writes
- * the element's current `revision`) and the initial-connect script that decides whether to
- * auto-`showModal()` it (which skips the sheet when the stored revision still matches, i.e.
- * the extension hasn't pushed a newer version since). A `durable` sheet that the extension
- * never removes would otherwise reopen on every reload/reconnect even after the user closed
- * it (round-2 audit A#16). Single source of truth so the two call sites can't drift apart.
+ * the element's current `openGeneration`) and the initial-connect script that decides whether
+ * to auto-`showModal()` it (which skips the sheet when the stored generation still matches,
+ * i.e. the extension hasn't deliberately re-shown it since). A `durable` sheet that the
+ * extension never removes would otherwise reopen on every reload/reconnect even after the user
+ * closed it (round-2 audit A#16); keying on `openGeneration` rather than `revision` also keeps
+ * a streaming sheet's incremental `patch`/`append` updates from reopening it (M4b). Single
+ * source of truth so the two call sites can't drift apart.
  */
 export function piUiDismissedStorageKey(element: Pick<PiUiElement, "id" | "ns">): string {
 	return `piui-dismissed-${piUiDialogId(element)}`;

@@ -31,6 +31,60 @@ test("extension UI resolves queued web dialogs in order", async () => {
 	assertEquals(store.extensionDialog, undefined);
 });
 
+test("select() marks hasOwnCancel when an option is already a cancel row, and not otherwise (m8)", async () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	const withOwnCancel = ui.select("compact-pct", ["off", "5%", "Cancel"]);
+	assertEquals(store.extensionDialog?.kind, "select");
+	assertEquals(
+		store.extensionDialog?.kind === "select" && store.extensionDialog.hasOwnCancel,
+		true,
+	);
+	const firstId = store.extensionDialog?.id ?? "";
+	controller.respond(firstId, "off", false);
+	await withOwnCancel;
+
+	const withoutOwnCancel = ui.select("Choose", ["one", "two"]);
+	assertEquals(store.extensionDialog?.kind, "select");
+	assertEquals(
+		store.extensionDialog?.kind === "select" && store.extensionDialog.hasOwnCancel,
+		false,
+	);
+	const secondId = store.extensionDialog?.id ?? "";
+	controller.respond(secondId, "one", false);
+	await withoutOwnCancel;
+});
+
+test("input() drops a placeholder that only repeats the title (m8)", async () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	const repeated = ui.input("Draft a goal", "Draft a goal");
+	assertEquals(
+		store.extensionDialog?.kind === "input"
+			? store.extensionDialog.placeholder
+			: "unset",
+		undefined,
+	);
+	const repeatedId = store.extensionDialog?.id ?? "";
+	controller.respond(repeatedId, "value", false);
+	await repeated;
+
+	const distinct = ui.input("Draft a goal", "e.g. ship the release");
+	assertEquals(
+		store.extensionDialog?.kind === "input"
+			? store.extensionDialog.placeholder
+			: "unset",
+		"e.g. ship the release",
+	);
+	const distinctId = store.extensionDialog?.id ?? "";
+	controller.respond(distinctId, "value", false);
+	await distinct;
+});
+
 test("extension UI cancels dialogs on abort and inactive runtimes", async () => {
 	const store = new AppStore();
 	const controller = new ExtensionUiController(store);
@@ -395,6 +449,41 @@ test("custom() overlay wiring mounts a terminal surface, routes input, and resol
 	// An id nobody mounted routes to nothing, rather than throwing.
 	assertEquals(controller.handleTerminalSurfaceInput("no-such-surface", "x"), false);
 	assertEquals(controller.resizeTerminalSurface("no-such-surface", 80, 24), false);
+});
+
+test("a custom() surface's real Theme reflects the client's reported color scheme (m9)", async () => {
+	const store = new AppStore();
+	store.setClientColorScheme("light");
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	let seenThemeName: string | undefined;
+	const resultPromise = ui.custom(
+		(_tui, theme, _keybindings, done) => {
+			seenThemeName = theme.name;
+			done(undefined as never);
+			return { render: () => [], invalidate: () => {} } as never;
+		},
+		{ overlay: true },
+	);
+	await resultPromise;
+	assertEquals(seenThemeName, "pi-ui-light");
+
+	// The default (before any client report) stays "dark", matching pi-coding-agent's own
+	// default theme and this app's previous always-dark behavior.
+	const defaultStore = new AppStore();
+	const defaultController = new ExtensionUiController(defaultStore);
+	const defaultUi = defaultController.context(() => true, fakeRuntimeKey());
+	let defaultThemeName: string | undefined;
+	await defaultUi.custom(
+		(_tui, theme, _keybindings, done) => {
+			defaultThemeName = theme.name;
+			done(undefined as never);
+			return { render: () => [], invalidate: () => {} } as never;
+		},
+		{ overlay: true },
+	);
+	assertEquals(defaultThemeName, "pi-ui-dark");
 });
 
 test("setWidget/setFooter/setHeader component factories mount persistent terminal surfaces", () => {

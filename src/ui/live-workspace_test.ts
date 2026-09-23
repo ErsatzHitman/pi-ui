@@ -325,6 +325,7 @@ test("the extensions tab reuses the shared PIUI renderer and links sheets to the
 				title: "Fleet",
 				data: { rows: [{ label: "scout", status: "running" }] },
 				revision: 1,
+				openGeneration: 1,
 				updatedAt: 1,
 			},
 			{
@@ -335,6 +336,7 @@ test("the extensions tab reuses the shared PIUI renderer and links sheets to the
 				title: "Review plan",
 				data: {},
 				revision: 1,
+				openGeneration: 1,
 				updatedAt: 1,
 			},
 		],

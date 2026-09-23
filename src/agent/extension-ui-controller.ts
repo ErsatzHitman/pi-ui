@@ -82,11 +82,11 @@ export type ExtensionUiControllerHooks = {
 	 */
 	onChannel?: (channel: string, payload: JsonValue) => void;
 	/**
-	 * The browser client's light/dark preference, for the real `Theme` a
-	 * terminal surface's `Component` tree is mounted with. pi-ui has no
-	 * server-side signal for this today (it's a pure `prefers-color-scheme`
-	 * CSS media query client-side) — defaults to `"dark"`, matching
-	 * `pi-coding-agent`'s own default theme.
+	 * Overrides the browser client's reported light/dark preference (see
+	 * `colorScheme()`/`AppStore.clientColorScheme`), for the real `Theme` a terminal surface's
+	 * `Component` tree is mounted with. Only needed by a caller that already tracks this some
+	 * other way, or a test that wants a fixed scheme; leave unset to use the client's real,
+	 * reported preference.
 	 */
 	colorScheme?: () => TerminalSurfaceColorScheme;
 };
@@ -497,6 +497,12 @@ export class ExtensionUiController {
 					kind: "select",
 					title,
 					options: [...options],
+					// Some extensions (e.g. compact-pct) already include their own "Cancel"
+					// row among `options`; suppress pi-ui's own generic one so the list
+					// doesn't show two (round-2 audit m8).
+					hasOwnCancel: options.some(
+						(option) => option.trim().toLowerCase() === "cancel",
+					),
 				},
 				respond: (value, cancelled) =>
 					resolve(
@@ -540,7 +546,11 @@ export class ExtensionUiController {
 				id: crypto.randomUUID(),
 				kind: "input",
 				title,
-				placeholder,
+				// Some extensions (e.g. /goal draft) pass the same string for both the
+				// dialog's heading and its placeholder; showing it twice reads as broken —
+				// the heading already says it, so drop a placeholder that only repeats it
+				// (round-2 audit m8).
+				placeholder: placeholder === title ? undefined : placeholder,
 			},
 			dialogOptions,
 		);
@@ -589,8 +599,15 @@ export class ExtensionUiController {
 			});
 	}
 
+	/**
+	 * The `hooks.colorScheme` override exists for callers that already track this some other
+	 * way (and for tests); the normal path is `AppStore.clientColorScheme`, reported by the
+	 * browser itself once per connection and on change — see `pi-ui-elements.tsx`'s
+	 * `renderPiUiSheets` mount script and `POST /extensions/ui/color-scheme` — which is a real
+	 * signal rather than the previous permanent `"dark"` default (round-2 audit m9).
+	 */
 	private colorScheme(): TerminalSurfaceColorScheme {
-		return this.hooks.colorScheme?.() ?? "dark";
+		return this.hooks.colorScheme?.() ?? this.store.clientColorScheme;
 	}
 
 	/** A minimal `ReadonlyFooterDataProvider` backed by this controller's own status map. */

@@ -609,19 +609,21 @@ export class UiRenderer implements AppStorePresentation {
 	}
 	/**
 	 * Auto-opens a `sheet`/`screen` PIUI element on a fresh connection (reload, reconnect,
-	 * new tab) — unless this same browser previously dismissed this exact revision of it (see
-	 * `dismissAction` in pi-ui-elements.tsx and `piUiDismissedStorageKey`); a `durable` sheet
-	 * the extension never removes must stay closed instead of reopening every time (A#16).
+	 * new tab) — unless this same browser previously dismissed this exact open generation of
+	 * it (see `dismissAction` in pi-ui-elements.tsx and `piUiDismissedStorageKey`); a
+	 * `durable` sheet the extension never removes must stay closed instead of reopening every
+	 * time (A#16). Keyed on `openGeneration` rather than `revision` so a streaming sheet's
+	 * `patch`/`append` updates don't undo the dismissal on the next reload (M4b).
 	 */
 	private piUiSheetReopenScript(element: PiUiElement): string {
 		const id = piUiDialogId(element);
 		const key = piUiDismissedStorageKey(element);
-		const revision = JSON.stringify(String(element.revision));
+		const openGeneration = JSON.stringify(String(element.openGeneration));
 		return `{
 			const dialog = document.getElementById('${id}');
-			let dismissedRevision;
-			try { dismissedRevision = localStorage.getItem(${JSON.stringify(key)}); } catch {}
-			if (dialog && !dialog.open && dismissedRevision !== ${revision}) dialog.showModal();
+			let dismissedGeneration;
+			try { dismissedGeneration = localStorage.getItem(${JSON.stringify(key)}); } catch {}
+			if (dialog && !dialog.open && dismissedGeneration !== ${openGeneration}) dialog.showModal();
 		}`;
 	}
 }

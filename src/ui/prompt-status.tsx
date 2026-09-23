@@ -18,15 +18,27 @@ const animatedFrameCounts = new Set([2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
 export function renderPromptStatus(state: AppStateSnapshot): string {
 	const activityText = state.extensionWorkingMessage ?? state.activityText;
+	// The turn phase (from raw session/extension-hook events — see `LiveWorkspaceController`'s
+	// `recordUiPromptStart`/`recordUiPromptEnd`, also used by the Live Workspace "Now" tab's
+	// turn banner) already distinguishes an extension dialog or inline `custom()` waiting on
+	// the user from an ordinary running turn; "Sending..." staying up through that wait reads
+	// as a hang rather than a prompt for input (round-2 audit m6).
+	const turn = state.liveWorkspace.turn;
+	const waitingForExtension = turn?.phase === "waiting-for-extension";
+	const sendingLabel = waitingForExtension
+		? turn?.waitingTitle
+			? `Waiting for extension input: ${turn.waitingTitle}`
+			: "Waiting for extension input"
+		: "Sending...";
 	return syncHtml(
 		<span id="prompt-status" class="prompt-status">
 			<span
 				class="prompt-status-message"
-				data-show="$_promptSubmitting"
+				data-show={waitingForExtension ? "true" : "$_promptSubmitting"}
 				style="display: none"
 			>
 				{loaderIcon()}
-				<span>Sending...</span>
+				<span safe>{sendingLabel}</span>
 			</span>
 			{state.extensionWorkingVisible && activityText && (
 				<span class="prompt-working-status">

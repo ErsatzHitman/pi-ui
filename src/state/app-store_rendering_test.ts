@@ -1147,7 +1147,7 @@ test("a live workspace fleet storm patches only the agents tab, not usage/now/ac
 	}
 });
 
-test("a dismissed PIUI sheet is not reopened on the next connection while its revision is unchanged (A#16)", async () => {
+test("a dismissed PIUI sheet is not reopened on the next connection while its open generation is unchanged (A#16)", async () => {
 	const state = createState();
 	state.setExtensionElements([
 		{
@@ -1157,6 +1157,7 @@ test("a dismissed PIUI sheet is not reopened on the next connection while its re
 			placement: "sheet",
 			data: {},
 			revision: 3,
+			openGeneration: 3,
 			updatedAt: 0,
 		},
 	]);
@@ -1164,14 +1165,110 @@ test("a dismissed PIUI sheet is not reopened on the next connection while its re
 	// so wait for the guard's own distinguishing text (not just the shared key substring,
 	// which the dismiss handler's `data-on:close` attribute emits earlier in the stream).
 	const output = await readStateOutput(state, (text) =>
-		text.includes("dismissedRevision"),
+		text.includes("dismissedGeneration"),
 	);
 	assertIncludes(
 		output,
 		'localStorage.getItem("piui-dismissed-piui-sheet-ask-user-panel")',
 	);
-	assertIncludes(output, 'dismissedRevision !== "3"');
+	assertIncludes(output, 'dismissedGeneration !== "3"');
 	assertIncludes(output, "document.getElementById('piui-sheet-ask-user-panel')");
+});
+
+test("re-set()-ing an existing, dismissed sheet id gets a fresh open effect (M4a/M4b)", async () => {
+	const state = createState();
+	const baseSheet = {
+		id: "panel",
+		ns: "ask-user",
+		kind: "panel" as const,
+		placement: "sheet" as const,
+		data: {},
+		updatedAt: 0,
+	};
+	// The exact open-effect script `pickerEffectScripts` emits for this dialog id (see
+	// `ui-renderer.ts`'s "dialog" effect branch) — counted below rather than just checked for
+	// presence, so a stray leftover from an earlier update in the same accumulated read can't
+	// pass the assertion by coincidence.
+	const openScript =
+		"document.getElementById('piui-sheet-ask-user-panel'); if (dialog && !dialog.open) dialog.showModal();";
+	const controller = new AbortController();
+	try {
+		// Start from an empty connection so the whole sequence below is observed as
+		// incremental patches, not folded into the initial page render. Accumulate every read
+		// into one running buffer: dirtying `extensionElements` also dirties `pickers` (the
+		// open-effect script's own region), and those two patches can land in either order
+		// within — or split across — the transport's read chunks, so per-read isolation is
+		// unreliable; a cumulative count at each checkpoint is not.
+		const reader = await openInitializedStateStream(state, controller.signal);
+		let acc = "";
+		// Reads until both `marker` (this update's own distinguishing content) and at least
+		// `expectedOpenScripts` occurrences of the open-effect script have arrived — the two
+		// patches (extension elements, pickers) can land in either read chunk, so waiting on
+		// `marker` alone can race ahead of an open-effect script still in flight.
+		const readMore = async (marker: string, expectedOpenScripts: number) => {
+			acc += await readUntil(
+				reader,
+				(text) =>
+					(acc + text).includes(marker) &&
+					count(acc + text, openScript) >= expectedOpenScripts,
+			);
+			return acc;
+		};
+
+		// A genuinely new sheet id gets an open effect.
+		state.update(
+			() =>
+				state.setExtensionElements([
+					{
+						...baseSheet,
+						revision: 1,
+						openGeneration: 1,
+						data: { sections: [{ kind: "status", text: "hello" }] },
+					},
+				]),
+			{ flush: true },
+		);
+		await readMore("hello", 1);
+		assertEqual(count(acc, openScript), 1);
+
+		// Simulate the user dismissing it: the store itself doesn't track dismissal (that's
+		// client-side `localStorage`), so only the element list changes here. A `patch`-style
+		// content update (same `openGeneration`) must NOT get another open effect. There's
+		// nothing further to wait for here, so read once and assert the count held steady.
+		state.update(
+			() =>
+				state.setExtensionElements([
+					{
+						...baseSheet,
+						revision: 2,
+						openGeneration: 1,
+						data: { sections: [{ kind: "status", text: "streaming" }] },
+					},
+				]),
+			{ flush: true },
+		);
+		await readMore("streaming", 1);
+		assertEqual(count(acc, openScript), 1);
+
+		// A deliberate re-`set` (a fresh `openGeneration`) DOES get a new open effect, even
+		// though the id was already known.
+		state.update(
+			() =>
+				state.setExtensionElements([
+					{
+						...baseSheet,
+						revision: 3,
+						openGeneration: 2,
+						data: { sections: [{ kind: "status", text: "again" }] },
+					},
+				]),
+			{ flush: true },
+		);
+		await readMore("again", 2);
+		assertEqual(count(acc, openScript), 2);
+	} finally {
+		controller.abort();
+	}
 });
 
 test("hot app views exclude independently owned regions", () => {
@@ -1296,6 +1393,7 @@ function piUiWidget(id: string, overrides: Partial<PiUiElement> = {}): PiUiEleme
 		placement: "pinned",
 		data: { lines: [revision === 1 ? "hello" : "updated"] },
 		revision,
+		openGeneration: overrides.openGeneration ?? revision,
 		updatedAt: 0,
 		...overrides,
 	};
