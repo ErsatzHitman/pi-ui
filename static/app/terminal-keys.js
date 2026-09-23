@@ -238,6 +238,24 @@ function scheduleResize(grid) {
 	);
 }
 
+/**
+ * The height a grid's terminal reports as its rows. An overlay's dialog is sized to what the
+ * component rendered, so its current height says nothing about the terminal: pi-tui lays
+ * overlays out against the whole terminal (`maxHeight: "85%"` of its rows), and a component
+ * that sizes itself from `terminal.rows` (ask_user's overlay) would see a few rows, render a
+ * "terminal too short" stub, and keep the dialog that small. Report the height the dialog can
+ * grow to instead; it stays the same as the dialog grows, so this can't feed back on itself.
+ */
+function availableHeight(grid, rect) {
+	if (grid.dataset.terminalSurfaceKind !== "overlay") return rect.height;
+	const content = grid.closest(".terminal-surface-dialog-content");
+	if (!content) return rect.height;
+	const maxHeight = Number.parseFloat(getComputedStyle(content).maxHeight);
+	if (!Number.isFinite(maxHeight)) return rect.height;
+	const chrome = content.getBoundingClientRect().height - rect.height;
+	return Math.max(rect.height, maxHeight - chrome);
+}
+
 function sendResize(surfaceId, grid) {
 	const cell = measureCell();
 	if (!cell) return;
@@ -247,7 +265,7 @@ function sendResize(surfaceId, grid) {
 	// what lines actually get; the grid's border box over-fits by a column on phones.
 	const available = body ? body.clientWidth - inlinePadding(body) : rect.width;
 	const cols = Math.max(20, Math.floor(available / cell.width));
-	const rows = Math.max(3, Math.floor(rect.height / cell.height));
+	const rows = Math.max(3, Math.floor(availableHeight(grid, rect) / cell.height));
 	const previousCols = Number(body?.dataset.cols);
 	const previousRows = Number(body?.dataset.rows);
 	if (cols === previousCols && rows === previousRows) return;

@@ -309,3 +309,36 @@ test("focus returns to the prompt when a focused overlay or inline surface unmou
 		for (const restore of restores) restore();
 	}
 });
+
+test("an overlay reports the rows its dialog can grow to, not the rows it currently shows", async () => {
+	// A component that sizes itself from `terminal.rows` (ask_user's overlay) must not see the
+	// few rows its own short first render occupies, or it renders a "too short" stub forever.
+	const content = new FakeGridElement({ width: 700, height: 130 });
+	Object.assign(content.computedStyle, { maxHeight: "600px" });
+	const grid = new FakeGridElement({ width: 0, height: 96 });
+	grid.dataset.terminalSurfaceGrid = "s-overlay";
+	grid.dataset.terminalSurfaceKind = "overlay";
+	grid.setClosest(content);
+	const body = new FakeGridElement({ width: 0, height: 0 });
+	body.dataset.cols = "80";
+	body.dataset.rows = "4";
+	body.clientWidth = 700;
+	grid.setQueryResult(body);
+	body.setClosest(grid);
+
+	const dom = installFakeDom({ probeRect: { width: 140, height: 20 }, grids: [] });
+	try {
+		bindTerminalSurfaces();
+		dom.getMutationCallback()?.([
+			{ type: "attributes", target: body, addedNodes: [], removedNodes: [] },
+		]);
+		await waitForCondition(() => dom.calls.length > 0, {
+			timeoutMs: 1000,
+			message: "expected a resize POST for the overlay",
+		});
+		// 600px max-height minus 34px of dialog chrome, at 20px rows.
+		assertEquals(dom.calls[0]?.body, { surfaceId: "s-overlay", cols: 100, rows: 28 });
+	} finally {
+		dom.restore();
+	}
+});

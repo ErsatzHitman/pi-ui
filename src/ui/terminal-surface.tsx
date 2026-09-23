@@ -133,10 +133,22 @@ const knownAnchors = new Set([
 	"center",
 ]);
 
-/** Options are sanitized to finite numbers and `N%` strings by the controller before they get here. */
-function sizeValue(value: number | string | undefined, unit: string): string | undefined {
+/**
+ * Options are sanitized to finite numbers and `N%` strings by the controller before they get
+ * here. pi-tui resolves a percentage against the whole terminal, which here is the viewport
+ * (`percentUnit`): as a CSS percentage it would resolve against the fit-content dialog itself,
+ * which is circular, so a `width: "92%"` overlay collapsed to its min-width and a
+ * `maxHeight: "85%"` capped nothing.
+ */
+function sizeValue(
+	value: number | string | undefined,
+	unit: string,
+	percentUnit: string,
+): string | undefined {
 	if (value === undefined) return undefined;
-	return isString(value) ? value : `${value}${unit}`;
+	if (!isString(value)) return `${value}${unit}`;
+	const percent = /^(\d+(?:\.\d+)?)%$/.exec(value);
+	return percent ? `${percent[1]}${percentUnit}` : value;
 }
 
 /**
@@ -150,12 +162,12 @@ function overlayStyleVars(
 ): string | undefined {
 	if (!options) return undefined;
 	const decls: string[] = [];
-	const width = sizeValue(options.width, "ch");
+	const width = sizeValue(options.width, "ch", "vw");
 	if (width) decls.push(`--terminal-overlay-width:${width}`);
 	if (options.minWidth !== undefined) {
 		decls.push(`--terminal-overlay-min-width:${options.minWidth}ch`);
 	}
-	const maxHeight = sizeValue(options.maxHeight, "lh");
+	const maxHeight = sizeValue(options.maxHeight, "lh", "dvh");
 	if (maxHeight) decls.push(`--terminal-overlay-max-height:${maxHeight}`);
 	if (options.offsetX) decls.push(`--terminal-overlay-offset-x:${options.offsetX}ch`);
 	if (options.offsetY) decls.push(`--terminal-overlay-offset-y:${options.offsetY}lh`);

@@ -81,6 +81,16 @@ test("overlay anchor and offset project onto the dialog's data attribute and sty
 	assertStringIncludes(html, "--terminal-overlay-width:40ch");
 });
 
+test("percentage overlay sizes resolve against the viewport, like pi-tui's terminal", () => {
+	const html = renderTerminalSurfaceOverlays({
+		terminalSurfaces: [
+			surface({ overlayOptions: { width: "92%", maxHeight: "85%" } }),
+		],
+	});
+	assertStringIncludes(html, "--terminal-overlay-width:92vw");
+	assertStringIncludes(html, "--terminal-overlay-max-height:85dvh");
+});
+
 test("an unrecognized anchor falls back to center rather than breaking the CSS selector", () => {
 	const html = renderTerminalSurfaceOverlays({
 		terminalSurfaces: [surface({ overlayOptions: { anchor: "north" } })],
