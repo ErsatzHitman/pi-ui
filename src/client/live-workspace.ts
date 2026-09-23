@@ -6,7 +6,11 @@
  * git-availability gating, which Live Workspace has no equivalent of.
  */
 
-import { registerDismissibleSurface } from "../../static/app/history-stack.js";
+import {
+	notifyExternalSurfaceClose,
+	notifyExternalSurfaceOpen,
+	registerDismissibleSurface,
+} from "../../static/app/history-stack.js";
 import { formatRetryCountdown } from "../live-workspace-types.ts";
 
 const tickIntervalMs = 1000;
@@ -144,6 +148,9 @@ function watchTurnPhase(): void {
 
 function bindLiveWorkspace() {
 	let open = false;
+	// Whether opening the pane as an overlay pushed a history entry that closing must pop
+	// (A#17: a back press should close the drawer/sheet, not leave the page).
+	let historyEntry = false;
 	const applyOpen = (next: boolean) => {
 		if (next === open) return;
 		open = next;
@@ -152,12 +159,29 @@ function bindLiveWorkspace() {
 		if (open) {
 			requestAnimationFrame(() => {
 				pane.querySelector<HTMLElement>(".live-workspace-tab-button")?.focus();
+				if (open && !historyEntry && isOverlayOpen()) {
+					historyEntry = true;
+					notifyExternalSurfaceOpen();
+				}
 			});
-		} else if (pane.contains(document.activeElement)) {
+			return;
+		}
+		if (historyEntry) {
+			historyEntry = false;
+			notifyExternalSurfaceClose();
+		}
+		if (pane.contains(document.activeElement)) {
 			document.getElementById("live-workspace-toggle")?.focus();
 		}
 	};
-	registerDismissibleSurface({ close: closeLiveWorkspace, isOpen: isOverlayOpen });
+	registerDismissibleSurface({
+		// A back press already consumed this surface's history entry; don't pop another.
+		close: () => {
+			historyEntry = false;
+			closeLiveWorkspace();
+		},
+		isOpen: isOverlayOpen,
+	});
 	return { applyOpen, requestNotificationPermission };
 }
 

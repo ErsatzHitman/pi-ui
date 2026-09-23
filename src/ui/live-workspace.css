@@ -12,6 +12,14 @@
 	 */
 	#live-workspace-backdrop {
 		position: absolute;
+
+		/*
+		 * Placed in `#workspace-shell`'s content row (like the drawer itself) so its containing
+		 * block stops below `.toolbar`: the scrim must not swallow clicks meant for the
+		 * toolbar's other buttons (session sidebar, command palette, …) while the pane is open.
+		 */
+		grid-row: 2 / 3;
+		grid-column: 1 / -1;
 		inset: 0;
 		z-index: 55;
 		display: block;
@@ -455,5 +463,12 @@
 			grid-column: 2;
 			margin-inline: 0;
 		}
+	}
+}
+
+@layer components {
+	/* On/off icon pair inside one icon button; `data-show` hides the inactive one. */
+	.live-workspace-icon-state {
+		display: contents;
 	}
 }

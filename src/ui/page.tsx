@@ -28,10 +28,10 @@ import { renderPiUiSheets } from "./pi-ui-elements.tsx";
 import { renderSessionPicker, renderWorkspaceDialogMenu } from "./pickers.tsx";
 import { renderPromptBox } from "./prompt-box.tsx";
 import type { AppRenderSnapshot } from "./render-state.ts";
-import { renderTerminalSurfaceOverlays } from "./terminal-surface.tsx";
 import { renderSessionSidebar } from "./session-sidebar.tsx";
 import { previousSessionAction, renderSessionTransition } from "./session-transition.tsx";
 import { syncHtml } from "./sync-html.ts";
+import { renderTerminalSurfaceOverlays } from "./terminal-surface.tsx";
 import { renderThemeLab } from "./theme-lab.tsx";
 import { renderToolbar } from "./toolbar.tsx";
 import { renderTreePicker } from "./tree-picker.tsx";
@@ -240,6 +240,13 @@ export function renderPage(
 							"workspace-canvas app-shell",
 							state.isTemporarySession && "temporary-chat",
 						]}
+						// Seed the pane signals before any attribute below reads them: Datastar applies an
+						// element's attributes in order, and an earlier read (data-class) would create the
+						// signal first, so `__ifmissing` would skip the saved `open` preference (A#15).
+						data-signals:_workspace-review-open__ifmissing="false"
+						data-signals:_live-workspace-open__ifmissing={
+							state.liveWorkspacePreferences.open ? "true" : "false"
+						}
 						data-class:review-open="$_workspaceReviewOpen"
 						data-class:live-workspace-open="$_liveWorkspaceOpen"
 						data-class:temporary-chat="$_temporarySession"
@@ -249,10 +256,6 @@ export function renderPage(
 							window.piUi.workspaceReview.applyOpen($_workspaceReviewOpen);
 							window.piUi.liveWorkspace.applyOpen($_liveWorkspaceOpen);
 						`}
-						data-signals:_workspace-review-open__ifmissing="false"
-						data-signals:_live-workspace-open__ifmissing={
-							state.liveWorkspacePreferences.open ? "true" : "false"
-						}
 						data-init={streamConnectAction}
 						data-on:pi-ui-stream-reconnect__window={streamConnectAction}
 					>

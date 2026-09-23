@@ -3,7 +3,10 @@ import { test } from "bun:test";
 import { assertEquals } from "#testing/assertions";
 
 import {
+	bindDismissibleHistory,
 	createDismissibleHistoryGuard,
+	notifyExternalSurfaceClose,
+	notifyExternalSurfaceOpen,
 	registerDismissibleSurface,
 } from "./history-stack.js";
 
@@ -94,4 +97,19 @@ test("a later independent close is handled normally again after the popstate set
 	guard.notifyOpen();
 	guard.notifyClose();
 	assertEquals(backCalls, 1);
+});
+
+test("non-dialog surfaces report open/close through the bound guard (A#17)", () => {
+	let pushes = 0;
+	let backs = 0;
+	const guard = createDismissibleHistoryGuard({
+		pushState: () => (pushes += 1),
+		back: () => (backs += 1),
+	});
+	const target = { addEventListener: () => {} };
+	bindDismissibleHistory(guard, target, target);
+	notifyExternalSurfaceOpen();
+	assertEquals(pushes, 1);
+	notifyExternalSurfaceClose();
+	assertEquals(backs, 1);
 });

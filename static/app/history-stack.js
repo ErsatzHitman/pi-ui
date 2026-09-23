@@ -55,6 +55,21 @@ export function createDismissibleHistoryGuard(options = {}) {
  * markup. Each entry reports its own open state, since only its owner knows when that's true.
  */
 const externalSurfaces = new Set();
+/** The guard `bindDismissibleHistory` installed, so non-dialog surfaces can report open/close. */
+let boundGuard;
+
+/**
+ * Tells the history guard a registered non-dialog surface just opened as a dismissible
+ * overlay (dialogs report themselves through their `toggle` event instead).
+ */
+export function notifyExternalSurfaceOpen() {
+	boundGuard?.notifyOpen();
+}
+
+/** Counterpart of {@link notifyExternalSurfaceOpen} for a close NOT caused by a back press. */
+export function notifyExternalSurfaceClose() {
+	boundGuard?.notifyClose();
+}
 
 /** Registers a `{ isOpen(), close() }` surface; returns a function that unregisters it. */
 export function registerDismissibleSurface(surface) {
@@ -107,6 +122,7 @@ export function bindDismissibleHistory(
 	documentTarget = document,
 	windowTarget = window,
 ) {
+	boundGuard = guard;
 	documentTarget.addEventListener(
 		"toggle",
 		(event) => {

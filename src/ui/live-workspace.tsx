@@ -26,7 +26,7 @@ import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppStateSnapshot, AppUsage } from "../state/app-store.ts";
 import { formatTokens } from "../utils/format.ts";
 import { Icon } from "./icon.tsx";
-import { Activity, Bell, Bot, Download, Gauge, List, X } from "./icons.ts";
+import { Activity, Bell, BellOff, Bot, Download, Gauge, List, X } from "./icons.ts";
 import { ShortcutKbd, ShortcutTooltip } from "./keyboard.tsx";
 import { renderPiUiElement } from "./pi-ui-elements.tsx";
 import { resumeSessionAction } from "./session-transition.tsx";
@@ -233,7 +233,28 @@ export function renderLiveWorkspace(
 							}
 						`}
 						>
-							<Icon icon={Bell} />
+							<span
+								class="live-workspace-icon-state"
+								style={
+									preferences.notifications
+										? undefined
+										: "display: none"
+								}
+								data-show="$liveWorkspacePreferences.notifications"
+							>
+								<Icon icon={Bell} />
+							</span>
+							<span
+								class="live-workspace-icon-state"
+								style={
+									preferences.notifications
+										? "display: none"
+										: undefined
+								}
+								data-show="!$liveWorkspacePreferences.notifications"
+							>
+								<Icon icon={BellOff} />
+							</span>
 							<ShortcutTooltip label="Notify on completion" />
 						</button>
 						<button
