@@ -11,6 +11,7 @@ function key(
 		altKey: boolean;
 		shiftKey: boolean;
 		metaKey: boolean;
+		isComposing: boolean;
 	}> = {},
 ) {
 	return {
@@ -19,6 +20,7 @@ function key(
 		altKey: false,
 		shiftKey: false,
 		metaKey: false,
+		isComposing: false,
 		...modifiers,
 	};
 }
@@ -57,10 +59,44 @@ test("isForwardCandidate always forwards Escape regardless of prompt contents", 
 	assertEquals(isForwardCandidate(key("Escape"), true), true);
 });
 
-test("isForwardCandidate rejects any modifier-held key outright", () => {
-	assertEquals(isForwardCandidate(key("a", { ctrlKey: true }), true), false);
-	assertEquals(isForwardCandidate(key("a", { altKey: true }), true), false);
+test("isForwardCandidate forwards an Alt or Ctrl chord regardless of prompt contents", () => {
+	// Round 6 F1: Alt+O must reach a hidden workflow view's `onTerminalInput`
+	// listener from the prompt, whether or not the prompt has text in it.
+	assertEquals(isForwardCandidate(key("o", { altKey: true }), true), true);
+	assertEquals(isForwardCandidate(key("o", { altKey: true }), false), true);
+	assertEquals(isForwardCandidate(key("k", { ctrlKey: true }), true), true);
+});
+
+test("isForwardCandidate rejects Cmd/Meta chords and a bare modifier keydown", () => {
 	assertEquals(isForwardCandidate(key("a", { metaKey: true }), true), false);
+	assertEquals(isForwardCandidate(key("Alt", { altKey: true }), true), false);
+	assertEquals(isForwardCandidate(key("Control", { ctrlKey: true }), true), false);
+});
+
+test("isForwardCandidate never intercepts the platform's own editing chords", () => {
+	for (const letter of ["c", "v", "x", "a", "z", "y"]) {
+		assertEquals(isForwardCandidate(key(letter, { ctrlKey: true }), true), false);
+	}
+	assertEquals(isForwardCandidate(key("Backspace", { ctrlKey: true }), true), false);
+	// Ctrl+Alt+C is a distinct, unclaimed chord — only the Ctrl-only form is protected.
+	assertEquals(
+		isForwardCandidate(key("c", { ctrlKey: true, altKey: true }), true),
+		true,
+	);
+});
+
+test("isForwardCandidate never intercepts IME composition or AltGraph", () => {
+	assertEquals(
+		isForwardCandidate(key("o", { altKey: true, isComposing: true }), true),
+		false,
+	);
+	assertEquals(
+		isForwardCandidate(
+			{ ...key("e", { altKey: true }), getModifierState: () => true },
+			true,
+		),
+		false,
+	);
 });
 
 test("isForwardCandidate only forwards arrows and single characters while the prompt is empty", () => {

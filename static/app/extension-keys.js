@@ -25,10 +25,10 @@ import { encodeKeyEvent } from "./terminal-keys.js";
  * would matter.
  *
  * Prompt-level `onTerminalInput` forwarding only intercepts a bounded
- * "candidate" set — Escape unconditionally, and arrows/a single unmodified
- * character only while the prompt is empty — so ordinary multi-line typing
- * and cursor movement never pay a round trip; see `isForwardCandidate`'s doc
- * comment. Forwarding a candidate always preventDefault()s it up front (the
+ * "candidate" set — Escape unconditionally, any Alt/Ctrl chord that isn't a
+ * platform editing shortcut, and arrows/a single unmodified character only
+ * while the prompt is empty — so ordinary multi-line typing and cursor
+ * movement never pay a round trip; see `isForwardCandidate`'s doc comment. Forwarding a candidate always preventDefault()s it up front (the
  * round trip has to decide first), which also stands down prompt-box.tsx's
  * own target-phase handling for that same keypress — including its
  * Escape-blurs-the-prompt convenience, since that handler runs on the
@@ -117,6 +117,24 @@ export function matchesKeyId(event, keyId) {
 	return matchesBaseToken(event, base);
 }
 
+/** Base keys (case-insensitive) a Ctrl-chord already means something to the
+ * browser/OS for — copy, paste, cut, select-all, undo, redo — plus Ctrl+
+ * Backspace's "delete previous word". Round 6 F1: never forwarded, exactly
+ * like Escape/Enter/arrows already never touch these; an extension that wants
+ * one of these chords for itself is out of luck, same as it would be against
+ * a real terminal emulator's own copy/paste bindings. */
+const nativeEditingChordKeys = new Set(["c", "v", "x", "a", "z", "y"]);
+
+/** Whether `event` is a Ctrl-chord the platform already gives a fixed editing
+ * meaning to (see `nativeEditingChordKeys`) — checked before Alt is even
+ * considered, since these are Ctrl-only bindings (Ctrl+Alt+C etc. are a
+ * distinct, unclaimed chord). */
+function isNativeEditingChord(event) {
+	if (!event.ctrlKey || event.altKey || event.metaKey) return false;
+	if (event.key === "Backspace") return true;
+	return nativeEditingChordKeys.has(event.key.toLowerCase());
+}
+
 /**
  * Whether `event` is a candidate for prompt-level `onTerminalInput`
  * forwarding (F1 §2). Escape is always a candidate — extension state (a
@@ -128,10 +146,35 @@ export function matchesKeyId(event, keyId) {
  * only state where every extension observed using them (`bash-background.ts`,
  * `subagents.ts` manage mode) actually reads them — so a normal multi-line
  * edit's cursor movement and typing never wait on a round trip.
+ *
+ * Round 6 F1: an Alt+key or Ctrl+key chord is also a candidate, regardless of
+ * prompt contents — real interactive-mode's raw `onTerminalInput` listeners
+ * (`ask-user.ts`'s `alt+o` overlay toggle, `subagents.ts` manage mode) see
+ * every keystroke including modifier chords, and no ordinary typing or prompt
+ * editing ever holds Ctrl/Alt, so there's no per-keystroke cost to widening
+ * this the way there would be for plain characters. This never suppresses
+ * pi-ui's own bound keys (`src/keybinds.ts`): they're dispatched by a
+ * separate `window`-level listener that still runs and fires exactly as
+ * before (this module only ever calls `preventDefault()`, never
+ * `stopPropagation()`) — same "both may act" precedent already documented in
+ * `extension-shortcuts.ts` for a `registerShortcut()` collision, just applied
+ * to a raw listener instead of one dispatched through the SDK's own
+ * `getShortcuts()` map. Excluded outright: the platform's own editing chords
+ * (`isNativeEditingChord`), IME composition, AltGraph (accented/special
+ * characters on many non-US layouts arrive as `altKey: true` with
+ * `getModifierState("AltGraph")`), Cmd/Meta chords (macOS/Chrome-OS reserved,
+ * same as before), and a bare modifier keydown with no base key yet.
  */
 export function isForwardCandidate(event, promptEmpty) {
-	if (event.ctrlKey || event.metaKey || event.altKey) return false;
 	if (event.key === "Escape") return true;
+	if (event.isComposing) return false;
+	if (event.metaKey) return false;
+	if (event.getModifierState?.("AltGraph")) return false;
+	if (event.ctrlKey || event.altKey) {
+		if (isNativeEditingChord(event)) return false;
+		if (["Control", "Alt", "Shift", "Meta"].includes(event.key)) return false;
+		return true;
+	}
 	if (!promptEmpty) return false;
 	if (
 		event.key === "ArrowUp" ||
@@ -323,7 +366,20 @@ function applyKeyLocally(input, event) {
 			return;
 		}
 		default:
-			if (event.key.length === 1) replaceSelection(input, event.key, start, end);
+			// A modifier chord (Alt+O, Ctrl+K, …) unconsumed by any extension has no
+			// text to insert — pi-ui's own `window`-level keybind handler, if the
+			// chord is one of its own, already ran (see `isForwardCandidate`'s doc
+			// comment); if it isn't, the chord is simply a no-op, same as a real
+			// terminal would treat an unbound one. Only a bare, unmodified character
+			// is native text input.
+			if (
+				event.key.length === 1 &&
+				!event.ctrlKey &&
+				!event.altKey &&
+				!event.metaKey
+			) {
+				replaceSelection(input, event.key, start, end);
+			}
 	}
 }
 
