@@ -3,6 +3,7 @@ import {
 	type PiUiAction,
 	type PiUiElement,
 	piUiDialogId,
+	piUiDismissedStorageKey,
 } from "../extension-surface-types.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
@@ -64,9 +65,82 @@ export function renderPiUiWidgets(
 						widgetPlacements.has(element.placement) &&
 						element.kind !== "composer",
 				)
-				.map((element) => renderPiUiElement(element))}
+				.map((element) =>
+					isPinnedSummaryKind(element)
+						? renderPiUiPinnedSummary(element)
+						: renderPiUiElement(element),
+				)}
 		</div>,
 	);
+}
+
+/**
+ * `pinned` `roster`/`progress` elements: a `roster` can carry many rows, and stacking every
+ * one of them above the editor would make the widget area a tall list rather than the
+ * compact strip the plan calls for. Show a one-line summary here instead (row count and how
+ * many are `running`, or the progress bar/label — already one line) with a button to the full
+ * detail, which keeps rendering unchanged in the Live Workspace Extensions tab
+ * (`renderExtensionsTab`, live-workspace.tsx) via the same `renderPiUiElement`.
+ */
+function isPinnedSummaryKind(element: PiUiElement): boolean {
+	return (
+		element.placement === "pinned" &&
+		(element.kind === "roster" || element.kind === "progress")
+	);
+}
+
+function renderPiUiPinnedSummary(element: PiUiElement): string {
+	return syncHtml(
+		<div class="piui-element piui-summary" data-piui-element={domId(element)}>
+			{element.title && (
+				<div class="piui-element-title" safe>
+					{element.title}
+				</div>
+			)}
+			<div class="piui-summary-row">
+				<div class="piui-summary-body">
+					{element.kind === "roster"
+						? renderRosterSummary(element)
+						: renderProgress(element)}
+				</div>
+				<button
+					type="button"
+					class="btn"
+					data-variant="ghost"
+					data-size="xs"
+					data-on:click={openLiveWorkspaceExtensionsAction()}
+				>
+					Open
+				</button>
+			</div>
+		</div>,
+	);
+}
+
+function renderRosterSummary(element: PiUiElement): string {
+	const rows = arrayField(element.data);
+	if (!rows) return renderGenericData(element.data);
+	const running = rows.filter(
+		(row) =>
+			isJsonObject(row) &&
+			(textField(row.state) ?? textField(row.status)) === "running",
+	).length;
+	return syncHtml(
+		<span class="fine-print">
+			{rows.length} item{rows.length === 1 ? "" : "s"}
+			{running > 0 && ` · ${running} running`}
+		</span>,
+	);
+}
+
+/** Opens the Live Workspace pane to the Extensions tab, where the full element renders. */
+function openLiveWorkspaceExtensionsAction(): string {
+	return `$_liveWorkspaceOpen = true;
+		$liveWorkspacePreferences.tab = 'extensions';
+		document.body.dispatchEvent(new CustomEvent(
+			'pi-ui-live-workspace-preferences',
+			{ detail: { tab: 'extensions' } },
+		));`;
 }
 
 export function renderPiUiSheets(
@@ -146,7 +220,7 @@ function renderPiUiBody(element: PiUiElement): string {
 		case "status":
 			return syncHtml(<span safe>{textField(element.data.text) ?? ""}</span>);
 		case "widget":
-			return renderLines(element.data.lines, "piui-widget-lines");
+			return renderWidgetLines(element.data.lines);
 		case "log":
 			return renderLines(element.data.lines, "piui-log-lines");
 		case "progress":
@@ -174,6 +248,29 @@ function renderLines(value: JsonValue | undefined, className: string): string {
 				<div safe>{line}</div>
 			))}
 		</div>,
+	);
+}
+
+/** Above this many lines, a `widget` element's lines start collapsed (round-2 audit's
+ * "PIUI placement UX": the above-editor area must never become a tall stack). */
+const widgetCollapseLineThreshold = 6;
+
+function renderWidgetLines(value: JsonValue | undefined): string {
+	const lines = stringArray(value);
+	if (lines.length === 0) return "";
+	const list = (
+		<div class="piui-widget-lines">
+			{lines.map((line) => (
+				<div safe>{line}</div>
+			))}
+		</div>
+	);
+	if (lines.length <= widgetCollapseLineThreshold) return syncHtml(list);
+	return syncHtml(
+		<details class="piui-widget-lines-collapsible">
+			<summary class="fine-print">{lines.length} lines</summary>
+			{list}
+		</details>,
 	);
 }
 
@@ -567,9 +664,16 @@ function signalPart(value: string): string {
 /**
  * Closing the sheet (Esc, backdrop, the Close button) replies with the `close` action id,
  * which `lib/bridge.ts` consumers (ask-user.ts, btw.ts) listen on to cancel or tear down.
+ * It also remembers, in this browser only, that the element's current revision was
+ * dismissed — see `piUiDismissedStorageKey` (its reader is `UiRenderer.piUiSheetReopenScript`
+ * in ui-renderer.ts) — so a `durable` sheet the extension never removes stays closed across a
+ * reload/reconnect instead of popping back open (round-2 audit A#16).
  */
 function dismissAction(element: PiUiElement): string {
-	return actionPost(element, closeActionId, "undefined");
+	return `try {
+		localStorage.setItem(${JSON.stringify(piUiDismissedStorageKey(element))}, ${JSON.stringify(String(element.revision))});
+	} catch {}
+	${actionPost(element, closeActionId, "undefined")}`;
 }
 
 function fieldValuesExpression(
