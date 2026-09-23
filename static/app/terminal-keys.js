@@ -478,7 +478,31 @@ function handleSoftKey(button) {
 	input?.focus();
 }
 
+/**
+ * Publishes the platform's classic (space-taking) scrollbar width as
+ * `--terminal-scrollbar-size` (0 where scrollbars overlay the content, e.g. on phones), so
+ * `terminal-surface.css` can count an overlay body's always-reserved `scrollbar-gutter` in
+ * `--terminal-overlay-chrome`. Without it a tall component's vertical scrollbar ate into the
+ * N cells an overlay was sized for and grew a horizontal scrollbar over its last row.
+ */
+function publishScrollbarSize() {
+	const probe = document.createElement("div");
+	probe.style.cssText =
+		"position:absolute;visibility:hidden;left:-9999px;top:-9999px;width:100px;height:50px;overflow-y:scroll;";
+	document.body.appendChild(probe);
+	const size = Math.max(0, probe.offsetWidth - probe.clientWidth) || 0;
+	document.body.removeChild(probe);
+	let style = document.getElementById("terminal-scrollbar-size");
+	if (!style) {
+		style = document.createElement("style");
+		style.id = "terminal-scrollbar-size";
+		document.head.appendChild(style);
+	}
+	style.textContent = `:root{--terminal-scrollbar-size:${size}px}`;
+}
+
 export function bindTerminalSurfaces() {
+	publishScrollbarSize();
 	observeNewGrids();
 	const mutationObserver = new MutationObserver((mutations) => {
 		for (const mutation of mutations) {
