@@ -30,6 +30,9 @@ export type LiveWorkspacePreferences = Readonly<{
 	open?: boolean;
 	ratio?: number;
 	tab?: LiveWorkspaceTab;
+	/** Opt-in: request a browser Notification on turn completion / waiting-for-input while the
+	 * page is hidden. Off by default — never enabled without the person asking. */
+	notifications?: boolean;
 }>;
 
 /** Keeps only valid, clamped preference values so a partial update can merge. */
@@ -41,6 +44,7 @@ export function normalizeLiveWorkspacePreferences<Value>(
 		open: isBoolean(value.open) ? value.open : undefined,
 		ratio: normalizedRatio(value.ratio),
 		tab: isLiveWorkspaceTab(value.tab) ? value.tab : undefined,
+		notifications: isBoolean(value.notifications) ? value.notifications : undefined,
 	};
 }
 
@@ -135,4 +139,14 @@ export const emptyLiveWorkspaceSnapshot: LiveWorkspaceSnapshot = {
 /** Truncates untrusted extension-derived text defensively before it reaches the DOM. */
 export function truncateForDisplay(value: string, limit: number): string {
 	return value.length > limit ? `${value.slice(0, limit)}…` : value;
+}
+
+/**
+ * Formats a retry countdown from milliseconds remaining. Shared between the server's initial
+ * render and the client ticker (`src/client/live-workspace.ts`) so the two never drift apart
+ * (A#26: the countdown must keep ticking client-side instead of freezing at the SSE-render
+ * instant).
+ */
+export function formatRetryCountdown(remainingMs: number): string {
+	return remainingMs > 0 ? `in ${Math.ceil(remainingMs / 1000)}s` : "retrying now";
 }
