@@ -8,7 +8,7 @@ import type {
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 
-import { assertEquals, assertRejects } from "#testing/assertions";
+import { assertEquals, assertRejects, waitForCondition } from "#testing/assertions";
 
 import { AppStore } from "../state/app-store.ts";
 import type { SessionDoneNotification } from "../system-notifications.ts";
@@ -1533,7 +1533,15 @@ test("RuntimeController renames the session for /name <title> without prompting 
 	const controller = await activate(state, [fake], "/workspace");
 
 	assertEquals(await controller.prompt("/name  My Session  "), true);
-	await new Promise((resolve) => setTimeout(resolve, 0));
+	// The rename refreshes the session catalog with a real `fs.stat`, which can take more
+	// than one macrotask under full-suite load, so wait for the confirmation instead.
+	await waitForCondition(
+		() => state.messages.at(-1)?.text?.startsWith("Session renamed") ?? false,
+		{
+			timeoutMs: 2_000,
+			message: "/name never confirmed the rename",
+		},
+	);
 
 	assertEquals(fake.promptInputs, []);
 	assertEquals(fake.setSessionNames, ["My Session"]);

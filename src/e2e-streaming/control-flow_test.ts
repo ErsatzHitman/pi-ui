@@ -108,6 +108,45 @@ test("a follow-up prompt sent while streaming queues instead of interrupting the
 	}
 }, 20_000);
 
+test("a steering prompt sent while streaming is queued as steering and then answered", async () => {
+	const harness = await createStreamingHarness();
+	try {
+		assertEquals(await harness.controller.prompt(fakeDirectives.fleet(50, 12)), true);
+		// Same window as the follow-up test: `session.isStreaming` covers token generation.
+		await waitForCondition(
+			() =>
+				harness.store.messages.some(
+					(message) => message.role === "thought" && message.text.length > 0,
+				),
+			{ message: "first turn never started streaming" },
+		);
+
+		assertEquals(
+			await harness.controller.prompt(fakeDirectives.text("steered-reply"), {
+				streamingBehavior: "steer",
+			}),
+			true,
+		);
+		// Steering is counted separately from follow-ups, never as a follow-up.
+		await waitForCondition(
+			() => harness.store.snapshot().liveWorkspace.queuedSteering === 1,
+			{ message: "the steering prompt was never reflected as queued steering" },
+		);
+		assertEquals(harness.store.snapshot().liveWorkspace.queuedFollowUp, 0);
+
+		await waitForCondition(
+			() =>
+				harness.store.messages.some((message) =>
+					message.text.includes("Fake reply: steered-reply"),
+				),
+			{ message: "the steering prompt was never delivered and answered" },
+		);
+		assertEquals(harness.store.snapshot().liveWorkspace.queuedSteering, 0);
+	} finally {
+		await harness.dispose();
+	}
+}, 20_000);
+
 test("switching sessions mid-stream backgrounds the streaming session instead of dropping it", async () => {
 	const harness = await createStreamingHarness();
 	try {

@@ -92,30 +92,24 @@ export async function createStreamingHarness(): Promise<StreamingHarness> {
 				hub.dispose();
 				await readyController.dispose();
 				restoreEnv();
-				await rm(root, { recursive: true, force: true });
+				await removeRoot(root);
 			},
 		};
 	} catch (error) {
 		await controller?.dispose();
 		restoreEnv();
-		await rm(root, { recursive: true, force: true });
+		await removeRoot(root);
 		throw error;
 	}
 }
 
-/** Polls `predicate` until it returns true or the timeout elapses. */
-export async function waitForCondition(
-	predicate: () => boolean,
-	options: { timeoutMs?: number; intervalMs?: number; message?: string } = {},
-): Promise<void> {
-	const timeoutMs = options.timeoutMs ?? 10_000;
-	const intervalMs = options.intervalMs ?? 5;
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		if (predicate()) return;
-		if (Date.now() >= deadline) {
-			throw new Error(options.message ?? "condition did not become true in time");
-		}
-		await new Promise((resolve) => setTimeout(resolve, intervalMs));
-	}
+export { waitForCondition } from "./assertions.ts";
+
+/**
+ * On Windows a just-exited `bash` tool child can keep a handle on its cwd (under `root`) for a
+ * moment, so `rm` throws EBUSY/EPERM. Node's `maxRetries` retries exactly those codes with a
+ * linear backoff (`retryDelay` × attempt).
+ */
+function removeRoot(root: string): Promise<void> {
+	return rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }
