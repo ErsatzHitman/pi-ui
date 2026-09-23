@@ -97,6 +97,9 @@ export class LiveWorkspaceController {
 				this.retry = undefined;
 				this.compaction = undefined;
 				this.waiting = undefined;
+				// A#19: an aborted or finished run must not leave stale "running" tool rows —
+				// `tool_execution_end` is not guaranteed for every in-flight call on abort.
+				this.activeTools.clear();
 				return true;
 			case "auto_retry_start":
 				this.retry = {
@@ -465,13 +468,21 @@ function deriveAgentRows(channel: string, value: JsonValue): LiveWorkspaceAgentR
 			: isString(record.status)
 				? record.status
 				: "active";
+		// `WorkflowStatusPayload` (see the `workflows` extension) carries `done`/`total`
+		// agent counts alongside the phase name; fold them into `detail` when present so
+		// the Agents tab row reads e.g. "running (2/5 agents)" instead of just the phase.
+		const detail = isString(record.detail)
+			? record.detail
+			: isNumber(record.done) && isNumber(record.total)
+				? `${record.done}/${record.total} agent${record.total === 1 ? "" : "s"}`
+				: undefined;
 		return [
 			{
 				id: channel,
 				kind: "channel-entry" as const,
 				source: channel,
 				label,
-				detail: isString(record.detail) ? record.detail : undefined,
+				detail,
 				status,
 				depth: 0,
 				startedAt: isNumber(record.startedAt) ? record.startedAt : undefined,

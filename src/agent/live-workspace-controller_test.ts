@@ -131,6 +131,38 @@ test("tracks active tools with a human-readable summary and clears on completion
 	assertEquals(controller.snapshot(input).activeTools, []);
 });
 
+test("agent_settled clears any active tools left running by an aborted turn", () => {
+	const { controller, input } = fixture();
+	controller.recordEvent(
+		agentSessionEventStub({
+			type: "tool_execution_start",
+			toolCallId: "call-1",
+			toolName: "bash",
+			args: { command: "sleep 5" },
+		}),
+		{ background: false },
+	);
+	assertEquals(controller.snapshot(input).activeTools.length, 1);
+
+	controller.recordEvent(agentSessionEventStub({ type: "agent_settled" }), {
+		background: false,
+	});
+	assertEquals(controller.snapshot(input).activeTools, []);
+});
+
+test("derives a workflow done/total detail from workflow:progress", () => {
+	const { controller, input } = fixture();
+	controller.recordChannel("workflow:progress", {
+		active: true,
+		name: "Refactor",
+		phase: "running",
+		done: 2,
+		total: 5,
+	});
+	const [row] = controller.snapshot(input).agents;
+	assertEquals(row?.detail, "2/5 agents");
+});
+
 test("records a bounded, most-recent-first activity log", () => {
 	const { controller, input } = fixture();
 
