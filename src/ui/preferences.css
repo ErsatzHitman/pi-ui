@@ -94,6 +94,13 @@
 		cursor: pointer;
 		text-align: start;
 	}
+
+	/* A keyboard-focused row reads like a hovered one; the ring sits inside the
+	   row so the dialog's scroll container never clips it. */
+	.hotkeys-row-clickable:focus-visible {
+		outline-offset: -2px;
+		background: var(--surface-control);
+	}
 	.hotkeys-row-content {
 		display: flex;
 		flex-direction: column;
