@@ -33,13 +33,7 @@ import {
 	startSessionPerformanceMeasurement,
 } from "./session-performance.js";
 import { bindStreamReconnect } from "./stream-reconnect.js";
-import {
-	encodeTerminalKey,
-	encodeTerminalPaste,
-	encodeTerminalWheel,
-	fitTerminalColumns,
-	sendTerminalInput,
-} from "./terminal-keys.js";
+import { bindTerminalSurfaces } from "./terminal-keys.js";
 import { bindTooltips } from "./tooltips.js";
 import { bindVimScroll } from "./vim-scroll.js";
 import { windowFocus } from "./window-focus.js";
@@ -78,13 +72,6 @@ window.piUi = {
 		observe: readTransitionState,
 		start: startSessionPerformanceMeasurement,
 	},
-	terminal: {
-		encodeKey: encodeTerminalKey,
-		encodePaste: encodeTerminalPaste,
-		encodeWheel: encodeTerminalWheel,
-		fitColumns: fitTerminalColumns,
-		send: sendTerminalInput,
-	},
 	windowFocus,
 	workspaceReview: { applyOpen: () => {} },
 	liveWorkspace: { applyOpen: () => {} },
@@ -118,6 +105,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 	bindVimScroll();
 	bindDisplayRefreshMeasurement();
 	bindStreamReconnect();
+	bindTerminalSurfaces();
 	bindDebugFps();
 
 	await Promise.all([

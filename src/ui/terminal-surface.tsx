@@ -1,25 +1,25 @@
 import {
 	terminalSurfaceDialogId,
 	type TerminalSurface,
+	type TerminalSurfaceOverlayOptions,
 } from "../agent/terminal-surface/types.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
+import { isString } from "../utils/type-guards.ts";
+import { Icon } from "./icon.tsx";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft } from "./icons.ts";
 import { syncHtml } from "./sync-html.ts";
 
 /**
- * Minimal server-rendered markup for the terminal-surface host (see
- * `terminal-surface-controller.ts`): a `<pre>`-like block per surface,
- * `overlay`-kind surfaces wrapped in a native `<dialog>`. Every line is
- * already pre-escaped, safe HTML from `ansiLineToHtml` — never re-escaped
- * here (matching how `renderMarkdownStreaming`'s trusted output is embedded
- * elsewhere in this codebase).
- *
- * This intentionally stops at "functional, not final": full client-side key
- * forwarding, cell-grid measurement, and visual polish (matching pi-ui's
- * dialog/sheet chrome per the Round 2 plan's "Visual consistency") are a
- * separate client workstream (`static/app/terminal-keys.js`,
- * `terminal-surface.css`) layered on top of these element ids without
- * changing them.
+ * Client-facing rendering for the terminal-surface host (see
+ * `terminal-surface-controller.ts`): a monospace cell grid per surface,
+ * `overlay`-kind surfaces wrapped in a native `<dialog>` styled like every
+ * other pi-ui dialog/sheet. Every line is already pre-escaped, safe HTML
+ * from `ansiLineToHtml` — never re-escaped here (matching how
+ * `renderMarkdownStreaming`'s trusted output is embedded elsewhere in this
+ * codebase). Key forwarding, cell-grid measurement/resize, and the mobile
+ * soft-key bar's behavior live in `static/app/terminal-keys.js`; this module
+ * only emits the markup and data attributes that script reads.
  */
 
 // Non-overlay `custom()` surfaces ("inline") take the TUI editor's place there; in the browser they
@@ -43,13 +43,30 @@ export function renderTerminalSurfaceOverlays(
 	);
 }
 
+/**
+ * The persistent (non-overlay) host, split above/below the prompt editor (M3): a `header` or
+ * a `widget` with no `belowEditor` renders above, next to the editor's other persistent
+ * surfaces; a `footer` or a `belowEditor` widget renders after it — mirroring where pi-tui
+ * itself puts a footer versus a header, and matching `renderExtensionWidgets`'s own
+ * aboveEditor/belowEditor split for string-line widgets.
+ */
 export function renderTerminalSurfacePersistent(
 	state: Pick<AppStateSnapshot, "terminalSurfaces">,
+	placement: "aboveEditor" | "belowEditor" = "aboveEditor",
 ): string {
+	const id =
+		placement === "aboveEditor"
+			? "terminal-surface-persistent"
+			: "terminal-surface-persistent-below";
 	return syncHtml(
-		<div id="terminal-surface-persistent" aria-live="polite">
+		<div id={id} aria-live="polite">
 			{state.terminalSurfaces
 				.filter((surface) => persistentKinds.has(surface.kind))
+				.filter((surface) =>
+					surface.kind === "inline"
+						? placement === "aboveEditor"
+						: surface.belowEditor === (placement === "belowEditor"),
+				)
 				.map((surface) =>
 					surface.kind === "inline" ? surface : trimBlankEdges(surface),
 				)
@@ -84,29 +101,91 @@ function trimBlankEdges(surface: TerminalSurface): TerminalSurface {
 	return { ...surface, lines: lines.slice(start, end), cursor };
 }
 
-/** Ids of currently-mounted `overlay`-kind surfaces — used to auto-open newly created ones. */
-export function terminalSurfaceOverlayIds(
+/**
+ * Open effects for currently-mounted `overlay`-kind surfaces — used to
+ * auto-open newly created ones, both on the initial SSE view (`renderView`)
+ * and via `AppStore.setTerminalSurfaces`'s per-surface diffing. `modal`
+ * mirrors `OverlayOptions.nonCapturing`: a non-capturing overlay is shown
+ * non-modally (`.show()`) so it never steals focus from the prompt.
+ */
+export function terminalSurfaceOverlayEffects(
 	state: Pick<AppStateSnapshot, "terminalSurfaces">,
-): readonly string[] {
+): readonly { id: string; modal: boolean }[] {
 	return state.terminalSurfaces
 		.filter((surface) => surface.kind === "overlay")
-		.map((surface) => terminalSurfaceDialogId(surface.id));
+		.map((surface) => ({
+			id: terminalSurfaceDialogId(surface.id),
+			modal: !surface.overlayOptions?.nonCapturing,
+		}));
+}
+
+/** The 9-way `OverlayAnchor` values `terminal-surface.css` has a `[data-anchor=…]` rule for. */
+const knownAnchors = new Set([
+	"top-left",
+	"top-right",
+	"top-center",
+	"bottom-left",
+	"bottom-right",
+	"bottom-center",
+	"left-center",
+	"right-center",
+	"center",
+]);
+
+/** Options are sanitized to finite numbers and `N%` strings by the controller before they get here. */
+function sizeValue(value: number | string | undefined, unit: string): string | undefined {
+	if (value === undefined) return undefined;
+	return isString(value) ? value : `${value}${unit}`;
+}
+
+/**
+ * Projects `OverlayOptions` (columns/rows/anchor/offsets) onto CSS custom
+ * properties `terminal-surface.css` reads — a best-effort approximation of
+ * pi-tui's cell-based overlay layout using the same `ch`/`lh` units the
+ * cell grid itself is sized with, not pixel-perfect terminal math.
+ */
+function overlayStyleVars(
+	options: TerminalSurfaceOverlayOptions | undefined,
+): string | undefined {
+	if (!options) return undefined;
+	const decls: string[] = [];
+	const width = sizeValue(options.width, "ch");
+	if (width) decls.push(`--terminal-overlay-width:${width}`);
+	if (options.minWidth !== undefined) {
+		decls.push(`--terminal-overlay-min-width:${options.minWidth}ch`);
+	}
+	const maxHeight = sizeValue(options.maxHeight, "lh");
+	if (maxHeight) decls.push(`--terminal-overlay-max-height:${maxHeight}`);
+	if (options.offsetX) decls.push(`--terminal-overlay-offset-x:${options.offsetX}ch`);
+	if (options.offsetY) decls.push(`--terminal-overlay-offset-y:${options.offsetY}lh`);
+	if (options.margin !== undefined) {
+		decls.push(`--terminal-overlay-margin:${options.margin}ch`);
+	}
+	return decls.length > 0 ? decls.join(";") : undefined;
 }
 
 function renderTerminalSurfaceDialog(surface: TerminalSurface): string {
 	const id = terminalSurfaceDialogId(surface.id);
+	const options = surface.overlayOptions;
+	const nonCapturing = options?.nonCapturing === true;
+	const anchor =
+		options?.anchor && knownAnchors.has(options.anchor) ? options.anchor : "center";
 	return syncHtml(
 		<dialog
 			id={id}
 			class="dialog terminal-surface-dialog"
 			aria-labelledby={surface.title ? `${id}-title` : undefined}
+			aria-label={surface.title ? undefined : "Extension panel"}
 			closedby="any"
 			data-preserve-attr="open"
-			data-on:close={postTerminalInput(surface.id, "'\\u001b'")}
+			data-nonblocking={nonCapturing ? "true" : undefined}
+			data-anchor={anchor}
+			style={overlayStyleVars(options)}
+			data-on:close={`@post('${endpoints.terminalSurfaceInput}', { payload: { surfaceId: ${JSON.stringify(surface.id)}, data: '\\u001b' } })`}
 		>
 			{/* The dialog's single child is its panel (shared `.dialog > *` chrome); the panel is
 			    sized to the surface's column grid, capped to the viewport. */}
-			<div class="terminal-surface-panel">
+			<div class="terminal-surface-dialog-content">
 				{surface.title && (
 					<header>
 						<h2 id={`${id}-title`} safe>
@@ -136,53 +215,142 @@ function renderTerminalSurfaceBlock(surface: TerminalSurface): string {
 	);
 }
 
-/**
- * A Datastar expression sending `data` (an expression) to this surface's input route. Not an
- * `@post()`: keys must arrive once each and in typing order, which concurrent (and, by
- * default, mutually cancelling) `@post()` requests don't guarantee — see `sendTerminalInput`.
- */
-function postTerminalInput(surfaceId: string, data: string): string {
-	return `window.piUi.terminal.send('${endpoints.terminalSurfaceInput}', ${JSON.stringify(surfaceId)}, ${data})`;
+function renderTerminalSurfaceBody(surface: TerminalSurface): string {
+	const cursor = surface.cursor;
+	const caretStyle = cursor
+		? `--terminal-cursor-row:${cursor.row};--terminal-cursor-col:${cursor.column}`
+		: undefined;
+	const label = surface.title ?? "Terminal panel";
+	return syncHtml(
+		<div
+			class="terminal-surface-grid"
+			data-terminal-surface-grid={surface.id}
+			data-terminal-surface-kind={surface.kind}
+			role="group"
+			aria-label={label}
+		>
+			<pre
+				class={
+					cursor ? "terminal-surface-body has-caret" : "terminal-surface-body"
+				}
+				data-terminal-surface-body={surface.id}
+				data-cols={surface.cols}
+				data-rows={surface.rows}
+				data-revision={surface.revision}
+				style={caretStyle}
+			>
+				{surface.lines.join("\n")}
+			</pre>
+			<textarea
+				class="terminal-surface-input"
+				data-terminal-surface-input={surface.id}
+				aria-label={label}
+				spellcheck="false"
+				rows="1"
+				style={caretStyle}
+				attrs={{
+					autocomplete: "off",
+					autocorrect: "off",
+					autocapitalize: "off",
+				}}
+			/>
+			{renderSoftKeyBar(surface.id)}
+		</div>,
+	);
 }
 
-function renderTerminalSurfaceBody(surface: TerminalSurface): string {
-	// Keys, pastes and wheel gestures are encoded client-side into the terminal byte
-	// sequences a pi-tui `Component` expects (static/app/terminal-keys.js) and forwarded
-	// to the focused component through the input route.
-	const onKeydown = `const data = window.piUi.terminal.encodeKey(evt); if (data !== undefined) { evt.preventDefault(); evt.stopPropagation(); ${postTerminalInput(surface.id, "data")} }`;
-	const onPaste = `evt.preventDefault(); ${postTerminalInput(surface.id, "window.piUi.terminal.encodePaste(evt.clipboardData?.getData('text') ?? '')")}`;
-	// Fit the component's column grid to the space the surface actually has (the viewport for
-	// an overlay, the prompt column otherwise). The expression embeds the current cols, so it
-	// re-runs after each resize re-render and settles once the measured fit matches.
-	// An inline `custom()` takes the editor's place (and its focus) in the TUI, so it takes
-	// keyboard focus here too; overlays get it from `autofocus` when their dialog opens.
-	const focusInline =
-		surface.kind === "inline" ? "el.focus({ preventScroll: true }); " : "";
-	// Every surface posts to the same resize URL, and Datastar's default ("auto") cancellation
-	// aborts an in-flight request to the same URL — two surfaces mounting together (a widget and
-	// an overlay) would cancel each other's fit and leave one at its default width.
-	// A new overlay's body is inserted while its dialog is still closed (not rendered, so nothing
-	// can be measured) and only opened afterwards; fit it once the dialog opens instead.
-	const onInit = `${focusInline}const fit = () => { const cols = window.piUi.terminal.fitColumns(el); if (cols !== undefined && cols !== ${surface.cols}) { @post('${endpoints.terminalSurfaceResize}', { payload: { surfaceId: ${JSON.stringify(surface.id)}, cols, rows: ${surface.rows} }, requestCancellation: 'disabled' }) } }; const dialog = el.closest('dialog'); if (dialog && !dialog.open) { dialog.addEventListener('toggle', fit, { once: true }) } else { fit() }`;
-	const onWheel = `const data = window.piUi.terminal.encodeWheel(evt); if (data !== undefined) { evt.preventDefault(); ${postTerminalInput(surface.id, "data")} }`;
+function renderSoftKeyBar(surfaceId: string): string {
 	return syncHtml(
-		<pre
-			class="terminal-surface-body"
-			data-terminal-surface-body={surface.id}
-			autofocus={surface.kind === "overlay"}
-			data-init={onInit}
-			data-on:keydown={onKeydown}
-			data-on:paste={onPaste}
-			{...{ "data-on:wheel__throttle.100ms": onWheel }}
-			data-cols={surface.cols}
-			data-rows={surface.rows}
-			data-revision={surface.revision}
-			data-cursor-row={surface.cursor?.row}
-			data-cursor-column={surface.cursor?.column}
-			style={`--terminal-cols: ${surface.width}`}
-			tabindex="0"
+		<div
+			class="terminal-surface-keys"
+			data-terminal-surface-keys={surfaceId}
+			role="toolbar"
+			aria-label="Terminal keys"
 		>
-			{surface.lines.join("\n")}
-		</pre>,
+			<button
+				type="button"
+				class="btn terminal-key"
+				data-variant="outline"
+				data-terminal-key="escape"
+			>
+				Esc
+			</button>
+			<button
+				type="button"
+				class="btn terminal-key"
+				data-variant="outline"
+				data-terminal-key="tab"
+			>
+				Tab
+			</button>
+			<button
+				type="button"
+				class="btn terminal-key"
+				data-variant="outline"
+				data-size="icon-sm"
+				data-terminal-key="up"
+				aria-label="Up"
+			>
+				<Icon icon={ArrowUp} />
+			</button>
+			<button
+				type="button"
+				class="btn terminal-key"
+				data-variant="outline"
+				data-size="icon-sm"
+				data-terminal-key="down"
+				aria-label="Down"
+			>
+				<Icon icon={ArrowDown} />
+			</button>
+			<button
+				type="button"
+				class="btn terminal-key"
+				data-variant="outline"
+				data-size="icon-sm"
+				data-terminal-key="left"
+				aria-label="Left"
+			>
+				<Icon icon={ArrowLeft} />
+			</button>
+			<button
+				type="button"
+				class="btn terminal-key"
+				data-variant="outline"
+				data-size="icon-sm"
+				data-terminal-key="right"
+				aria-label="Right"
+			>
+				<Icon icon={ArrowRight} />
+			</button>
+			<button
+				type="button"
+				class="btn terminal-key"
+				data-variant="outline"
+				data-size="icon-sm"
+				data-terminal-key="enter"
+				aria-label="Enter"
+			>
+				<Icon icon={CornerDownLeft} />
+			</button>
+			<button
+				type="button"
+				class="btn terminal-key terminal-key-sticky"
+				data-variant="outline"
+				data-terminal-key="ctrl"
+				aria-pressed="false"
+			>
+				Ctrl
+			</button>
+			<button
+				type="button"
+				class="btn terminal-key terminal-key-sticky"
+				data-variant="outline"
+				data-terminal-key="alt"
+				aria-pressed="false"
+			>
+				Alt
+			</button>
+		</div>,
 	);
 }

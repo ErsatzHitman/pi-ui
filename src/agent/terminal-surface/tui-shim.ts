@@ -1,6 +1,7 @@
 import {
 	isFocusable,
 	isKeyRelease,
+	StdinBuffer,
 	type Component,
 	type OverlayAnchor,
 	type OverlayBounds,
@@ -64,11 +65,18 @@ export class TuiShim implements TUI {
 	#clearOnShrink = false;
 	#inputListeners = new Set<TuiInputListener>();
 	#lastOverlayWidth = 0;
+	/** Splits batched client input into single key sequences, as pi-tui's own terminal does. */
+	#stdin = new StdinBuffer();
 
 	constructor(
 		public terminal: HeadlessTerminal,
 		private readonly callbacks: TuiShimCallbacks,
-	) {}
+	) {
+		this.#stdin.on("data", (sequence) => this.#dispatchInput(sequence));
+		this.#stdin.on("paste", (content) =>
+			this.#dispatchInput(`\x1b[200~${content}\x1b[201~`),
+		);
+	}
 
 	get fullRedraws(): number {
 		return 0;
@@ -152,6 +160,7 @@ export class TuiShim implements TUI {
 	}
 
 	stop(_options?: TuiStopOptions): void {
+		this.#stdin.destroy();
 		this.terminal.stop();
 	}
 
@@ -213,8 +222,18 @@ export class TuiShim implements TUI {
 		return this.#lastOverlayWidth;
 	}
 
-	/** Routes a raw terminal byte sequence: input listeners first, then the focused component. */
+	/**
+	 * Routes raw client input. The browser always sends complete sequences, so
+	 * anything the buffer still holds (a lone Esc awaiting a possible Alt+key
+	 * continuation) is flushed immediately instead of on a timer.
+	 */
 	handleInput(data: string): void {
+		this.#stdin.process(data);
+		for (const sequence of this.#stdin.flush()) this.#dispatchInput(sequence);
+	}
+
+	/** Dispatches one key sequence: input listeners first, then the focused component. */
+	#dispatchInput(data: string): void {
 		let current = data;
 		for (const listener of this.#inputListeners) {
 			const result = listener(current);

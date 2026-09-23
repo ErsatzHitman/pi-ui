@@ -2,85 +2,49 @@ import { test } from "bun:test";
 
 import { assertEquals } from "#testing/assertions";
 
-import {
-	encodeTerminalKey,
-	encodeTerminalPaste,
-	encodeTerminalWheel,
-	sendTerminalInput,
-} from "./terminal-keys.js";
+import { encodeKeyEvent } from "./terminal-keys.js";
 
 function key(
 	value: string,
-	modifiers: Partial<{
-		ctrlKey: boolean;
-		altKey: boolean;
-		shiftKey: boolean;
-		metaKey: boolean;
-		isComposing: boolean;
-	}> = {},
+	modifiers: Partial<{ ctrlKey: boolean; altKey: boolean; shiftKey: boolean }> = {},
 ) {
-	return {
-		key: value,
-		ctrlKey: false,
-		altKey: false,
-		shiftKey: false,
-		metaKey: false,
-		...modifiers,
-	};
+	return { key: value, ctrlKey: false, altKey: false, shiftKey: false, ...modifiers };
 }
 
 test("terminal keys encode editing and navigation keys as xterm sequences", () => {
-	assertEquals(encodeTerminalKey(key("Enter")), "\r");
-	assertEquals(encodeTerminalKey(key("Escape")), "\u001b");
-	assertEquals(encodeTerminalKey(key("Backspace")), "\u007f");
-	assertEquals(encodeTerminalKey(key("Tab")), "\t");
-	assertEquals(encodeTerminalKey(key("Tab", { shiftKey: true })), "\u001b[Z");
-	assertEquals(encodeTerminalKey(key("ArrowUp")), "\u001b[A");
-	assertEquals(encodeTerminalKey(key("ArrowLeft", { ctrlKey: true })), "\u001b[1;5D");
-	assertEquals(encodeTerminalKey(key("PageDown")), "\u001b[6~");
-	assertEquals(encodeTerminalKey(key("Delete", { shiftKey: true })), "\u001b[3;2~");
-	assertEquals(encodeTerminalKey(key("Home")), "\u001b[H");
+	assertEquals(encodeKeyEvent(key("Enter")), "\r");
+	assertEquals(encodeKeyEvent(key("Escape")), "\u001b");
+	assertEquals(encodeKeyEvent(key("Backspace")), "\u007f");
+	assertEquals(encodeKeyEvent(key("Tab")), "\t");
+	assertEquals(encodeKeyEvent(key("Tab", { shiftKey: true })), "\u001b[Z");
+	assertEquals(encodeKeyEvent(key("ArrowUp")), "\u001b[A");
+	assertEquals(encodeKeyEvent(key("ArrowLeft", { ctrlKey: true })), "\u001b[1;5D");
+	assertEquals(encodeKeyEvent(key("PageDown")), "\u001b[6~");
+	assertEquals(encodeKeyEvent(key("Delete", { shiftKey: true })), "\u001b[3;2~");
+	assertEquals(encodeKeyEvent(key("Home")), "\u001b[H");
+});
+
+test("terminal keys fall back to xterm's modifyOtherKeys form for otherwise-unencodable chords", () => {
+	// Ctrl+Enter/Ctrl+Tab have no simpler legacy encoding pi-tui's parser accepts.
+	assertEquals(encodeKeyEvent(key("Enter", { ctrlKey: true })), "\u001b[27;5;13~");
+	assertEquals(encodeKeyEvent(key("Tab", { ctrlKey: true })), "\u001b[27;5;9~");
+	assertEquals(
+		encodeKeyEvent(key(" ", { ctrlKey: true, altKey: true })),
+		"\u001b[27;7;32~",
+	);
 });
 
 test("terminal keys encode printable text, Ctrl and Alt chords", () => {
-	assertEquals(encodeTerminalKey(key("a")), "a");
-	assertEquals(encodeTerminalKey(key("Z", { shiftKey: true })), "Z");
-	assertEquals(encodeTerminalKey(key("c", { ctrlKey: true })), "\u0003");
-	assertEquals(encodeTerminalKey(key("x", { altKey: true })), "\u001bx");
-	assertEquals(encodeTerminalKey(key(" ", { ctrlKey: true })), "\u0000");
+	assertEquals(encodeKeyEvent(key("a")), "a");
+	assertEquals(encodeKeyEvent(key("Z", { shiftKey: true })), "Z");
+	assertEquals(encodeKeyEvent(key("c", { ctrlKey: true })), "\u0003");
+	assertEquals(encodeKeyEvent(key("x", { altKey: true })), "\u001bx");
+	assertEquals(encodeKeyEvent(key(" ", { ctrlKey: true })), "\u0000");
+	assertEquals(encodeKeyEvent(key(" ", { altKey: true })), "\u001b ");
 });
 
-test("terminal keys leave modifiers, IME composition and Meta shortcuts to the browser", () => {
-	assertEquals(encodeTerminalKey(key("Shift", { shiftKey: true })), undefined);
-	assertEquals(encodeTerminalKey(key("a", { isComposing: true })), undefined);
-	assertEquals(encodeTerminalKey(key("v", { metaKey: true })), undefined);
-});
-
-test("terminal paste is bracketed and wheel maps to bounded arrow steps", () => {
-	assertEquals(encodeTerminalPaste("hi"), "\u001b[200~hi\u001b[201~");
-	assertEquals(encodeTerminalWheel({ deltaY: -40 }), "\u001b[A");
-	assertEquals(encodeTerminalWheel({ deltaY: 1000 }), "\u001b[B".repeat(5));
-	assertEquals(encodeTerminalWheel({ deltaY: 0 }), undefined);
-});
-
-test("terminal input reaches the server one key at a time, in typing order", async () => {
-	const sent: string[] = [];
-	const releases: Array<() => void> = [];
-	const send = (_url: string, init?: RequestInit) => {
-		sent.push(JSON.parse(String(init?.body)).data);
-		return new Promise<Response>((resolve) =>
-			releases.push(() => resolve(new Response())),
-		);
-	};
-	const done = sendTerminalInput("/input", "s1", "a", send as typeof fetch);
-	sendTerminalInput("/input", "s1", "b", send as typeof fetch);
-	sendTerminalInput("/input", "s1", "c", send as typeof fetch);
-	// Only the first key is in flight until the server answers it.
-	assertEquals(sent, ["a"]);
-	for (let step = 0; step < 3; step += 1) {
-		releases.shift()?.();
-		await new Promise((resolve) => setTimeout(resolve, 0));
-	}
-	await done;
-	assertEquals(sent, ["a", "b", "c"]);
+test("terminal keys leave bare modifiers and unsupported function keys to the browser", () => {
+	assertEquals(encodeKeyEvent(key("Shift", { shiftKey: true })), null);
+	assertEquals(encodeKeyEvent(key("F5")), null);
+	assertEquals(encodeKeyEvent(key("Escape", { shiftKey: true })), null);
 });

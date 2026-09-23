@@ -12,6 +12,8 @@ export type TerminalSurfaceOverlayOptions = {
 	readonly row?: number | string;
 	readonly col?: number | string;
 	readonly margin?: number;
+	/** Mirrors `OverlayOptions.nonCapturing` — when true, the client must not steal prompt focus. */
+	readonly nonCapturing?: boolean;
 };
 
 export type TerminalSurfaceCursor = { readonly row: number; readonly column: number };
@@ -27,6 +29,13 @@ export type TerminalSurface = {
 	readonly kind: TerminalSurfaceKind;
 	readonly title: string | undefined;
 	readonly overlayOptions: TerminalSurfaceOverlayOptions | undefined;
+	/**
+	 * Persistent (`widget`/`footer`/`header`) surfaces only: renders after the prompt editor
+	 * instead of above it — a footer is always `true`, a header always `false`, a widget takes
+	 * it from `ExtensionUIContext.setWidget`'s `placement` option (M3). Ignored for
+	 * `overlay`/`inline` kinds, which never sit in the persistent host.
+	 */
+	readonly belowEditor: boolean;
 	/** Pre-escaped HTML for each rendered line (see `ansiLineToHtml`); never raw ANSI. */
 	readonly lines: readonly string[];
 	readonly cursor: TerminalSurfaceCursor | undefined;
