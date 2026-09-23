@@ -69,6 +69,7 @@ type Deferred = { data: string; resolve: (consumed: boolean) => void };
 
 type Harness = {
 	input: FakeTextarea;
+	aborts: number[];
 	requests: Deferred[];
 	submitted: string[];
 	press: (key: string, options?: { shiftKey?: boolean }) => FakeKeyboardEvent;
@@ -87,8 +88,13 @@ afterEach(() => {
  * behind), and a `fetch` whose `/extensions/ui/prompt-input` round trips the
  * test resolves by hand, so two keydowns can land inside one round trip.
  */
-function install(): Harness {
+function install(options: { running?: boolean } = {}): Harness {
 	const input = new FakeTextarea();
+	const aborts: number[] = [];
+	// prompt-action.tsx renders either the send button (`data-send-trigger`) or,
+	// while a turn runs, the destructive abort button.
+	const abortButton = { click: () => aborts.push(Date.now()) };
+	const sendButton = {};
 	const island = { dataset: { terminalInputActive: "" }, children: [] };
 	const documentListeners: ((event: Event) => void)[] = [];
 	const requests: Deferred[] = [];
@@ -112,7 +118,16 @@ function install(): Harness {
 				: id === "extension-shortcuts-data"
 					? island
 					: null,
-		querySelector: () => ({}),
+		querySelector: (selector: string) =>
+			selector === "[data-send-trigger]"
+				? options.running
+					? null
+					: sendButton
+				: selector.startsWith("#prompt-action[")
+					? options.running
+						? abortButton
+						: null
+					: null,
 		addEventListener: (_type: string, listener: (event: Event) => void) => {
 			documentListeners.push(listener);
 		},
@@ -120,7 +135,14 @@ function install(): Harness {
 	restores.push(patchGlobal("document", fakeDocument));
 	restores.push(patchGlobal("HTMLTextAreaElement", FakeTextarea));
 	restores.push(patchGlobal("KeyboardEvent", FakeKeyboardEvent));
-	restores.push(patchGlobal("window", { piUi: { pickers: { isOpen: () => false } } }));
+	restores.push(
+		patchGlobal("window", {
+			piUi: {
+				pickers: { isOpen: () => false },
+				shouldAbortOnEscape: (event: Event) => !event.defaultPrevented,
+			},
+		}),
+	);
 	restores.push(
 		patchGlobal("fetch", (_url: string, init: { body: string }) => {
 			const { data } = JSON.parse(init.body) as { data: string };
@@ -154,7 +176,7 @@ function install(): Harness {
 		for (let i = 0; i < 20; i += 1) await Promise.resolve();
 	}
 
-	return { input, requests, submitted, press, settle };
+	return { input, aborts, requests, submitted, press, settle };
 }
 
 test("two characters typed inside one round trip both land, in order", async () => {
@@ -211,4 +233,23 @@ test("an unconsumed Escape blurs the prompt", async () => {
 	requests[0]?.resolve(false);
 	await settle();
 	assertEquals(input.blurred, true);
+});
+
+test("an unconsumed Escape aborts a running turn instead of blurring", async () => {
+	const { input, aborts, requests, press, settle } = install({ running: true });
+	press("Escape");
+	await settle();
+	requests[0]?.resolve(false);
+	await settle();
+	assertEquals(aborts.length, 1);
+	assertEquals(input.blurred, false);
+});
+
+test("a consumed Escape never aborts a running turn", async () => {
+	const { aborts, requests, press, settle } = install({ running: true });
+	press("Escape");
+	await settle();
+	requests[0]?.resolve(true);
+	await settle();
+	assertEquals(aborts.length, 0);
 });

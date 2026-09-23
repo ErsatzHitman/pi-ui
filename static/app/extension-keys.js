@@ -342,6 +342,25 @@ function blurPromptIfIdle(input, event) {
 	input?.blur();
 }
 
+/** Replicates `prompt-action.tsx`'s window-level Escape-aborts-the-run handling,
+ * for the same reason `blurPromptIfIdle` exists: the forwarded Escape was
+ * preventDefault()'d before that (bubble-phase, `window`) handler saw it, so it
+ * stood down. Real interactive-mode behaves the same way — raw
+ * `onTerminalInput` listeners see Escape first, and only an unconsumed one
+ * reaches `app.interrupt`. Clicks the abort button (only rendered while a turn
+ * runs) so the abort goes through its own `@post`. Returns whether it aborted. */
+function abortRunIfActive(event) {
+	if (event.shiftKey) return false;
+	const abort = document.querySelector('#prompt-action[data-variant="destructive"]');
+	if (!abort) return false;
+	// A fresh event: the original is already defaultPrevented, and only the
+	// "is a picker/modal/popover open" half of this check applies here.
+	const probe = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+	if (!window.piUi.shouldAbortOnEscape(probe)) return false;
+	abort.click();
+	return true;
+}
+
 async function forwardToListeners(encoded) {
 	try {
 		const response = await postJson(endpoints.extensionPromptInput, {
@@ -374,7 +393,7 @@ async function processPendingKey({ event, fromPrompt }) {
 		}
 	}
 	if (event.key === "Escape") {
-		blurPromptIfIdle(input, event);
+		if (!abortRunIfActive(event)) blurPromptIfIdle(input, event);
 		return;
 	}
 	// A key typed with focus on <body> had no native effect to play back.
