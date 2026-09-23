@@ -2,6 +2,7 @@ import type { JsonValue } from "../../utils/json-types.ts";
 import {
 	ActionInputError,
 	booleanField,
+	enumField,
 	jsonSizeField,
 	nonnegativeIntegerField,
 	readActionSignals,
@@ -74,6 +75,20 @@ export const extensionUiRoutes = {
 				}),
 				value,
 			});
+			return datastarResponse();
+		},
+	},
+	[endpoints.extensionUiColorScheme]: {
+		POST: async (request, context) => {
+			// The browser's real `prefers-color-scheme`, reported once per connection and on
+			// change (see `pi-ui-elements.tsx`'s `renderPiUiSheets` mount script). No host is
+			// required: `ExtensionUiController` reads this straight off `AppStore` (round-2
+			// audit m9), so a bound runtime isn't a precondition the way the other routes here
+			// need one for `dispatchExtensionUiAction`/terminal input.
+			const signals = await readActionSignals(request);
+			context.store.setClientColorScheme(
+				enumField(signals, "colorScheme", ["light", "dark"] as const),
+			);
 			return datastarResponse();
 		},
 	},

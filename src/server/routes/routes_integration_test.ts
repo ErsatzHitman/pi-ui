@@ -911,6 +911,30 @@ test("extension UI actions reject an oversized value without dispatching", async
 	assertEquals(dispatched, false);
 });
 
+test("the client's reported color scheme reaches AppStore without needing a bound runtime", async () => {
+	const context = fakeContext();
+	const router = createRouter(context);
+	assertEquals(context.store.clientColorScheme, "dark");
+
+	const response = await router.fetch(
+		signalRequest(endpoints.extensionUiColorScheme, { colorScheme: "light" }),
+	);
+
+	assertEquals(response.status, 204);
+	assertEquals(context.store.clientColorScheme, "light");
+});
+
+test("an invalid color scheme value is rejected", async () => {
+	const context = fakeContext();
+	const router = createRouter(context);
+	const response = await router.fetch(
+		signalRequest(endpoints.extensionUiColorScheme, { colorScheme: "purple" }),
+	);
+
+	assertEquals(response.status, 400);
+	assertEquals(context.store.clientColorScheme, "dark");
+});
+
 test("terminal surface input routes a raw byte sequence to the active runtime", async () => {
 	let received: { surfaceId: string; data: string } | undefined;
 	const host = fakeHost({
