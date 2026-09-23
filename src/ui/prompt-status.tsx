@@ -1,9 +1,20 @@
-import type { AppUsage, AppUsageLimits } from "../state/app-store.ts";
+import type {
+	AppExtensionWorkingIndicator,
+	AppUsage,
+	AppUsageLimits,
+} from "../state/app-store.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
 import { formatTokens } from "../utils/format.ts";
 import { Icon } from "./icon.tsx";
 import { Loader } from "./icons.ts";
+import { renderPiUiStatusChips } from "./pi-ui-elements.tsx";
 import { syncHtml } from "./sync-html.ts";
+
+// Pure-CSS frame counts the working-indicator animation ships keyframes for
+// (see prompt-status.css). Extensions rarely animate more than a handful of
+// glyphs (spinners/braille dots); anything wider falls back to a static
+// first frame rather than growing the stylesheet for an unbounded count.
+const animatedFrameCounts = new Set([2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
 export function renderPromptStatus(state: AppStateSnapshot): string {
 	const activityText = state.extensionWorkingMessage ?? state.activityText;
@@ -20,11 +31,7 @@ export function renderPromptStatus(state: AppStateSnapshot): string {
 			{state.extensionWorkingVisible && activityText && (
 				<span class="prompt-working-status">
 					<span class="prompt-working-content">
-						{state.extensionWorkingIndicator === undefined
-							? loaderIcon()
-							: state.extensionWorkingIndicator && (
-									<span safe>{state.extensionWorkingIndicator}</span>
-								)}
+						{renderWorkingIndicator(state.extensionWorkingIndicator)}
 						<span safe>{activityText}</span>
 					</span>
 				</span>
@@ -34,6 +41,7 @@ export function renderPromptStatus(state: AppStateSnapshot): string {
 					{status.text}
 				</span>
 			))}
+			{renderPiUiStatusChips(state)}
 			{renderUsageIndicators(state.usage)}
 		</span>,
 	);
@@ -224,4 +232,38 @@ function clampPercent(value: number): number {
 
 export function loaderIcon() {
 	return <Icon icon={Loader} label="Loading" role="status" class="icon-spin" />;
+}
+
+/**
+ * Renders `ctx.ui.setWorkingIndicator()`'s configuration:
+ * - `undefined` (no override) restores the default animated spinner icon.
+ * - `frames: []` hides the indicator glyph entirely (the working message
+ *   text can still show).
+ * - a single frame renders as a static glyph.
+ * - multiple frames cycle client-side via a pure-CSS animation (see
+ *   `.working-indicator-frames` in prompt-status.css) when the frame count
+ *   has precomputed keyframes, else falls back to a static first frame.
+ */
+function renderWorkingIndicator(indicator: AppExtensionWorkingIndicator | undefined) {
+	if (indicator === undefined) return loaderIcon();
+	const { frames } = indicator;
+	if (frames.length === 0) return undefined;
+	if (frames.length === 1 || !animatedFrameCounts.has(frames.length)) {
+		return <span safe>{frames[0]}</span>;
+	}
+	const intervalMs = indicator.intervalMs ?? 120;
+	const duration = frames.length * intervalMs;
+	return (
+		<span class="working-indicator-frames">
+			{frames.map((frame, index) => (
+				<span
+					class="working-indicator-frame"
+					style={`animation-name: working-indicator-cycle-${frames.length}; animation-duration: ${duration}ms; animation-delay: ${-1 * index * intervalMs}ms`}
+					safe
+				>
+					{frame}
+				</span>
+			))}
+		</span>
+	);
 }

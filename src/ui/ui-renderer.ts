@@ -19,6 +19,7 @@ import {
 	type MessageRenderServiceOptions,
 } from "./message-render-service.ts";
 import { renderMessages } from "./messages.tsx";
+import { piUiSheetIds, renderPiUiSheets, renderPiUiWidgets } from "./pi-ui-elements.tsx";
 import {
 	renderSessionPickerContent,
 	renderSlashPicker,
@@ -350,6 +351,8 @@ export class UiRenderer implements AppStorePresentation {
 			renderPromptStatus(snapshot) +
 			renderExtensionWidgets(snapshot, "aboveEditor") +
 			renderExtensionWidgets(snapshot, "belowEditor") +
+			renderPiUiWidgets(snapshot) +
+			renderPiUiSheets(snapshot) +
 			renderPromptStart(snapshot) +
 			renderSessionTransition(snapshot) +
 			renderDebugOverlay(snapshot)
@@ -432,17 +435,21 @@ export class UiRenderer implements AppStorePresentation {
 		return [...scripts];
 	}
 	private initialDialogScripts(snapshot: AppStateSnapshot): string[] {
-		return [
-			["auth-dialog", snapshot.authDialog],
-			["extension-dialog", snapshot.extensionDialog],
-			["llama-dialog", snapshot.llamaDialog],
-		]
+		const staticIds = (
+			[
+				["auth-dialog", snapshot.authDialog],
+				["extension-dialog", snapshot.extensionDialog],
+				["llama-dialog", snapshot.llamaDialog],
+			] as const
+		)
 			.values()
 			.filter((entry) => Boolean(entry[1]))
-			.map(
-				([id]) =>
-					`{ const dialog = document.getElementById('${id}'); if (dialog && !dialog.open) dialog.showModal(); }`,
-			)
+			.map(([id]) => id)
 			.toArray();
+		const ids: readonly string[] = [...staticIds, ...piUiSheetIds(snapshot)];
+		return ids.map(
+			(id) =>
+				`{ const dialog = document.getElementById('${id}'); if (dialog && !dialog.open) dialog.showModal(); }`,
+		);
 	}
 }
