@@ -93,10 +93,16 @@
 	   narrowing the N cells the panel was sized for. Lines never exceed those cells (pi-tui
 	   truncates to the width it rendered at), so the only horizontal overflow left is a few px
 	   from fallback-font glyphs (✓ ◐ ❯) a terminal would force into one cell: clip it rather
-	   than show a scrollbar over the last row. */
+	   than show a scrollbar over the last row. Not on the phone sheet: there a component with
+	   its own minimum width (a two-column workflow view) can render wider than the few dozen
+	   cells a phone has, and scrolling to the rest beats losing it. */
 	.terminal-surface-dialog .terminal-surface-body {
 		scrollbar-gutter: stable;
-		overflow-x: hidden;
+	}
+	@media (width > 40rem) {
+		.terminal-surface-dialog .terminal-surface-body {
+			overflow-x: hidden;
+		}
 	}
 
 	.terminal-surface-dialog-content > header h2 {
