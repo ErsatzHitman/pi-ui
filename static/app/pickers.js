@@ -136,12 +136,17 @@ function applyArgumentCompletion(value) {
 	const match = /^(\/\S+[ \t])([^\n]*)$/.exec(input.value.slice(0, cursor));
 	if (!match) return;
 	const before = input.value.slice(0, match[1].length) + value;
+	const command = activeArgumentQuery.command;
+	closeArgumentPicker();
+	// Record the chosen value as the current query so the input event below does not
+	// immediately re-query and reopen the picker for it — an open picker swallows Enter,
+	// which would leave the completed command impossible to submit from the keyboard.
+	activeArgumentQuery = { command, prefix: value };
 	input.value = before + input.value.slice(cursor);
 	input.selectionStart = before.length;
 	input.selectionEnd = before.length;
 	input.dispatchEvent(new Event("input", { bubbles: true }));
 	input.focus();
-	closeArgumentPicker();
 }
 
 function handleClick(event) {
