@@ -579,12 +579,14 @@ export class UiRenderer implements AppStorePresentation {
 			}
 			if (effect.type === "dialog") {
 				scripts.add(
-					effect.open
-						? terminalSurfaceOverlayOpenScript(
-								effect.id,
-								effect.modal !== false,
-							)
-						: `{ const dialog = document.getElementById('${effect.id}'); if (dialog?.open) dialog.close(); }`,
+					!effect.open
+						? `{ const dialog = document.getElementById('${effect.id}'); if (dialog?.open) dialog.close(); }`
+						: // Only terminal-surface overlay effects carry `modal` (see
+							// `AppStore.setTerminalSurfaces`); every other dialog keeps the plain
+							// `showModal()` open and its own focus handling.
+							effect.modal === undefined
+							? `{ const dialog = document.getElementById('${effect.id}'); if (dialog && !dialog.open) dialog.showModal(); }`
+							: terminalSurfaceOverlayOpenScript(effect.id, effect.modal),
 				);
 			}
 		}
