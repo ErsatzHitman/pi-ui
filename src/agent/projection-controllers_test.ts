@@ -149,6 +149,44 @@ test("transcript projection restores persisted provider errors", () => {
 	);
 });
 
+test("transcript projection marks a persisted aborted reply as stopped (round-4 O6)", () => {
+	const message = assistantMessageStub({
+		role: "assistant",
+		content: [{ type: "text", text: "partial reply" }],
+		stopReason: "error",
+		errorMessage: "The operation was aborted.",
+	});
+
+	assertEquals(new TranscriptProjector().message(message, new Date(0)), [
+		{
+			role: "assistant",
+			text: "partial reply",
+			timestamp: new Date(0),
+			meta: "Stopped",
+		},
+	]);
+});
+
+test("transcript projection marks a persisted dedicated-stopReason abort as stopped (round-4 O6)", () => {
+	// The SDK's actual abort path persists `stopReason: "aborted"` directly (no
+	// `errorMessage`), distinct from the `"error"` + abort-worded-message case
+	// covered above — both must produce the same muted marker.
+	const message = assistantMessageStub({
+		role: "assistant",
+		content: [{ type: "text", text: "partial reply" }],
+		stopReason: "aborted",
+	});
+
+	assertEquals(new TranscriptProjector().message(message, new Date(0)), [
+		{
+			role: "assistant",
+			text: "partial reply",
+			timestamp: new Date(0),
+			meta: "Stopped",
+		},
+	]);
+});
+
 test("transcript projection hides persisted canonical abort errors", () => {
 	const message = assistantMessageStub({
 		role: "assistant",
