@@ -147,8 +147,14 @@ export const extensionUiRoutes = {
 			const overlayPercentColumns = clampReportedColumns(
 				optionalNonnegativeIntegerField(signals, "overlayPercentCols"),
 			);
+			// The width a custom message/entry render card has in this tab's transcript, which
+			// extension message/entry renderers render at (see
+			// `AppStore.narrowestTranscriptColumns`). Optional and clamped like the others.
+			const transcriptColumns = clampReportedColumns(
+				optionalNonnegativeIntegerField(signals, "transcriptCols"),
+			);
 			context.store.setClientViewportCells(
-				{ ...size, promptColumns, overlayPercentColumns },
+				{ ...size, promptColumns, overlayPercentColumns, transcriptColumns },
 				clientId,
 			);
 			return datastarResponse();
@@ -217,5 +223,10 @@ export const extensionUiRoutes = {
  * `TerminalSurfaceController`'s `viewportHint`, not a validated surface size of its own.
  */
 function clampReportedColumns(value: number | undefined): number | undefined {
-	return value === undefined ? undefined : Math.min(maxTerminalColumns, value);
+	return value === undefined
+		? undefined
+		: Math.max(minReportedColumns, Math.min(maxTerminalColumns, value));
 }
+
+/** A reported 0 (or a tiny value) must not size a surface or a render down to nothing. */
+const minReportedColumns = 10;

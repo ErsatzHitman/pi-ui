@@ -106,3 +106,30 @@ export function resolveTerminalTheme(scheme: TerminalSurfaceColorScheme): Theme 
 	themeCache.set(scheme, theme);
 	return theme;
 }
+
+/**
+ * The palette overrides for a `registerMessageRenderer`/`registerEntryRenderer`
+ * render inside a transcript card, where pi-ui's own card already supplies the
+ * surface. The SDK's conventional custom-message box paints its whole block
+ * with `customMessageBg` and `customMessageText`; mapped onto the basic palette
+ * (cyan has no pi-ui token), that turned every render into a striped teal
+ * "success" band. Here the box background is the terminal default (none), the
+ * body text is the default text color, and the label uses the accent color.
+ * `""` is `Theme`'s documented "default terminal color" value.
+ */
+const transcriptThemeCache = new Map<TerminalSurfaceColorScheme, Theme>();
+
+/** Resolves (and caches) the `Theme` custom message/entry renderers get in the transcript. */
+export function resolveTranscriptTheme(scheme: TerminalSurfaceColorScheme): Theme {
+	const cached = transcriptThemeCache.get(scheme);
+	if (cached) return cached;
+	const palette = scheme === "light" ? lightPalette : darkPalette;
+	const theme = new Theme(
+		{ ...palette, customMessageText: "", customMessageLabel: palette.accent },
+		{ ...backgroundPalette, customMessageBg: "" },
+		"256color",
+		{ name: `pi-ui-transcript-${scheme}` },
+	);
+	transcriptThemeCache.set(scheme, theme);
+	return theme;
+}

@@ -137,6 +137,12 @@ export type ClientViewportCells = {
 	rows: number;
 	promptColumns?: number;
 	overlayPercentColumns?: number;
+	/**
+	 * The width, in cells, of a custom message/entry render card (`.message-custom-render`) in
+	 * this client's transcript column: what extension message/entry renderers render at.
+	 * `undefined` from a client that cannot measure it yet.
+	 */
+	transcriptColumns?: number;
 };
 /**
  * The interactive working indicator an extension configured via
@@ -488,6 +494,21 @@ export class AppStore {
 		return this.mostRecentViewportClientId !== undefined
 			? this.clientViewportCellsByClient.get(this.mostRecentViewportClientId)
 			: undefined;
+	}
+	/**
+	 * The narrowest transcript render width any still-connected client reported. Every tab
+	 * shows the same transcript, so a custom message/entry render sized for a wider tab would
+	 * wrap mid-line in a narrower one. `undefined` until a client reports one.
+	 */
+	get narrowestTranscriptColumns(): number | undefined {
+		let narrowest: number | undefined;
+		for (const size of this.clientViewportCellsByClient.values()) {
+			if (size.transcriptColumns === undefined) continue;
+			if (narrowest === undefined || size.transcriptColumns < narrowest) {
+				narrowest = size.transcriptColumns;
+			}
+		}
+		return narrowest;
 	}
 	extensionWorkingIndicator: AppExtensionWorkingIndicator | undefined;
 	extensionWorkingMessage: string | undefined;

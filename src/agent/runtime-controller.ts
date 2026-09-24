@@ -112,7 +112,7 @@ import {
 	type SessionTransitionResult,
 } from "./session-transition-controller.ts";
 import { defaultTerminalColumns } from "./terminal-surface/headless-terminal.ts";
-import { resolveTerminalTheme } from "./terminal-surface/theme.ts";
+import { resolveTranscriptTheme } from "./terminal-surface/theme.ts";
 import {
 	formatToolResult,
 	formatToolStart,
@@ -1852,6 +1852,7 @@ export class RuntimeController {
 			this.publishLiveWorkspace();
 		}
 		const outcome = this.reduceEvent(
+			backgroundSession.runtime,
 			event,
 			backgroundSession.state,
 			backgroundSession.tools,
@@ -2113,8 +2114,12 @@ export class RuntimeController {
 		if (event.type === "agent_settled") this.foregroundObservedRunning = false;
 		this.state.update(
 			() => {
-				const outcome = this.reduceEvent(event, this.state, this.tools, () =>
-					this.usage.sync(),
+				const outcome = this.reduceEvent(
+					this.runtime,
+					event,
+					this.state,
+					this.tools,
+					() => this.usage.sync(),
 				);
 				this.updateSessionCatalogFromEvent(event, this.runtime);
 				this.scheduleAutoTitleAfterUserMessage(this.runtime, event);
@@ -2180,27 +2185,24 @@ export class RuntimeController {
 	}
 
 	/**
-	 * Builds fresh `TranscriptCustomRenderers` closures, bound to the current
-	 * runtime's `extensionRunner` plus the requesting client's last reported
-	 * terminal width/color scheme (R7-A "custom message + entry renderers") —
-	 * see `TranscriptCustomRenderers`' and `CustomRendererHost`'s doc
-	 * comments. Read fresh on every call (never cached across calls) because
-	 * `this.runtime` changes on session switch/fork/resume, and the client's
-	 * reported width/scheme can change between messages.
+	 * Builds fresh `TranscriptCustomRenderers` closures, bound to `runtime`'s
+	 * `extensionRunner` (the runtime the event or transcript belongs to, so a
+	 * background session renders with its own extensions' renderers, never the
+	 * foreground's) plus the connected clients' transcript width and color
+	 * scheme (R7-A "custom message + entry renderers"). See
+	 * `TranscriptCustomRenderers`' and `CustomRendererHost`'s doc comments.
+	 * Read fresh on every call because the runtime changes on session
+	 * switch/fork/resume, and the reported width/scheme can change between
+	 * messages.
 	 */
-	private customTranscriptRenderers(): TranscriptCustomRenderers {
-		const extensionRunner = this.runtime.session.extensionRunner;
-		// Mirrors `TerminalSurfaceController`'s own non-overlay cap (round 6 F2):
-		// the viewport hint is the whole browser window, which only an overlay
-		// can span — a transcript message sits in the prompt column, so on a
-		// wide screen the raw hint would render it far wider than its box.
-		const width = Math.min(
-			this.state.clientViewportCells?.columns ?? defaultTerminalColumns,
-			defaultTerminalColumns,
-		);
+	private customTranscriptRenderers(
+		runtime: AgentSessionRuntime,
+	): TranscriptCustomRenderers {
+		const extensionRunner = runtime.session.extensionRunner;
+		const width = this.customRenderColumns();
 		const colorScheme = this.state.clientColorScheme;
-		const theme = resolveTerminalTheme(colorScheme);
-		const outputPad = this.runtime.session.settingsManager?.getOutputPad() ?? 1;
+		const theme = resolveTranscriptTheme(colorScheme);
+		const outputPad = runtime.session.settingsManager?.getOutputPad() ?? 1;
 		const renderOptions = { width, colorScheme, expanded: true };
 		return {
 			renderMessage: (message) => {
@@ -2228,13 +2230,32 @@ export class RuntimeController {
 		};
 	}
 
+	/**
+	 * The width custom message/entry renders are produced at: the narrowest
+	 * transcript card any connected tab measured (the transcript is shared, so
+	 * a render sized for a wider tab would wrap mid-line in a narrower one).
+	 * Before any tab has measured one, falls back to the same prompt-column /
+	 * capped-viewport estimate `TerminalSurfaceController` seeds non-overlay
+	 * surfaces with.
+	 */
+	private customRenderColumns(): number {
+		const measured = this.state.narrowestTranscriptColumns;
+		if (measured !== undefined) return measured;
+		const hint = this.state.clientViewportCells;
+		return Math.min(
+			hint?.promptColumns ?? hint?.columns ?? defaultTerminalColumns,
+			defaultTerminalColumns,
+		);
+	}
+
 	private reduceEvent(
+		runtime: AgentSessionRuntime,
 		event: AgentSessionEvent,
 		state: SessionEventStateSink,
 		tools: SessionEventToolState,
 		syncUsage?: () => void,
 	) {
-		const customRenderers = this.customTranscriptRenderers();
+		const customRenderers = this.customTranscriptRenderers(runtime);
 		return reduceSessionEvent(event, {
 			state,
 			tools,
@@ -2284,13 +2305,13 @@ export class RuntimeController {
 				};
 			},
 			cacheMissNotice: (message) => {
-				if (!this.runtime.session.settingsManager?.getShowCacheMissNotices()) {
+				if (!runtime.session.settingsManager?.getShowCacheMissNotices()) {
 					return undefined;
 				}
 				const miss = detectCacheMiss(
-					this.runtime.session.sessionManager.getEntries(),
+					runtime.session.sessionManager.getEntries(),
 					message,
-					this.runtime.session.modelRuntime,
+					runtime.session.modelRuntime,
 				);
 				return miss ? formatCacheMissNotice(miss) : undefined;
 			},
@@ -2402,7 +2423,11 @@ export class RuntimeController {
 	}
 
 	private loadCurrentSessionMessages(): void {
-		this.transcript.load(this.runtime, this.state, this.customTranscriptRenderers());
+		this.transcript.load(
+			this.runtime,
+			this.state,
+			this.customTranscriptRenderers(this.runtime),
+		);
 		this.usage.sync();
 	}
 }

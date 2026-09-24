@@ -20,6 +20,7 @@ import type { PreparedSessionList } from "./session-catalog.ts";
 import {
 	agentSessionEventStub,
 	agentSessionRuntimeStub,
+	sessionEntryStub,
 	sessionManagerStub,
 } from "./test-fixtures.ts";
 
@@ -1847,6 +1848,40 @@ test("RuntimeController rejects /export targets that name a directory", async ()
 		);
 	}
 	assertEquals(fake.promptInputs, []);
+	await controller.dispose();
+});
+
+test("RuntimeController renders a background session's custom entries with that session's own renderers", async () => {
+	const state = new AppStore();
+	const [a, b] = streamingRuntimes();
+	const controller = await activate(state, [a, b]);
+	const rendered: string[] = [];
+	a.runtime.session.extensionRunner.getEntryRenderer = (customType) =>
+		customType === "demo"
+			? (entry) => {
+					rendered.push(`a:${entry.id}`);
+					return { render: () => ["from a"], invalidate: () => {} };
+				}
+			: undefined;
+	b.runtime.session.extensionRunner.getEntryRenderer = () => () => {
+		rendered.push("b");
+		return { render: () => ["from b"], invalidate: () => {} };
+	};
+
+	// Foreground `b`; `a` keeps streaming in the background.
+	assertEquals(await controller.resumeSession("/sessions/b.jsonl"), {
+		status: "success",
+	});
+	a.emit(
+		agentSessionEventStub({
+			type: "entry_appended",
+			entry: sessionEntryStub({ type: "custom", customType: "demo", id: "e1" }),
+		}),
+	);
+
+	assertEquals(rendered, ["a:e1"]);
+	// Nothing from the background session reaches the foreground transcript.
+	assertEquals(state.messages, []);
 	await controller.dispose();
 });
 

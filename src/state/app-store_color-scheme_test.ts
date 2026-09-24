@@ -33,3 +33,26 @@ test("client color scheme reports without a client id use the legacy shared slot
 	store.clearClientColorScheme(AppStore.legacyClientColorSchemeKey);
 	assertEquals(store.clientColorScheme, "dark");
 });
+
+test("custom renders use the narrowest transcript width any connected client reported", () => {
+	const store = new AppStore();
+	assertEquals(store.narrowestTranscriptColumns, undefined);
+
+	store.setClientViewportCells(
+		{ columns: 168, rows: 40, transcriptColumns: 94 },
+		"wide",
+	);
+	store.setClientViewportCells(
+		{ columns: 51, rows: 90, transcriptColumns: 38 },
+		"phone",
+	);
+	// A client that could not measure its transcript does not count.
+	store.setClientViewportCells({ columns: 20, rows: 10 }, "old");
+	assertEquals(store.narrowestTranscriptColumns, 38);
+
+	// Once the narrow tab closes, renders can use the wide tab's width again.
+	store.clearClientViewportCells("phone");
+	assertEquals(store.narrowestTranscriptColumns, 94);
+	store.clearClientViewportCells("wide");
+	assertEquals(store.narrowestTranscriptColumns, undefined);
+});

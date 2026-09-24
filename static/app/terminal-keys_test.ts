@@ -7,6 +7,7 @@ import {
 	bindTerminalSurfaces,
 	encodeKeyEvent,
 	measurePromptColumnCells,
+	measureTranscriptRenderCells,
 	restoreFocusAfterSurfaceUnmount,
 } from "./terminal-keys.js";
 
@@ -661,5 +662,89 @@ test("a resize report carries this tab's display client id when the page has one
 		});
 	} finally {
 		dom.restore();
+	}
+});
+
+// Custom message/entry renders (R7-A) are sized from a replica of the transcript card.
+test("the transcript render width is measured from a removed replica of the custom render card", () => {
+	type FakeNode = {
+		tag: string;
+		className: string;
+		style: Record<string, string>;
+		textContent: string;
+		children: FakeNode[];
+		clientWidth: number;
+		removed: boolean;
+		setAttribute(): void;
+		appendChild(child: FakeNode): FakeNode;
+		append(...nodes: FakeNode[]): void;
+		getBoundingClientRect(): { width: number };
+		remove(): void;
+	};
+	const node = (tag: string): FakeNode => ({
+		tag,
+		className: "",
+		style: {},
+		textContent: "",
+		children: [],
+		clientWidth: 0,
+		removed: false,
+		setAttribute() {},
+		appendChild(child) {
+			this.children.push(child);
+			return child;
+		},
+		append(...nodes) {
+			this.children.push(...nodes);
+		},
+		// 20 glyphs 160px wide: 8px per cell.
+		getBoundingClientRect() {
+			return { width: tag === "span" ? 160 : 0 };
+		},
+		remove() {
+			this.removed = true;
+		},
+	});
+	const created: FakeNode[] = [];
+	const list = node("div");
+	const restore = patchGlobal("document", {
+		getElementById: (id: string) => (id === "message-list" ? list : undefined),
+		createElement: (tag: string) => {
+			const element = node(tag);
+			// The card's content box: 750px, 8px glyphs -> 93 cells.
+			if (tag === "div") element.clientWidth = 750;
+			created.push(element);
+			return element;
+		},
+	});
+	const restoreStyle = patchGlobal("getComputedStyle", () => ({
+		paddingInlineStart: "0px",
+		paddingInlineEnd: "0px",
+	}));
+	try {
+		assertEquals(measureTranscriptRenderCells(), 93);
+		const article = created.find((entry) => entry.tag === "article");
+		assertEquals(
+			article?.className,
+			"message message-context tool-timeline-item message-skill",
+		);
+		assertEquals(list.children[0], article);
+		assertEquals(article?.removed, true);
+		const render = created.find(
+			(entry) => entry.className === "message-custom-render",
+		);
+		assertEquals(render?.style.overflowY, "scroll");
+	} finally {
+		restore();
+		restoreStyle();
+	}
+});
+
+test("the transcript render width is undefined before #message-list exists", () => {
+	const restore = patchGlobal("document", { getElementById: () => undefined });
+	try {
+		assertEquals(measureTranscriptRenderCells(), undefined);
+	} finally {
+		restore();
 	}
 });

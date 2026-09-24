@@ -946,6 +946,7 @@ test("the client's reported viewport carries the optional prompt-column and over
 			rows: 43,
 			promptCols: 92,
 			overlayPercentCols: 150,
+			transcriptCols: 88,
 		}),
 	);
 
@@ -955,6 +956,31 @@ test("the client's reported viewport carries the optional prompt-column and over
 		rows: 43,
 		promptColumns: 92,
 		overlayPercentColumns: 150,
+		transcriptColumns: 88,
+	});
+});
+
+test("the client's reported column hints are clamped to a usable width", async () => {
+	const context = fakeContext();
+	const router = createRouter(context);
+
+	const response = await router.fetch(
+		signalRequest(endpoints.terminalViewport, {
+			cols: 100,
+			rows: 30,
+			promptCols: 0,
+			overlayPercentCols: 100_000,
+			transcriptCols: 3,
+		}),
+	);
+
+	assertEquals(response.status, 204);
+	assertEquals(context.store.clientViewportCells, {
+		columns: 100,
+		rows: 30,
+		promptColumns: 10,
+		overlayPercentColumns: 500,
+		transcriptColumns: 10,
 	});
 });
 
@@ -972,6 +998,7 @@ test("the client's reported viewport tolerates missing prompt-column and overlay
 		rows: 30,
 		promptColumns: undefined,
 		overlayPercentColumns: undefined,
+		transcriptColumns: undefined,
 	});
 });
 

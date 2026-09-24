@@ -172,6 +172,7 @@ export function renderPage(
 							rows: evt.detail.rows,
 							promptCols: evt.detail.promptCols,
 							overlayPercentCols: evt.detail.overlayPercentCols,
+							transcriptCols: evt.detail.transcriptCols,
 						},
 						requestCancellation: 'disabled',
 					})`}

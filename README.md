@@ -339,6 +339,13 @@ terminal:
     a small Node subprocess pi-ui launches once and talks to over a pipe, but that is a meaningfully
     larger change than this round covers and is left for a future round.
 
+- **Extension message/entry renders keep the width they were made at.** Output from
+  `registerMessageRenderer`/`registerEntryRenderer` is rendered once, at the narrowest transcript
+  width any connected tab has reported, when the message arrives or the session loads. Resizing a
+  window, or connecting a narrower tab, does not redraw messages that are already in the
+  transcript; they re-render at the new width the next time the session loads. Light/dark changes
+  need no redraw because the colors are pi-ui theme tokens.
+
 ## mobile and Capacitor wrapping
 
 pi-ui's shell is built to drop into a Capacitor WebView with no code changes:

@@ -254,6 +254,54 @@ function measureOverlayChrome() {
 	return Number.isFinite(chrome) && chrome > 0 ? chrome : 0;
 }
 
+/**
+ * The width, in cells, of a custom message/entry render card in this tab's transcript: what
+ * `RuntimeController` renders `registerMessageRenderer`/`registerEntryRenderer` output at, so
+ * a render's lines fit the card instead of wrapping mid-line. Measured from a short-lived,
+ * invisible replica of the card's real nesting (`messages.tsx`'s `renderContextMessage`)
+ * inside `#message-list`, with a scrollbar reserved the way a long render has one. The card's
+ * own font is measured too, since it need not match the terminal-surface cell. `undefined`
+ * before `#message-list` exists or when the DOM cannot lay the replica out.
+ */
+export function measureTranscriptRenderCells() {
+	const list = document.getElementById("message-list");
+	if (!list) return undefined;
+	let article;
+	try {
+		article = document.createElement("article");
+		article.className = "message message-context tool-timeline-item message-skill";
+		article.setAttribute("aria-hidden", "true");
+		article.style.cssText =
+			"position:absolute;left:0;right:0;top:0;visibility:hidden;pointer-events:none;contain:none;";
+		const details = document.createElement("details");
+		details.className = "context-details";
+		details.setAttribute("open", "");
+		const summary = document.createElement("summary");
+		summary.className = "context-summary";
+		const surface = document.createElement("div");
+		surface.className = "tool-output-surface context-output";
+		const render = document.createElement("div");
+		render.className = "message-custom-render";
+		render.style.overflowY = "scroll";
+		const glyphs = document.createElement("span");
+		glyphs.style.whiteSpace = "pre";
+		glyphs.textContent = "0".repeat(20);
+		render.appendChild(glyphs);
+		surface.appendChild(render);
+		details.append(summary, surface);
+		article.appendChild(details);
+		list.appendChild(article);
+		const glyphWidth = glyphs.getBoundingClientRect().width / 20;
+		const width = render.clientWidth - inlinePadding(render);
+		if (!(glyphWidth > 0) || !(width > 0)) return undefined;
+		return Math.max(20, Math.floor(width / glyphWidth));
+	} catch {
+		return undefined;
+	} finally {
+		article?.remove();
+	}
+}
+
 let viewportReportTimer;
 
 /**
@@ -287,6 +335,7 @@ function reportViewportCells() {
 		Math.floor(document.documentElement.clientHeight / cell.height),
 	);
 	const promptCols = measurePromptColumnCells(cell);
+	const transcriptCols = measureTranscriptRenderCells();
 	const overlayPercentCols = Math.max(
 		20,
 		Math.floor(
@@ -296,7 +345,7 @@ function reportViewportCells() {
 	try {
 		document.body.dispatchEvent(
 			new CustomEvent("pi-ui-terminal-viewport", {
-				detail: { cols, rows, promptCols, overlayPercentCols },
+				detail: { cols, rows, promptCols, overlayPercentCols, transcriptCols },
 			}),
 		);
 	} catch {

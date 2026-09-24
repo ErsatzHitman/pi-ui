@@ -522,10 +522,11 @@
 	   converted to safe HTML by `CustomRendererHost` through the same ANSI→HTML
 	   pipeline `.terminal-surface-body` uses — styled like `.tool-pre` (the other
 	   place pre-rendered monospace extension output shows up in the transcript)
-	   so it reads as a native block, not a foreign terminal pane. */
+	   so it reads as a native block, not a foreign terminal pane. No padding of
+	   its own: `.context-output` already pads the card, and `terminal-keys.js`
+	   measures this box's width to size the render (`transcriptCols`). */
 	.message-custom-render {
 		max-height: 20rem;
-		padding: 0.75rem;
 		overflow: auto;
 		color: var(--text);
 		font-family: var(--font-mono);
@@ -536,7 +537,6 @@
 	}
 	.message-custom-render-error {
 		margin: 0;
-		padding: 0.75rem;
 		color: var(--status-error);
 		font-size: var(--text-sm);
 	}
