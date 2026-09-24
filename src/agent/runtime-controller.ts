@@ -368,12 +368,27 @@ export class RuntimeController {
 	private readonly liveWorkspaceFrames = new StreamingFrameScheduler<true>(() =>
 		this.commitLiveWorkspace(),
 	);
-	// `ExtensionActivity.id` -> transcript message id, so a later "updated"/
-	// "finished" `LedgerChange` patches the same card instead of appending a
-	// new one. Reset whenever the foreground transcript itself is reloaded
-	// (`bindSessionState`), since a reload's own `TranscriptProjector` replay
-	// already rebuilds activity messages from persisted entries with fresh ids.
-	private readonly activityMessageIds = new Map<string, string>();
+	// `ExtensionActivity.id` -> the transcript message it currently lives in,
+	// so a later "updated"/"finished" `LedgerChange` patches the same card
+	// instead of appending a new one. `anchoredToTool` records *which kind* of
+	// message that is: an anchored activity (`anchor.toolCallId` set) whose
+	// owning tool message existed by the time it was first rendered folds
+	// into that tool message forever (`anchoredToTool: true` — only
+	// `{activities, extension}` ever need patching, since the tool message's
+	// own text/state come from the tool run, not this activity). One whose
+	// tool message didn't exist yet falls back to its own standalone card
+	// (`anchoredToTool: false`) — every later update must keep patching that
+	// card's own `text`/`state`, not just `activities`, the same as any other
+	// standalone card; conflating the two (treating a standalone fallback
+	// card as if it were the tool message) would freeze that card's summary
+	// at whatever it was on creation. Reset whenever the foreground
+	// transcript itself is reloaded (`bindSessionState`), since a reload's
+	// own `TranscriptProjector` replay already rebuilds activity messages
+	// from persisted entries with fresh ids.
+	private readonly activityMessageIds = new Map<
+		string,
+		Readonly<{ messageId: string; anchoredToTool: boolean }>
+	>();
 
 	private constructor(
 		private runtime: AgentSessionRuntime,
@@ -2157,17 +2172,25 @@ export class RuntimeController {
 	private upsertExtensionActivityMessage(activity: ExtensionActivity): void {
 		const view = toExtensionActivityView(activity);
 		const toolCallId = activity.anchor?.toolCallId;
+		const cached = this.activityMessageIds.get(activity.id);
 		if (toolCallId) {
-			const toolMessageId =
-				this.activityMessageIds.get(activity.id) ??
-				this.findToolMessageId(toolCallId);
+			// Once this activity is genuinely folded into a tool message
+			// (`anchoredToTool: true`), keep using that id without re-scanning —
+			// never trust a cached *standalone* id (`anchoredToTool: false`,
+			// from a past fallback below) as if it were the tool message.
+			const toolMessageId = cached?.anchoredToTool
+				? cached.messageId
+				: this.findToolMessageId(toolCallId);
 			if (toolMessageId) {
 				const existing = this.state.transcript.getMessage(toolMessageId);
 				this.state.updateMessage(toolMessageId, {
 					activities: mergeActivitySteps(existing?.activities, view),
 					extension: activity.extension,
 				});
-				this.activityMessageIds.set(activity.id, toolMessageId);
+				this.activityMessageIds.set(activity.id, {
+					messageId: toolMessageId,
+					anchoredToTool: true,
+				});
 				return;
 			}
 			// No tool message found yet (e.g. the hook fired before its tool
@@ -2181,13 +2204,23 @@ export class RuntimeController {
 			toolCallId,
 			activities: [view],
 		};
-		const existingId = this.activityMessageIds.get(activity.id);
+		// A standalone card (never `anchoredToTool`) is the only kind reused
+		// here — an activity currently folded into a tool message must not be
+		// re-patched as if it were its own card (see `activityMessageIds`'s
+		// doc comment); it can only reach here in the first place if
+		// `toolCallId` is unset, in which case `cached.anchoredToTool` is
+		// always false anyway.
+		const existingId =
+			cached && !cached.anchoredToTool ? cached.messageId : undefined;
 		if (existingId) {
 			this.state.updateMessage(existingId, patch);
 			return;
 		}
 		const id = this.state.appendMessage("extension-activity", patch.text, patch);
-		this.activityMessageIds.set(activity.id, id);
+		this.activityMessageIds.set(activity.id, {
+			messageId: id,
+			anchoredToTool: false,
+		});
 	}
 
 	/** Reverse-scans for the `role: "tool"` message carrying this
@@ -2231,7 +2264,7 @@ export class RuntimeController {
 				extensionLabel: activity.extension.label,
 				progress: activity.progress,
 				state: activity.state === "working" ? "working" : "started",
-				anchorMessageId: this.activityMessageIds.get(activity.id),
+				anchorMessageId: this.activityMessageIds.get(activity.id)?.messageId,
 			}),
 		);
 		this.state.setExtensionActivityChips(chips);

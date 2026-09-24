@@ -154,6 +154,160 @@ test("a before_agent_start hook returning no display field (or display:true) sta
 	]);
 });
 
+test("a before_agent_start hook that returns the exact systemPrompt it was given is a no-op — filtered, not shown as Replaced", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 100 });
+
+	tracker.scopeStart(
+		hookScope({ hookEvent: { type: "before_agent_start", systemPrompt: "BASE" } }),
+		0,
+	);
+	timers[0]?.run();
+	tracker.scopeEnd(
+		hookScope({ hookEvent: { type: "before_agent_start", systemPrompt: "BASE" } }),
+		200,
+		{ ok: true, result: { systemPrompt: "BASE" } },
+	);
+
+	const finished = changes[1];
+	assertExists(finished);
+	if (finished.kind !== "finished") throw new Error("expected finished");
+	assertEquals(finished.activity.output, []);
+	assertEquals(finished.activity.summary, undefined);
+});
+
+test("a before_agent_start hook that appends to the system prompt reports only the appended suffix", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 100 });
+
+	tracker.scopeStart(
+		hookScope({ hookEvent: { type: "before_agent_start", systemPrompt: "BASE" } }),
+		0,
+	);
+	timers[0]?.run();
+	tracker.scopeEnd(
+		hookScope({ hookEvent: { type: "before_agent_start", systemPrompt: "BASE" } }),
+		200,
+		{ ok: true, result: { systemPrompt: "BASE\n\nExtra section" } },
+	);
+
+	const finished = changes[1];
+	assertExists(finished);
+	if (finished.kind !== "finished") throw new Error("expected finished");
+	assertEquals(finished.activity.output, [
+		{
+			kind: "system-prompt",
+			title: "Appended to system prompt",
+			text: "\n\nExtra section",
+		},
+	]);
+	assertEquals(finished.activity.summary, "Appended to system prompt");
+});
+
+test("a before_agent_start hook that replaces the system prompt with something unrelated reports the full replacement", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 100 });
+
+	tracker.scopeStart(
+		hookScope({ hookEvent: { type: "before_agent_start", systemPrompt: "BASE" } }),
+		0,
+	);
+	timers[0]?.run();
+	tracker.scopeEnd(
+		hookScope({ hookEvent: { type: "before_agent_start", systemPrompt: "BASE" } }),
+		200,
+		{ ok: true, result: { systemPrompt: "TOTALLY DIFFERENT" } },
+	);
+
+	const finished = changes[1];
+	assertExists(finished);
+	if (finished.kind !== "finished") throw new Error("expected finished");
+	assertEquals(finished.activity.output, [
+		{
+			kind: "system-prompt",
+			title: "Replaced system prompt",
+			text: "TOTALLY DIFFERENT",
+		},
+	]);
+});
+
+test("a context hook that returns the same messages it was given is a no-op — filtered, not shown as Replaced context", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 100 });
+	const messages = [{ role: "user", content: "hi" }];
+
+	tracker.scopeStart(
+		hookScope({
+			trigger: { kind: "hook", event: "context" },
+			title: "context",
+			hookEvent: { type: "context", messages },
+		}),
+		0,
+	);
+	timers[0]?.run();
+	tracker.scopeEnd(
+		hookScope({
+			trigger: { kind: "hook", event: "context" },
+			title: "context",
+			hookEvent: { type: "context", messages },
+		}),
+		200,
+		{ ok: true, result: { messages: [{ role: "user", content: "hi" }] } },
+	);
+
+	const finished = changes[1];
+	assertExists(finished);
+	if (finished.kind !== "finished") throw new Error("expected finished");
+	assertEquals(finished.activity.output, []);
+	assertEquals(finished.activity.summary, undefined);
+});
+
+test("a context hook that changes the messages reports the replacement, per the input/output diff", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 100 });
+	const messages = [{ role: "user", content: "hi" }];
+
+	tracker.scopeStart(
+		hookScope({
+			trigger: { kind: "hook", event: "context" },
+			title: "context",
+			hookEvent: { type: "context", messages },
+		}),
+		0,
+	);
+	timers[0]?.run();
+	tracker.scopeEnd(
+		hookScope({
+			trigger: { kind: "hook", event: "context" },
+			title: "context",
+			hookEvent: { type: "context", messages },
+		}),
+		200,
+		{
+			ok: true,
+			result: {
+				messages: [
+					{ role: "user", content: "hi" },
+					{ role: "system", content: "injected" },
+				],
+			},
+		},
+	);
+
+	const finished = changes[1];
+	assertExists(finished);
+	if (finished.kind !== "finished") throw new Error("expected finished");
+	assertEquals(finished.activity.summary, "Replaced context (2 messages)");
+	assertEquals(finished.activity.output, [
+		{ kind: "injected-messages", title: "Replaced context", text: "2 messages" },
+	]);
+});
+
 test("a scope that ends below threshold with no signal is dropped, not finished", () => {
 	const { scheduler } = fakeScheduler();
 	const { sink, changes } = sinkRecorder();

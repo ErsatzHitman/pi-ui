@@ -330,7 +330,7 @@ function mapOutcome(scope: InstrumentedScope, outcome: ScopeOutcomeRaw): ScopeOu
 	if (!outcome.ok) return { ok: false, error: describeError(outcome.error) };
 	if (scope.trigger.kind === "tool") return mapToolOutcome(outcome.result);
 	if (scope.trigger.kind === "hook")
-		return mapHookOutcome(scope.trigger.event, outcome.result);
+		return mapHookOutcome(scope.trigger.event, outcome.result, scope.hookEvent);
 	return { ok: true };
 }
 
@@ -346,13 +346,17 @@ function mapToolOutcome<Result>(result: Result): ScopeOutcome {
 	};
 }
 
-function mapHookOutcome<Result>(event: string, result: Result): ScopeOutcome {
+function mapHookOutcome<Result, HookEvent>(
+	event: string,
+	result: Result,
+	hookEvent: HookEvent,
+): ScopeOutcome {
 	switch (event) {
 		case "before_agent_start":
-			return mapBeforeAgentStart(result);
+			return mapBeforeAgentStart(result, hookEvent);
 		case "context":
 		case "context_with_system":
-			return mapContextResult(result);
+			return mapContextResult(result, hookEvent);
 		case "tool_call":
 			return mapToolCallResult(result);
 		case "tool_result":
@@ -364,7 +368,10 @@ function mapHookOutcome<Result>(event: string, result: Result): ScopeOutcome {
 	}
 }
 
-function mapBeforeAgentStart<Result>(result: Result): ScopeOutcome {
+function mapBeforeAgentStart<Result, HookEvent>(
+	result: Result,
+	hookEvent: HookEvent,
+): ScopeOutcome {
 	if (!isRecord(result)) return { ok: true };
 	const messageRecord = isRecord(result.message) ? result.message : undefined;
 	const message = messageRecord ? messageContentText(messageRecord.content) : undefined;
@@ -373,19 +380,62 @@ function mapBeforeAgentStart<Result>(result: Result): ScopeOutcome {
 	// place its text becomes visible at all (DESIGN-ext-activity.md's Vision
 	// Proxy row: "Output = returned message text … (hidden:true)").
 	const hidden = messageRecord?.display === false;
-	const systemPrompt = isString(result.systemPrompt) ? result.systemPrompt : undefined;
-	if (message === undefined && systemPrompt === undefined) return { ok: true };
+	const originalSystemPrompt =
+		isRecord(hookEvent) && isString(hookEvent.systemPrompt)
+			? hookEvent.systemPrompt
+			: undefined;
+	const returnedSystemPrompt = isString(result.systemPrompt)
+		? result.systemPrompt
+		: undefined;
+	const systemPromptOutput = systemPromptDiffOutput(
+		originalSystemPrompt,
+		returnedSystemPrompt,
+	);
+	if (message === undefined && systemPromptOutput === undefined) return { ok: true };
 	const output =
 		message !== undefined
 			? [returnedMessageOutput(message, hidden)]
-			: [
-					{
-						kind: "system-prompt" as const,
-						title: "Replaced system prompt",
-						text: systemPrompt ?? "",
-					},
-				];
-	return { ok: true, summary: message ?? "Replaced system prompt", output };
+			: systemPromptOutput
+				? [systemPromptOutput]
+				: [];
+	return {
+		ok: true,
+		summary: message ?? systemPromptOutput?.title ?? "Replaced system prompt",
+		output,
+	};
+}
+
+/**
+ * Diffs a `before_agent_start` hook's returned `systemPrompt` against the
+ * one it was actually invoked with (§2.3: "plus the appended `systemPrompt`
+ * suffix (diff vs `event.systemPrompt`)"). A hook that hands back the exact
+ * prompt it was given made no change and is filtered out entirely — the same
+ * "fast/no-op hooks never show" rule the promotion threshold applies to slow
+ * ones. A hook that only appends (the common case: an extension appends its
+ * own section rather than rebuilding the prompt from scratch) reports just
+ * the appended suffix, not the whole prompt reproduced. Anything else —
+ * including when the original prompt isn't known, e.g. in tests that
+ * construct a scope without `hookEvent` — falls back to the full returned
+ * text, matching this function's pre-diff behavior.
+ */
+function systemPromptDiffOutput(
+	original: string | undefined,
+	returned: string | undefined,
+): ExtensionActivityOutput | undefined {
+	if (returned === undefined) return undefined;
+	if (original !== undefined && returned === original) return undefined;
+	if (
+		original !== undefined &&
+		returned.length > original.length &&
+		returned.startsWith(original)
+	) {
+		return {
+			kind: "system-prompt",
+			title: "Appended to system prompt",
+			text: returned.slice(original.length),
+		};
+	}
+	return { kind: "system-prompt", title: "Replaced system prompt", text: returned };
 }
 
 /** The `before_agent_start` "Sent to model" output section — kept as its
@@ -404,8 +454,23 @@ function returnedMessageOutput(text: string, hidden: boolean): ExtensionActivity
 	return { kind: "returned-message", title: "Sent to model", text };
 }
 
-function mapContextResult<Result>(result: Result): ScopeOutcome {
+function mapContextResult<Result, HookEvent>(
+	result: Result,
+	hookEvent: HookEvent,
+): ScopeOutcome {
 	if (!isRecord(result) || !Array.isArray(result.messages)) return { ok: true };
+	// §2.3: "context → messages not identical to the input messages" — a hook
+	// that hands back the same messages it was given (by reference, or the
+	// same content) made no change and is filtered out, the same "no-op hooks
+	// never show" rule `systemPromptDiffOutput` applies to `before_agent_start`.
+	// When the input isn't known (e.g. a test-built scope with no `hookEvent`)
+	// this falls back to always reporting, matching the pre-diff behavior.
+	const inputMessages =
+		isRecord(hookEvent) && Array.isArray(hookEvent.messages)
+			? hookEvent.messages
+			: undefined;
+	if (inputMessages !== undefined && messagesUnchanged(inputMessages, result.messages))
+		return { ok: true };
 	const count = result.messages.length;
 	const text = `${count} message${count === 1 ? "" : "s"}`;
 	return {
@@ -413,6 +478,21 @@ function mapContextResult<Result>(result: Result): ScopeOutcome {
 		summary: `Replaced context (${text})`,
 		output: [{ kind: "injected-messages", title: "Replaced context", text }],
 	};
+}
+
+function messagesUnchanged(
+	input: readonly unknown[],
+	returned: readonly unknown[],
+): boolean {
+	if (input === returned) return true;
+	if (input.length !== returned.length) return false;
+	try {
+		return JSON.stringify(input) === JSON.stringify(returned);
+	} catch {
+		// Unserializable content (e.g. a circular structure) — can't prove
+		// they're the same, so report the change rather than silently drop it.
+		return false;
+	}
 }
 
 function mapToolCallResult<Result>(result: Result): ScopeOutcome {

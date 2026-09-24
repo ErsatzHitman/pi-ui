@@ -38,6 +38,14 @@ export type InstrumentedScope = Readonly<{
 	trigger: ExtensionActivityTrigger;
 	title: string;
 	toolCallId?: string;
+	/** The raw hook event object a timed hook scope was invoked with — lets
+	 * the tracker diff a hook's return value against what it was actually
+	 * given (e.g. `before_agent_start`'s `systemPrompt`, `context`'s
+	 * `messages`) instead of always reporting the return value verbatim, per
+	 * `DESIGN-ext-activity.md` §2.3. Only set for timed hook scopes: a carrier
+	 * scope is cached and reused across dispatches (§2.3 point 5), so it has
+	 * no single event to attach. */
+	hookEvent?: unknown;
 }>;
 
 export type ScopeOutcomeRaw =
@@ -246,6 +254,7 @@ function createHookWrapper(
 					trigger: { kind: "hook", event },
 					title: event,
 					toolCallId: extractToolCallId(hookEvent),
+					hookEvent,
 				}
 			: carrierScopeFor(carrierScopes, ref, event);
 		report(() => reporter.scopeStart(scope, clock()));
