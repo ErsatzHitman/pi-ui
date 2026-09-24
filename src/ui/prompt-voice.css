@@ -1,0 +1,212 @@
+/*
+ * Voice input (speech-to-text) in the prompt bar. See DESIGN-voice.md §1 for the UX spec and §7.3
+ * for the DOM/signals contract this styles against. Only tokens are used for color so light/dark
+ * and every existing theme just work.
+ */
+
+@layer components {
+	@keyframes prompt-voice-arm-sweep {
+		0%,
+		100% {
+			opacity: 0.15;
+		}
+		50% {
+			opacity: 0.5;
+		}
+	}
+
+	/* --- Idle mic button: same family as .prompt-file-button (prompt-box.css:117-122). --- */
+	.prompt-voice-button {
+		color: var(--text-muted);
+	}
+	.prompt-voice-button:is(:hover, :focus-visible) {
+		color: var(--text);
+	}
+	.prompt-voice-button[data-voice-blocked]:not([data-voice-blocked=""]) {
+		opacity: 0.5;
+	}
+	.prompt-surface:not([data-voice-state="idle"]) .prompt-voice-button,
+	.prompt-surface:not([data-voice-state="idle"]) .prompt-file-button,
+	.prompt-surface:not([data-voice-state="idle"]) .prompt-shortcut-hint {
+		display: none;
+	}
+
+	/* While voice input is active, the Send button (but not Abort — the agent may still be
+	 * running and needs to stay abortable) is replaced by the voice controls. */
+	.prompt-surface:not([data-voice-state="idle"]) .prompt-action[data-send-trigger] {
+		display: none;
+	}
+	.prompt-surface:not([data-voice-state="idle"]) #prompt-input {
+		display: none;
+	}
+
+	/* --- Recording panel. --- */
+	.prompt-voice-panel {
+		display: flex;
+		flex: 1;
+		min-width: 0;
+		align-items: center;
+		gap: 0.5rem;
+		opacity: 1;
+		translate: 0 0;
+		transition:
+			opacity 150ms var(--ease-out),
+			translate 150ms var(--ease-out);
+	}
+	@starting-style {
+		.prompt-surface:not([data-prompt-initial]) .prompt-voice-panel {
+			opacity: 0;
+			translate: 0 0.25rem;
+		}
+	}
+
+	.prompt-voice-dot {
+		flex-shrink: 0;
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		background: var(--status-error);
+		box-shadow: 0 0 0 0 var(--status-error);
+	}
+	.prompt-surface[data-voice-state="recording"] .prompt-voice-dot {
+		animation: ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+	}
+	.prompt-surface[data-voice-state="arming"] .prompt-voice-dot {
+		background: transparent;
+		border: 2px solid var(--text-muted);
+		animation: prompt-voice-arm-sweep 1.2s ease-in-out infinite;
+	}
+	.prompt-surface[data-voice-state="paused"] .prompt-voice-dot {
+		background: transparent;
+		border: 2px solid var(--status-warning);
+	}
+
+	.prompt-voice-timer {
+		flex-shrink: 0;
+		min-width: 2.75rem;
+		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
+		font-size: var(--text-sm);
+	}
+	.prompt-voice-timer[data-voice-warning] {
+		color: var(--status-warning);
+	}
+
+	.prompt-voice-wave {
+		flex: 1;
+		min-width: 4rem;
+		height: 2rem;
+		color: var(--text);
+		mask-image: linear-gradient(to right, transparent, black 12%);
+		transition: opacity 180ms var(--ease-out);
+	}
+	.prompt-surface[data-voice-state="paused"] .prompt-voice-wave {
+		opacity: 0.45;
+	}
+	.prompt-surface[data-voice-state="transcribing"] .prompt-voice-wave {
+		opacity: 0.35;
+	}
+
+	.prompt-voice-label {
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		color: var(--text-muted);
+		font-size: var(--text-sm);
+		white-space: nowrap;
+	}
+	.prompt-voice-label:has(.prompt-voice-label-text:empty) {
+		display: none;
+	}
+	.prompt-voice-label-spinner {
+		display: none;
+	}
+	.prompt-surface[data-voice-state="transcribing"] .prompt-voice-label-spinner {
+		display: block;
+	}
+
+	/* --- Voice controls (cancel / pause / done), same button family as prompt-action. --- */
+	.prompt-voice-control {
+		display: none;
+		opacity: 1;
+		translate: 0 0;
+		transition:
+			opacity 150ms var(--ease-out),
+			translate 150ms var(--ease-out);
+	}
+	@starting-style {
+		.prompt-surface:not([data-prompt-initial]) .prompt-voice-control {
+			opacity: 0;
+			translate: 0 0.25rem;
+		}
+	}
+	.prompt-surface:not([data-voice-state="idle"]) #prompt-voice-cancel {
+		display: inline-flex;
+	}
+	.prompt-surface:is([data-voice-state="recording"], [data-voice-state="paused"])
+		#prompt-voice-pause,
+	.prompt-surface:is([data-voice-state="recording"], [data-voice-state="paused"])
+		#prompt-voice-done {
+		display: inline-flex;
+	}
+
+	#prompt-voice-pause .prompt-voice-pause-icon,
+	#prompt-voice-pause .prompt-voice-resume-icon {
+		display: none;
+	}
+	.prompt-surface:not([data-voice-state="paused"])
+		#prompt-voice-pause
+		.prompt-voice-pause-icon,
+	.prompt-surface[data-voice-state="paused"]
+		#prompt-voice-pause
+		.prompt-voice-resume-icon {
+		display: block;
+	}
+
+	.prompt-voice-error {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.prompt-voice-error-retry {
+		flex-shrink: 0;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.prompt-surface[data-voice-state="recording"] .prompt-voice-dot {
+			animation: none;
+		}
+		.prompt-surface[data-voice-state="arming"] .prompt-voice-dot {
+			animation: none;
+			opacity: 0.4;
+		}
+	}
+
+	/* Same 2rem touch target and hit-area extension as .prompt-file-button/.prompt-action at
+	 * this width (prompt-box.css:404-437). Duplicated here (not edited there) per DESIGN-voice.md
+	 * §1.1, since only stream B owns prompt-voice.css. */
+	@media (width <= 639px) {
+		.prompt-editor-actions .btn:is(.prompt-voice-button, .prompt-voice-control) {
+			--button-size: 2rem;
+
+			position: relative;
+			width: var(--button-size);
+			min-width: 0;
+			padding: 0;
+		}
+		.prompt-editor-actions
+			.btn:is(.prompt-voice-button, .prompt-voice-control)::after {
+			position: absolute;
+			inset: -0.375rem -0.125rem;
+			content: "";
+		}
+		.prompt-voice-label {
+			display: none;
+		}
+		.prompt-surface[data-voice-state="transcribing"] .prompt-voice-label,
+		.prompt-surface[data-voice-state="paused"] .prompt-voice-label {
+			display: flex;
+		}
+	}
+}
