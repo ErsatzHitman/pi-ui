@@ -183,14 +183,13 @@ function isForwardableChord(event) {
  * (`ask-user.ts`'s `alt+o` overlay toggle, `subagents.ts` manage mode) see
  * every keystroke including modifier chords, and no ordinary typing or prompt
  * editing ever holds Ctrl/Alt, so there's no per-keystroke cost to widening
- * this the way there would be for plain characters. This never suppresses
- * pi-ui's own bound keys (`src/keybinds.ts`): they're dispatched by a
- * separate `window`-level listener that still runs and fires exactly as
- * before (this module only ever calls `preventDefault()`, never
- * `stopPropagation()`) — same "both may act" precedent already documented in
- * `extension-shortcuts.ts` for a `registerShortcut()` collision, just applied
- * to a raw listener instead of one dispatched through the SDK's own
- * `getShortcuts()` map. Excluded outright: the platform's own editing chords
+ * this the way there would be for plain characters. Like the TUI (whose raw
+ * listeners run before the editor's app keybindings), a listener answers
+ * first: `handlePromptLevelKeydown` holds a forwarded chord back from pi-ui's
+ * own `window`-level keybinds (`src/keybinds.ts`), and only an unconsumed one
+ * reaches them — after any matching `registerShortcut()` shortcut — via
+ * `replayToWindow`, so a chord an extension consumes (Alt+O restoring a hidden
+ * workflow view) never also toggles pi-ui's own bind. Excluded outright: the platform's own editing chords
  * (`isNativeEditingChord`), IME composition, AltGraph (accented/special
  * characters on many non-US layouts arrive as `altKey: true` with
  * `getModifierState("AltGraph")`), Cmd/Meta chords (macOS/Chrome-OS reserved,
@@ -395,12 +394,11 @@ function applyKeyLocally(input, event) {
 			return;
 		}
 		default:
-			// A modifier chord (Alt+O, Ctrl+K, …) unconsumed by any extension has no
-			// text to insert — pi-ui's own `window`-level keybind handler, if the
-			// chord is one of its own, already ran (see `isForwardCandidate`'s doc
-			// comment); if it isn't, the chord is simply a no-op, same as a real
-			// terminal would treat an unbound one. Only a bare, unmodified character
-			// is native text input.
+			// A modifier chord (Alt+O, Ctrl+M, …) unconsumed by any extension has no
+			// text to insert — a matching shortcut or pi-ui's own keybind already
+			// got it in `processPendingKey`; otherwise the chord is simply a no-op,
+			// same as a real terminal would treat an unbound one. Only a bare,
+			// unmodified character is native text input.
 			if (
 				event.key.length === 1 &&
 				!event.ctrlKey &&
@@ -492,7 +490,33 @@ export function promptInputBusy() {
 	return !replaying && (draining || pendingKeys.length > 0);
 }
 
-async function processPendingKey({ event, fromPrompt }) {
+/** The first active `registerShortcut()` key id `event` matches, if any. */
+function matchingShortcutKey(event) {
+	return currentShortcutKeys().find((keyId) => matchesKeyId(event, keyId));
+}
+
+/** Delivers a forwarded chord no listener consumed to pi-ui's own
+ * `window`-level keybinds (Datastar `data-on:keydown__window`), which
+ * `handlePromptLevelKeydown` kept it from while the listeners decided. A
+ * fresh, non-bubbling event dispatched on `window` itself: the original is
+ * already defaultPrevented, and only `window`'s listeners should see it. */
+function replayToWindow(event) {
+	window.dispatchEvent(
+		new KeyboardEvent("keydown", {
+			key: event.key,
+			code: event.code,
+			ctrlKey: event.ctrlKey,
+			altKey: event.altKey,
+			shiftKey: event.shiftKey,
+			metaKey: event.metaKey,
+			repeat: event.repeat,
+			bubbles: false,
+			cancelable: true,
+		}),
+	);
+}
+
+async function processPendingKey({ event, fromPrompt, heldFromWindow }) {
 	const input = promptInput();
 	const promptEmpty = !input || input.value.length === 0;
 	if (promptLevelInputActive() && isForwardCandidate(event, promptEmpty)) {
@@ -502,6 +526,14 @@ async function processPendingKey({ event, fromPrompt }) {
 			return;
 		}
 	}
+	// Unconsumed: next in the TUI's order is the editor's `registerShortcut()`
+	// check (`handleShortcutKeydown` never saw this key — forwarding took it).
+	const shortcutKey = matchingShortcutKey(event);
+	if (shortcutKey !== undefined) {
+		invokeShortcut(shortcutKey);
+		return;
+	}
+	if (heldFromWindow) replayToWindow(event);
 	if (event.key === "Escape") {
 		if (!abortRunIfActive(event)) blurPromptIfIdle(input, event);
 		return;
@@ -555,19 +587,23 @@ function handlePromptLevelKeydown(event) {
 	const input = promptInput();
 	const fromPrompt = input !== undefined && event.target === input;
 	event.preventDefault();
-	pendingKeys.push({ event, fromPrompt });
+	// A chord could be one of pi-ui's own `window`-level keybinds: keep it from
+	// them until the listeners answer (`replayToWindow`), like the TUI's raw
+	// listeners preempting its app keybindings. A chord only gets here as a
+	// forward candidate (`isOrderedKey` never queues one behind a forward).
+	const heldFromWindow = event.ctrlKey || event.altKey;
+	if (heldFromWindow) event.stopPropagation();
+	pendingKeys.push({ event, fromPrompt, heldFromWindow });
 	if (!draining) void drainPendingKeys();
 	return true;
 }
 
 function handleShortcutKeydown(event) {
 	if (event.defaultPrevented || event.isComposing || !focusInScope()) return;
-	for (const keyId of currentShortcutKeys()) {
-		if (!matchesKeyId(event, keyId)) continue;
-		event.preventDefault();
-		invokeShortcut(keyId);
-		return;
-	}
+	const keyId = matchingShortcutKey(event);
+	if (keyId === undefined) return;
+	event.preventDefault();
+	invokeShortcut(keyId);
 }
 
 export function bindExtensionKeys() {

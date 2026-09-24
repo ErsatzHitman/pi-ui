@@ -25,20 +25,48 @@ class FakeKeyboardEvent extends Event {
 	readonly altKey: boolean;
 	readonly metaKey: boolean;
 	readonly shiftKey: boolean;
+	readonly repeat = false;
 	readonly isComposing = false;
+	propagationStopped = false;
 
 	constructor(
 		type: string,
-		init: EventInit & { key: string; code?: string; shiftKey?: boolean },
+		init: EventInit & {
+			key: string;
+			code?: string;
+			shiftKey?: boolean;
+			ctrlKey?: boolean;
+			altKey?: boolean;
+		},
 	) {
 		super(type, init);
 		this.key = init.key;
 		this.code = init.code ?? init.key;
-		this.ctrlKey = false;
-		this.altKey = false;
+		this.ctrlKey = init.ctrlKey ?? false;
+		this.altKey = init.altKey ?? false;
 		this.metaKey = false;
 		this.shiftKey = init.shiftKey ?? false;
 	}
+
+	getModifierState(): boolean {
+		return false;
+	}
+
+	override stopPropagation() {
+		this.propagationStopped = true;
+		super.stopPropagation();
+	}
+}
+
+type KeyOptions = { shiftKey?: boolean; ctrlKey?: boolean; altKey?: boolean };
+
+function describeKey(event: FakeKeyboardEvent): string {
+	const mods = [
+		event.ctrlKey && "ctrl",
+		event.altKey && "alt",
+		event.shiftKey && "shift",
+	];
+	return [...mods.filter(Boolean), event.key.toLowerCase()].join("+");
 }
 
 /** Just the `HTMLTextAreaElement` surface `extension-keys.js` edits through. */
@@ -73,7 +101,11 @@ type Harness = {
 	requests: Deferred[];
 	submitted: string[];
 	recalls: string[];
-	press: (key: string, options?: { shiftKey?: boolean }) => FakeKeyboardEvent;
+	/** Keydowns pi-ui's own `window`-level keybinds saw, bubbled or replayed. */
+	windowKeys: string[];
+	/** Key ids posted to the `registerShortcut()` invoke route. */
+	shortcuts: string[];
+	press: (key: string, options?: KeyOptions) => FakeKeyboardEvent;
 	settle: () => Promise<void>;
 };
 
@@ -89,14 +121,21 @@ afterEach(() => {
  * behind), and a `fetch` whose `/extensions/ui/prompt-input` round trips the
  * test resolves by hand, so two keydowns can land inside one round trip.
  */
-function install(options: { running?: boolean } = {}): Harness {
+function install(options: { running?: boolean; shortcutKeys?: string[] } = {}): Harness {
 	const input = new FakeTextarea();
 	const aborts: number[] = [];
 	// prompt-action.tsx renders either the send button (`data-send-trigger`) or,
 	// while a turn runs, the destructive abort button.
 	const abortButton = { click: () => aborts.push(Date.now()) };
 	const sendButton = {};
-	const island = { dataset: { terminalInputActive: "" }, children: [] };
+	const island = {
+		dataset: { terminalInputActive: "" },
+		children: (options.shortcutKeys ?? []).map((key) => ({
+			dataset: { key, reachable: "" },
+		})),
+	};
+	const windowKeys: string[] = [];
+	const shortcuts: string[] = [];
 	const documentListeners: ((event: Event) => void)[] = [];
 	const requests: Deferred[] = [];
 	const submitted: string[] = [];
@@ -154,10 +193,18 @@ function install(options: { running?: boolean } = {}): Harness {
 				pickers: { isOpen: () => false },
 				shouldAbortOnEscape: (event: Event) => !event.defaultPrevented,
 			},
+			dispatchEvent: (event: FakeKeyboardEvent) => {
+				windowKeys.push(describeKey(event));
+				return true;
+			},
 		}),
 	);
 	restores.push(
-		patchGlobal("fetch", (_url: string, init: { body: string }) => {
+		patchGlobal("fetch", (url: string, init: { body: string }) => {
+			if (url === "/extensions/ui/shortcut") {
+				shortcuts.push((JSON.parse(init.body) as { keyId: string }).keyId);
+				return Promise.resolve({ json: async () => ({}) });
+			}
 			const { data } = JSON.parse(init.body) as { data: string };
 			return new Promise((resolveResponse) => {
 				requests.push({
@@ -171,17 +218,19 @@ function install(options: { running?: boolean } = {}): Harness {
 
 	bindExtensionKeys();
 
-	function press(key: string, options: { shiftKey?: boolean } = {}) {
+	function press(key: string, keyOptions: KeyOptions = {}) {
 		const event = new FakeKeyboardEvent("keydown", {
 			key,
 			bubbles: true,
 			cancelable: true,
-			shiftKey: options.shiftKey,
+			...keyOptions,
 		});
-		// Target phase first (prompt-box.tsx), then the document listener.
+		// Target phase first (prompt-box.tsx), then the document listener, then
+		// (unless stopped) `window`, where pi-ui's own keybinds listen.
 		Object.defineProperty(event, "target", { value: input, configurable: true });
 		input.dispatchEvent(event);
 		for (const listener of documentListeners) listener(event);
+		if (!event.propagationStopped) windowKeys.push(describeKey(event));
 		return event;
 	}
 
@@ -189,7 +238,17 @@ function install(options: { running?: boolean } = {}): Harness {
 		for (let i = 0; i < 20; i += 1) await Promise.resolve();
 	}
 
-	return { input, aborts, requests, submitted, recalls, press, settle };
+	return {
+		input,
+		aborts,
+		requests,
+		submitted,
+		recalls,
+		windowKeys,
+		shortcuts,
+		press,
+		settle,
+	};
 }
 
 test("two characters typed inside one round trip both land, in order", async () => {
@@ -290,4 +349,53 @@ test("an unconsumed ArrowUp still recalls prompt history", async () => {
 	await settle();
 	assertEquals(recalls, ["ArrowUp"]);
 	assertEquals(input.value, "recalled");
+});
+
+test("a chord a listener consumes never reaches pi-ui's own keybinds", async () => {
+	const { input, requests, windowKeys, press, settle } = install();
+	const chord = press("o", { altKey: true });
+	assertEquals(chord.defaultPrevented, true);
+	assertEquals(windowKeys, []);
+	await settle();
+	assertEquals(
+		requests.map((request) => request.data),
+		["o"],
+	);
+	requests[0]?.resolve(true);
+	await settle();
+	assertEquals(windowKeys, []);
+	assertEquals(input.value, "");
+});
+
+test("an unconsumed chord reaches pi-ui's own keybinds once, after the listeners", async () => {
+	const { input, requests, windowKeys, shortcuts, press, settle } = install();
+	press("o", { altKey: true });
+	await settle();
+	assertEquals(windowKeys, []);
+	requests[0]?.resolve(false);
+	await settle();
+	assertEquals(windowKeys, ["alt+o"]);
+	assertEquals(shortcuts, []);
+	assertEquals(input.value, "");
+});
+
+test("an unconsumed chord fires the extension shortcut registered on it", async () => {
+	const { requests, windowKeys, shortcuts, press, settle } = install({
+		shortcutKeys: ["alt+k"],
+	});
+	press("k", { altKey: true });
+	await settle();
+	requests[0]?.resolve(false);
+	await settle();
+	assertEquals(shortcuts, ["alt+k"]);
+	assertEquals(windowKeys, []);
+});
+
+test("a shortcut chord a listener consumes does not fire the shortcut", async () => {
+	const { requests, shortcuts, press, settle } = install({ shortcutKeys: ["alt+k"] });
+	press("k", { altKey: true });
+	await settle();
+	requests[0]?.resolve(true);
+	await settle();
+	assertEquals(shortcuts, []);
 });
