@@ -18,10 +18,11 @@ export type ServerAutostartPlatform = "linux" | "darwin" | "windows";
 
 /**
  * Values a headless (VPS / remote-laptop) service install persists so `--host`,
- * `--port`, `--remote`, `--auth-token`, and `--insecure-no-auth` survive across restarts and reboots without
- * ever appearing on the `ExecStart` command line (visible to any local user via `ps`).
- * Written to a 0600 systemd `EnvironmentFile`; picked up by `server-main.ts` exactly like
- * the `PI_UI_*` environment variables it already reads.
+ * `--port`, `--remote`, `--auth-token`, `--insecure-no-auth`, and `--workspace` survive
+ * across restarts and reboots without ever appearing on the `ExecStart` command line
+ * (visible to any local user via `ps`). Written to a 0600 systemd `EnvironmentFile`;
+ * picked up by `server-main.ts` exactly like the `PI_UI_*` environment variables it
+ * already reads.
  */
 export type ServerAutostartServiceEnvironment = {
 	hostname?: string;
@@ -29,6 +30,7 @@ export type ServerAutostartServiceEnvironment = {
 	remote?: boolean;
 	authToken?: string;
 	insecureNoAuth?: boolean;
+	workspace?: string;
 };
 
 export type ServerAutostartConfig = {
@@ -268,7 +270,8 @@ function hasServiceEnvironment(
 			environment.port !== undefined ||
 			environment.remote !== undefined ||
 			environment.authToken !== undefined ||
-			environment.insecureNoAuth === true)
+			environment.insecureNoAuth === true ||
+			environment.workspace !== undefined)
 	);
 }
 
@@ -288,6 +291,9 @@ function systemdEnvironmentFileContents(
 		lines.push(`PI_UI_AUTH_TOKEN=${environment.authToken}`);
 	}
 	if (environment.insecureNoAuth) lines.push("PI_UI_INSECURE_NO_AUTH=1");
+	if (environment.workspace !== undefined) {
+		lines.push(`PI_UI_WORKSPACE=${environment.workspace}`);
+	}
 	return `${lines.join("\n")}\n`;
 }
 

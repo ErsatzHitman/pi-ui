@@ -58,6 +58,8 @@ test("server options reject invalid input", () => {
 	assertThrows(() => parseServerOptions(["--unknown"]), Error, "unknown option");
 	assertThrows(() => parseServerOptions(["--auth-token"]), Error, "non-empty token");
 	assertThrows(() => parseServerOptions(["--auth-token="]), Error, "non-empty token");
+	assertThrows(() => parseServerOptions(["--workspace"]), Error, "non-empty path");
+	assertThrows(() => parseServerOptions(["--workspace="]), Error, "non-empty path");
 });
 
 test("server options accept an opt-in auth token from a flag or the environment", () => {
@@ -91,6 +93,42 @@ test("server options accept an opt-in auth token from a flag or the environment"
 test("server options omit authToken entirely when not set, unlike an empty string", () => {
 	const options = parseServerOptions([], { authToken: "  " });
 	assertEquals("authToken" in options, false);
+});
+
+test("server options accept an opt-in workspace override from a flag or the environment (RM1 audit open issue 8)", () => {
+	assertEquals(parseServerOptions(["--workspace", "/srv/pi-ui-workspace"]), {
+		hostname: defaultServerHostname,
+		port: defaultServerPort,
+		help: false,
+		workspace: "/srv/pi-ui-workspace",
+	});
+	assertEquals(parseServerOptions(["--workspace=/srv/pi-ui-workspace"]), {
+		hostname: defaultServerHostname,
+		port: defaultServerPort,
+		help: false,
+		workspace: "/srv/pi-ui-workspace",
+	});
+	assertEquals(parseServerOptions([], { workspace: "/srv/from-env" }), {
+		hostname: defaultServerHostname,
+		port: defaultServerPort,
+		help: false,
+		workspace: "/srv/from-env",
+	});
+	// A flag overrides the environment, same as --host/--port/--auth-token.
+	assertEquals(
+		parseServerOptions(["--workspace", "/srv/flag"], { workspace: "/srv/env" }),
+		{
+			hostname: defaultServerHostname,
+			port: defaultServerPort,
+			help: false,
+			workspace: "/srv/flag",
+		},
+	);
+});
+
+test("server options omit workspace entirely when not set, unlike an empty string", () => {
+	const options = parseServerOptions([], { workspace: "  " });
+	assertEquals("workspace" in options, false);
 });
 
 test("explicitServerOptions reports false for both when nothing was passed", () => {
@@ -161,6 +199,11 @@ test("server options accept the insecure-no-auth escape hatch from a flag or the
 
 test("serverUsage documents the service install --headless flag (RM1 audit open issue 5)", () => {
 	assertStringIncludes(serverUsage, "--headless");
+});
+
+test("serverUsage documents the --workspace override (RM1 audit open issue 8)", () => {
+	assertStringIncludes(serverUsage, "--workspace");
+	assertStringIncludes(serverUsage, "PI_UI_WORKSPACE");
 });
 
 test("serverUsage documents the insecure-no-auth escape hatch", () => {

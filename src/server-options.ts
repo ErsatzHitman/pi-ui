@@ -23,6 +23,13 @@ export type ServerOptions = {
 	 * `PI_UI_INSECURE_NO_AUTH=1`. Present only when enabled.
 	 */
 	insecureNoAuth?: true;
+	/**
+	 * Overrides the default workspace directory (normally the server's home directory —
+	 * see `utils/workspace.ts`'s `defaultWorkspacePath`), opt-in via `--workspace <path>` /
+	 * `PI_UI_WORKSPACE`. Mainly for a headless service, whose workspace otherwise defaults
+	 * to the service user's whole home directory (RM1 audit open issue 8).
+	 */
+	workspace?: string;
 };
 
 export type ServerEnvironment = {
@@ -31,6 +38,7 @@ export type ServerEnvironment = {
 	authToken?: string;
 	remote?: string;
 	insecureNoAuth?: string;
+	workspace?: string;
 };
 
 /**
@@ -95,6 +103,7 @@ function parseServerOptionsCore(
 	let authToken = nonEmpty(environment.authToken);
 	let remote = parseBooleanEnvironment(environment.remote);
 	let insecureNoAuth = parseBooleanEnvironment(environment.insecureNoAuth);
+	let workspace = nonEmpty(environment.workspace);
 
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index];
@@ -141,6 +150,17 @@ function parseServerOptionsCore(
 			);
 			continue;
 		}
+		if (argument === "--workspace") {
+			workspace = parseWorkspacePath(args[++index], argument);
+			continue;
+		}
+		if (argument.startsWith("--workspace=")) {
+			workspace = parseWorkspacePath(
+				argument.slice("--workspace=".length),
+				"--workspace",
+			);
+			continue;
+		}
 		throw new Error(`unknown option: ${argument}`);
 	}
 
@@ -148,6 +168,7 @@ function parseServerOptionsCore(
 	if (authToken) options.authToken = authToken;
 	if (remote) options.remote = true;
 	if (insecureNoAuth) options.insecureNoAuth = true;
+	if (workspace) options.workspace = workspace;
 	return {
 		options,
 		explicit: { hostname: explicitHostname, port: explicitPort },
@@ -177,6 +198,10 @@ options:
                             shell has a $DISPLAY/$WAYLAND_DISPLAY, e.g. installing over SSH
                             with X11 forwarding. Implied on Linux with no graphical session,
                             --remote, or a non-loopback --host.
+      --workspace <path>    workspace directory to start in (default: your home directory;
+                            env: PI_UI_WORKSPACE). Mainly for a headless service, whose
+                            workspace otherwise defaults to the whole home directory of the
+                            user it runs as.
       --version             show the version
   -h, --help                show this help`;
 
@@ -190,6 +215,12 @@ function parseAuthToken(value: string | undefined, source: string): string {
 	const token = value?.trim();
 	if (!token) throw new Error(`${source} requires a non-empty token`);
 	return token;
+}
+
+function parseWorkspacePath(value: string | undefined, source: string): string {
+	const path = value?.trim();
+	if (!path) throw new Error(`${source} requires a non-empty path`);
+	return path;
 }
 
 function parseBooleanEnvironment(value: string | undefined): boolean {

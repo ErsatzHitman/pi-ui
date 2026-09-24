@@ -47,6 +47,10 @@ COPY --from=build /repo/dist/pi-ui-bun-linux-x64 /usr/local/bin/pi-ui
 # tailnet/VPN interface on the host, not the public one — see ../docs/remote.md.
 ENV PI_UI_HOST=0.0.0.0
 ENV PI_UI_REMOTE=1
+# pi-ui's workspace defaults to $HOME (/root here), not the working directory, so WORKDIR
+# alone would leave it browsing /root instead of this volume. See ../docs/remote.md
+# "Workspace" and RM1 audit open issue 8.
+ENV PI_UI_WORKSPACE=/workspace
 
 WORKDIR /workspace
 EXPOSE 31415

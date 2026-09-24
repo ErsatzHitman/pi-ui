@@ -99,6 +99,31 @@ test("service install persists --remote/--auth-token without marking hostname/po
 	});
 });
 
+test("service install persists an explicit --workspace flag or PI_UI_WORKSPACE (RM1 audit open issue 8)", () => {
+	const fromFlag = buildServiceInstallAutostartConfig(
+		["--workspace", "/srv/pi-ui-workspace"],
+		{},
+	);
+	assertEquals(fromFlag.serviceEnvironment, {
+		hostname: undefined,
+		port: undefined,
+		remote: undefined,
+		authToken: undefined,
+		workspace: "/srv/pi-ui-workspace",
+	});
+
+	const fromEnv = buildServiceInstallAutostartConfig([], {
+		workspace: "/srv/from-env",
+	});
+	assertEquals(fromEnv.serviceEnvironment, {
+		hostname: undefined,
+		port: undefined,
+		remote: undefined,
+		authToken: undefined,
+		workspace: "/srv/from-env",
+	});
+});
+
 test("service install --headless is consumed as the headless override, not forwarded as an unknown flag", () => {
 	const config = buildServiceInstallAutostartConfig(["--headless"], {});
 

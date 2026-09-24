@@ -111,10 +111,10 @@ loginctl enable-linger $USER
 
 Without lingering, systemd still stops your user's services when your SSH session ends —
 this keeps pi-ui running after you log out. `pi-ui service install` accepts the same flags
-as the server itself (`--host`, `--port`, `--remote`, `--auth-token`, `--insecure-no-auth`;
-`--headless` forces headless detection if the installing shell happens to have a `$DISPLAY`,
-e.g. installing over an X-forwarded SSH session). Like the server, it refuses a remote-mode
-service with neither `--auth-token` nor `--insecure-no-auth`.
+as the server itself (`--host`, `--port`, `--remote`, `--auth-token`, `--insecure-no-auth`,
+`--workspace`; `--headless` forces headless detection if the installing shell happens to
+have a `$DISPLAY`, e.g. installing over an X-forwarded SSH session). Like the server, it
+refuses a remote-mode service with neither `--auth-token` nor `--insecure-no-auth`.
 
 ```sh
 pi-ui service uninstall   # stops it and removes the unit + env file
@@ -123,6 +123,29 @@ pi-ui service uninstall   # stops it and removes the unit + env file
 Prefer a system-wide service, independent of any login (its own `pi-ui` system user)?
 See [`deploy/pi-ui.service.example`](../deploy/pi-ui.service.example) instead — you manage
 its env file and updates yourself rather than through `pi-ui service install`.
+
+### Workspace
+
+pi-ui ignores the unit's `WorkingDirectory=` — its workspace (what the Files view browses,
+and where a fresh session starts) always defaults to whoever runs it's home directory. For
+the systemd install above, that's the whole home directory of the account you installed it
+as, `~/pi-ui-remote/token` and all, not just your git checkout(s).
+
+Two ways to narrow that:
+
+- **Recommended: give pi-ui its own dedicated user**, so "the whole home directory" is
+  nothing more than pi-ui's own workspace and agent data to begin with — the same "one
+  pi-ui per user" boundary the [security](#security) section already asks for, just
+  applied to the service account too.
+- **Or pass `--workspace <path>`** (env `PI_UI_WORKSPACE`) to point it at a specific
+  directory without creating a separate user:
+
+  ```sh
+  pi-ui service install --remote --auth-token "$(openssl rand -hex 32)" \
+    --workspace ~/projects
+  ```
+
+  `pi-ui service install` persists it to the same 0600 env file as the other options.
 
 ### Docker
 

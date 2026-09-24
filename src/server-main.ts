@@ -19,6 +19,7 @@ import { AuthRateLimiter } from "./server/auth-rate-limit.ts";
 import { withAuthToken, type AuthCheckDeps } from "./server/request-auth.ts";
 import { endpoints } from "./server/routes/endpoints.ts";
 import { createSessionLoginRoute } from "./server/session-login-route.ts";
+import { expandHomePath, setDefaultWorkspacePath } from "./utils/workspace.ts";
 import { isVersionRequest, version } from "./version.ts";
 
 // Bun decides "jsx"/"jsxImportSource" from a tsconfig.json in process.cwd() once, at
@@ -118,12 +119,14 @@ export function buildServiceInstallAutostartConfig(
 		authToken?: string;
 		remote?: string;
 		insecureNoAuth?: string;
+		workspace?: string;
 	} = {
 		host: process.env.PI_UI_HOST,
 		port: process.env.PI_UI_PORT,
 		authToken: process.env.PI_UI_AUTH_TOKEN,
 		remote: process.env.PI_UI_REMOTE,
 		insecureNoAuth: process.env.PI_UI_INSECURE_NO_AUTH,
+		workspace: process.env.PI_UI_WORKSPACE,
 	},
 ): ServerAutostartOverrides {
 	const headlessIndex = rest.indexOf("--headless");
@@ -148,6 +151,7 @@ export function buildServiceInstallAutostartConfig(
 		authToken: options.authToken,
 	};
 	if (options.insecureNoAuth) serviceEnvironment.insecureNoAuth = true;
+	if (options.workspace) serviceEnvironment.workspace = options.workspace;
 	return { headless, serviceEnvironment };
 }
 
@@ -220,11 +224,18 @@ async function main(): Promise<void> {
 			authToken: process.env.PI_UI_AUTH_TOKEN,
 			remote: process.env.PI_UI_REMOTE,
 			insecureNoAuth: process.env.PI_UI_INSECURE_NO_AUTH,
+			workspace: process.env.PI_UI_WORKSPACE,
 		});
 		if (options.help) {
 			console.log(serverUsage);
 		} else {
 			setRemoteMode(resolveRemoteMode(options));
+			// Before the app's first request creates its RuntimeController/AppStore (which
+			// resolve the workspace lazily, on demand — see lazy-app.ts). RM1 audit open
+			// issue 8.
+			if (options.workspace) {
+				setDefaultWorkspacePath(expandHomePath(options.workspace));
+			}
 			if (isRemoteMode() && !options.authToken) {
 				if (options.insecureNoAuth) {
 					console.warn(insecureNoAuthWarning);

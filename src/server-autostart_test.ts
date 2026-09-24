@@ -253,6 +253,20 @@ test("writeSystemdServiceEnvironment persists --insecure-no-auth for a remote se
 	assertStringIncludes(contents, "PI_UI_INSECURE_NO_AUTH=1");
 });
 
+test("writeSystemdServiceEnvironment persists --workspace, so a headless service isn't stuck browsing its user's whole home directory (RM1 audit open issue 8)", async () => {
+	const home = await makeTempDir();
+	const config = serverAutostartConfig(
+		"linux",
+		{ executable: "/usr/bin/pi-ui", standalone: true },
+		{ serviceEnvironment: { workspace: "/srv/pi-ui-workspace" } },
+	);
+
+	const path = await writeSystemdServiceEnvironment({ ...config, home });
+
+	const contents = await Bun.file(path).text();
+	assertStringIncludes(contents, "PI_UI_WORKSPACE=/srv/pi-ui-workspace");
+});
+
 test("writeSystemdServiceEnvironment removes a stale file when nothing is persisted", async () => {
 	const home = await makeTempDir();
 	const withEnvironment = {
