@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { isRemoteMode } from "./remote-mode.ts";
 import { staticPath } from "./server/static-path.ts";
 
 const notificationIconPath = staticPath("notification-icon.png");
@@ -14,8 +15,21 @@ export type SessionDoneNotification = Readonly<{
 	sessionPath?: string;
 }>;
 
+/**
+ * `notify-send` reaches a desktop session on this same machine. In remote mode the
+ * browser is on another device entirely, so a server-side desktop notification would
+ * either fail silently or land on nobody's screen; the client-side broadcast in
+ * `RuntimeController.notifyRuntimeDone` (routed through `AppStore.notifySessionFinished`)
+ * is what reaches the browser there instead. Local (non-remote) behaviour is unchanged.
+ */
+export function shouldSendSystemNotification(
+	platform: string = process.platform,
+): boolean {
+	return platform === "linux" && !isRemoteMode();
+}
+
 export async function notifySessionDone(details: SessionDoneNotification): Promise<void> {
-	if (process.platform !== "linux") return;
+	if (!shouldSendSystemNotification()) return;
 	try {
 		const iconPath = await linuxNotificationIconPath();
 		if (!iconPath) return;
