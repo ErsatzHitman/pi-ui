@@ -8,7 +8,11 @@ import {
 } from "#testing/assertions";
 
 import { serverAutostartConfig, systemdService } from "./server-autostart.ts";
-import { buildServiceInstallAutostartConfig, createShutdown } from "./server-main.ts";
+import {
+	buildServiceInstallAutostartConfig,
+	createShutdown,
+	formatCliError,
+} from "./server-main.ts";
 
 // These tests exercise the exact function `main()`'s `pi-ui service install` branch calls
 // (`buildServiceInstallAutostartConfig`), not a hand-built `serverAutostartConfig` /
@@ -95,6 +99,31 @@ test("service install persists --remote/--auth-token without marking hostname/po
 	});
 });
 
+test("service install persists an explicit --workspace flag or PI_UI_WORKSPACE (RM1 audit open issue 8)", () => {
+	const fromFlag = buildServiceInstallAutostartConfig(
+		["--workspace", "/srv/pi-ui-workspace"],
+		{},
+	);
+	assertEquals(fromFlag.serviceEnvironment, {
+		hostname: undefined,
+		port: undefined,
+		remote: undefined,
+		authToken: undefined,
+		workspace: "/srv/pi-ui-workspace",
+	});
+
+	const fromEnv = buildServiceInstallAutostartConfig([], {
+		workspace: "/srv/from-env",
+	});
+	assertEquals(fromEnv.serviceEnvironment, {
+		hostname: undefined,
+		port: undefined,
+		remote: undefined,
+		authToken: undefined,
+		workspace: "/srv/from-env",
+	});
+});
+
 test("service install --headless is consumed as the headless override, not forwarded as an unknown flag", () => {
 	const config = buildServiceInstallAutostartConfig(["--headless"], {});
 
@@ -154,24 +183,52 @@ test("service install persists --insecure-no-auth so an explicitly unauthenticat
 	});
 });
 
-test("shutdown closes open SSE streams in remote mode, so SIGTERM never waits on a connected client", async () => {
-	for (const remote of [true, false]) {
-		const calls: string[] = [];
-		const shutdown = createShutdown(
-			{
-				stop: async (closeActiveConnections?: boolean) => {
-					calls.push(`stop(${closeActiveConnections === true})`);
-				},
+test("shutdown closes open SSE streams by default, in local mode too, so SIGTERM never waits on a connected client", async () => {
+	// `systemctl stop/restart` (remote) or Ctrl+C (local, a tab left open) with a client
+	// still connected used to hang for Bun's default graceful stop / systemd's 90s stop
+	// timeout and end in SIGKILL, with disposeApp never running. RM1 audit open issue 4:
+	// this is a real local bug too, so it's unconditional now, not gated on remote mode.
+	const calls: string[] = [];
+	const shutdown = createShutdown(
+		{
+			stop: async (closeActiveConnections?: boolean) => {
+				calls.push(`stop(${closeActiveConnections === true})`);
 			},
-			async () => {
-				calls.push("dispose");
+		},
+		async () => {
+			calls.push("dispose");
+		},
+	);
+	await Promise.all([shutdown(), shutdown()]);
+	assertEquals(calls, ["stop(true)", "dispose"]);
+});
+
+test("formatCliError reduces an Error to its one-line message, no stack or source frame (RM1 audit open issue 5)", () => {
+	const error = new Error("--auth-token required for a remote install");
+	const formatted = formatCliError(error);
+	assertEquals(formatted, "--auth-token required for a remote install");
+	assertFalse(formatted.includes("\n"));
+	assertFalse(formatted.includes("at "));
+});
+
+test("formatCliError falls back to String() for a non-Error throw", () => {
+	assertEquals(formatCliError("plain string failure"), "plain string failure");
+	assertEquals(formatCliError(42), "42");
+});
+
+test("shutdown's closeActiveConnections is still overridable for callers that need it", async () => {
+	const calls: string[] = [];
+	const shutdown = createShutdown(
+		{
+			stop: async (closeActiveConnections?: boolean) => {
+				calls.push(`stop(${closeActiveConnections === true})`);
 			},
-			remote,
-		);
-		await Promise.all([shutdown(), shutdown()]);
-		// Remote: `systemctl stop/restart` with a phone still connected used to hang for
-		// systemd's 90 s stop timeout and end in SIGKILL (disposeApp never ran). Local
-		// keeps Bun's default graceful stop.
-		assertEquals(calls, [`stop(${remote})`, "dispose"]);
-	}
+		},
+		async () => {
+			calls.push("dispose");
+		},
+		false,
+	);
+	await shutdown();
+	assertEquals(calls, ["stop(false)", "dispose"]);
 });

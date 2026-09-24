@@ -120,13 +120,26 @@ const loopbackAddresses = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 /**
  * The peer address Bun accepted the connection from, unless that peer is loopback (a
  * reverse proxy on the same host) and it forwarded one via `X-Forwarded-For`, in which
- * case its first hop — the actual client — is used instead. Never trusts
- * `X-Forwarded-For` from a non-loopback peer, since anyone on the network could send it.
+ * case its LAST hop — the one *this* proxy appended, describing whoever it accepted the
+ * connection from — is used instead. Never trusts `X-Forwarded-For` from a non-loopback
+ * peer, since anyone on the network could send it.
+ *
+ * The last hop, not the first: a reverse proxy that *appends* to an existing
+ * `X-Forwarded-For` (e.g. nginx's default `$proxy_add_x_forwarded_for`) leaves any
+ * earlier, client-supplied hops in the header untouched, so trusting the first one would
+ * let a client pick its own rate-limit bucket just by sending its own
+ * `X-Forwarded-For: <anything I like>`. This project's documented recipe (Caddy,
+ * `docs/remote.md`) instead *replaces* the header with a single real hop, so either
+ * choice is safe there — but the last hop is safe under both proxy behaviours, so it's
+ * the one used (RM1 audit open issue 6). Deploying behind a different reverse proxy?
+ * Confirm it doesn't forward an untouched client-supplied `X-Forwarded-For` verbatim as
+ * its only (and therefore last) hop.
  */
 export function clientIp(request: Request, server: RequestIpSource | undefined): string {
 	const peer = server?.requestIP(request)?.address;
 	if (peer && loopbackAddresses.has(peer)) {
-		const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+		const hops = request.headers.get("x-forwarded-for")?.split(",") ?? [];
+		const forwarded = hops[hops.length - 1]?.trim();
 		if (forwarded) return forwarded;
 	}
 	return peer ?? "unknown";
@@ -217,7 +230,7 @@ export function checkAuthToken(
 		if (provided) limiter?.recordFailure(ip);
 		const response = isBrowserNavigation(request)
 			? loginPageResponse(sanitizeNextPath(url.pathname + url.search))
-			: unauthorizedResponse();
+			: unauthorizedResponse(request);
 		// A stale cookie (e.g. from before the token was rotated) would otherwise ride
 		// along on every request — each one a failed guess — until it rate-limits its own
 		// browser out of the login form.
@@ -249,13 +262,17 @@ export function checkAuthToken(
 	return { ok: true, setCookie, redirect: `${stripped.pathname}${stripped.search}` };
 }
 
-/** Renders the login page as a 401: a machine client sees a failure status, while a
- * browser just sees the normal-looking sign-in form the body carries. */
+/** Renders the login page. Always a plain 200: every call site is a browser navigation the
+ * page itself IS the response to (an unauthenticated visit, or a login form re-rendered
+ * with an error after a wrong submission) — a non-2xx status on it would only produce a
+ * "Failed to load resource" console line for the document itself, with no machine client
+ * ever reading it (those get `unauthorizedResponse`'s plain-text 401 instead; see
+ * `isBrowserNavigation`). RM1 audit open issue 2. */
 export function loginPageResponse(next: string, error?: string): Response {
 	return new Response(
 		renderLoginPage({ next, loginPath: endpoints.sessionLogin, error }),
 		{
-			status: 401,
+			status: 200,
 			headers: {
 				"content-type": "text/html; charset=utf-8",
 				"cache-control": "no-store",
@@ -264,10 +281,19 @@ export function loginPageResponse(next: string, error?: string): Response {
 	);
 }
 
-function unauthorizedResponse(): Response {
+/** Behind an HTTPS reverse proxy the app itself always sees plain `http://` on
+ * `request.url` (TLS was terminated upstream) — a hard-coded `http://` here would tell
+ * someone to open a URL their browser would then refuse or silently upgrade. Uses the
+ * same scheme/host resolution as the rest of this module (RM1 audit open issue 5). */
+function unauthorizedResponse(request: Request): Response {
+	const scheme = isHttpsRequest(request) ? "https" : "http";
+	const host =
+		request.headers.get("x-forwarded-host") ??
+		request.headers.get("host") ??
+		new URL(request.url).host;
 	return new Response(
 		"Unauthorized. This pi-ui server requires its auth token: open " +
-			"http://<host>:<port>/?token=<token> once in this browser, or send an " +
+			`${scheme}://${host}/?token=<token> once in this browser, or send an ` +
 			"Authorization: Bearer <token> header.",
 		{
 			status: 401,

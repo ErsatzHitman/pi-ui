@@ -3,7 +3,6 @@ import { activeFontStacks } from "../fonts.ts";
 import { activeKeybind, keybindActions } from "../keybinds.ts";
 import { liveWorkspaceRatioDefault } from "../live-workspace-types.ts";
 import { getPierreThemes } from "../pierre-theme.ts";
-import { isRemoteMode } from "../remote-mode.ts";
 import {
 	endpoints,
 	workspaceFilesBase,
@@ -71,14 +70,17 @@ export function renderPage(
 	// a stale mobile connection is re-opened with the exact same options. Passing
 	// 'cleanup' aborts any still-open request under this same key before starting
 	// the new one, so re-issuing this action is always safe to call again. Datastar's
-	// @get closes the stream whenever the tab is hidden; a remote client keeps it open
-	// so a background tab still receives the "session finished" effect its Web
-	// Notification depends on (static/app/notifications.js). Local mode is unchanged.
+	// @get closes the stream whenever the tab is hidden by default; kept open instead
+	// so a hidden background tab still receives the "session finished"/"Turn finished"
+	// effects those notifications depend on (static/app/notifications.js,
+	// src/client/live-workspace.ts). Unconditional (RM1 audit open issue 4): this is a
+	// real local bug too, not only a remote one.
 	const streamConnectAction = `@get('${endpoints.stream}?clientId=${displayClientId}&appVersion=${appVersion}', {
 						payload: {},
 						retry: 'always',
 						retryMaxCount: Infinity,
-						requestCancellation: 'cleanup',${isRemoteMode() ? " openWhenHidden: true," : ""}
+						requestCancellation: 'cleanup',
+						openWhenHidden: true,
 					})`;
 
 	return syncHtml(

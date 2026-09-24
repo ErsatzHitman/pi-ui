@@ -19,6 +19,7 @@ import { AuthRateLimiter } from "./server/auth-rate-limit.ts";
 import { withAuthToken, type AuthCheckDeps } from "./server/request-auth.ts";
 import { endpoints } from "./server/routes/endpoints.ts";
 import { createSessionLoginRoute } from "./server/session-login-route.ts";
+import { expandHomePath, setDefaultWorkspacePath } from "./utils/workspace.ts";
 import { isVersionRequest, version } from "./version.ts";
 
 // Bun decides "jsx"/"jsxImportSource" from a tsconfig.json in process.cwd() once, at
@@ -118,12 +119,14 @@ export function buildServiceInstallAutostartConfig(
 		authToken?: string;
 		remote?: string;
 		insecureNoAuth?: string;
+		workspace?: string;
 	} = {
 		host: process.env.PI_UI_HOST,
 		port: process.env.PI_UI_PORT,
 		authToken: process.env.PI_UI_AUTH_TOKEN,
 		remote: process.env.PI_UI_REMOTE,
 		insecureNoAuth: process.env.PI_UI_INSECURE_NO_AUTH,
+		workspace: process.env.PI_UI_WORKSPACE,
 	},
 ): ServerAutostartOverrides {
 	const headlessIndex = rest.indexOf("--headless");
@@ -148,22 +151,24 @@ export function buildServiceInstallAutostartConfig(
 		authToken: options.authToken,
 	};
 	if (options.insecureNoAuth) serviceEnvironment.insecureNoAuth = true;
+	if (options.workspace) serviceEnvironment.workspace = options.workspace;
 	return { headless, serviceEnvironment };
 }
 
 /**
  * SIGINT/SIGTERM handler: stop accepting connections, then dispose the app (runtimes,
  * watchers, transfer dirs). Bun's default `server.stop()` waits for in-flight requests,
- * and a connected client's `/stream` SSE never finishes on its own — so in remote mode,
- * where a phone or laptop is typically still connected, `systemctl stop/restart` hung
- * for systemd's 90 s stop timeout and ended in SIGKILL without disposing anything. Remote
- * mode closes those connections instead (clients reconnect on their own); local mode
- * keeps the default. Runs once however many signals arrive.
+ * and a connected client's `/stream` SSE never finishes on its own — so `systemctl
+ * stop/restart` with a phone still connected, or a local Ctrl+C with a tab left open,
+ * hung for systemd's 90 s stop timeout / indefinitely and ended in SIGKILL without
+ * disposing anything. Unconditional (RM1 audit open issue 4): a real local bug too, not
+ * only a remote one; connected clients simply reconnect on their own either way. Runs
+ * once however many signals arrive.
  */
 export function createShutdown(
 	server: { stop(closeActiveConnections?: boolean): Promise<void> },
 	disposeApp: () => Promise<void>,
-	closeActiveConnections: boolean = isRemoteMode(),
+	closeActiveConnections: boolean = true,
 ): () => Promise<void> {
 	let stopping: Promise<void> | undefined;
 	return () => {
@@ -173,6 +178,14 @@ export function createShutdown(
 		})();
 		return stopping;
 	};
+}
+
+/** Reduces a thrown value to a clean one-line message for the top-level CLI catch: no Bun
+ * stack trace or source frame (RM1 audit open issue 5) — `service install`/startup errors
+ * (a missing --auth-token, a bad "service install|uninstall" invocation, a systemd failure)
+ * are user mistakes or environment problems, not bugs to debug from a stack. */
+export function formatCliError(cause: unknown): string {
+	return cause instanceof Error ? cause.message : String(cause);
 }
 
 async function main(): Promise<void> {
@@ -211,11 +224,18 @@ async function main(): Promise<void> {
 			authToken: process.env.PI_UI_AUTH_TOKEN,
 			remote: process.env.PI_UI_REMOTE,
 			insecureNoAuth: process.env.PI_UI_INSECURE_NO_AUTH,
+			workspace: process.env.PI_UI_WORKSPACE,
 		});
 		if (options.help) {
 			console.log(serverUsage);
 		} else {
 			setRemoteMode(resolveRemoteMode(options));
+			// Before the app's first request creates its RuntimeController/AppStore (which
+			// resolve the workspace lazily, on demand — see lazy-app.ts). RM1 audit open
+			// issue 8.
+			if (options.workspace) {
+				setDefaultWorkspacePath(expandHomePath(options.workspace));
+			}
 			if (isRemoteMode() && !options.authToken) {
 				if (options.insecureNoAuth) {
 					console.warn(insecureNoAuthWarning);
@@ -265,7 +285,7 @@ if (import.meta.main) {
 	});
 
 	main().catch((cause) => {
-		console.error(cause);
+		console.error(formatCliError(cause));
 		process.exitCode = 1;
 	});
 }

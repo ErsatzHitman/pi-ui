@@ -19,6 +19,9 @@
 #   PI_UI_PORT=31415
 #   PI_UI_REMOTE=1
 #   PI_UI_AUTH_TOKEN=<a long random token>
+#   PI_UI_WORKSPACE=/var/lib/pi-ui/workspace  # pi-ui's workspace defaults to the whole
+#                                              # $HOME above otherwise — see docs/remote.md
+#                                              # "Workspace"
 #
 # Point ExecStart at wherever you installed the pi-ui binary (see ../README.md "install"),
 # or a full `bun /path/to/server-main.js` command if you're running it from the npm

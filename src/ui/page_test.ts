@@ -93,15 +93,17 @@ test("configured sidebar width is applied before styles", () => {
 	);
 });
 
-test("in remote mode the SSE stream stays open while the tab is hidden", () => {
+test("the SSE stream stays open while the tab is hidden, in local mode too", () => {
 	// Datastar's @get closes its stream on visibilitychange -> hidden by default, so a
-	// remote client in a background tab would never receive the "session finished" effect
-	// that its Web Notification depends on. Local mode keeps Datastar's default.
+	// background tab would never receive the "session finished" effect its Web
+	// Notification depends on. RM1 audit open issue 4: this is a real local bug too (a
+	// hidden local tab never got its "Turn finished" notification either), so it's
+	// unconditional now, not gated on remote mode.
 	const streamAction = (page: string) =>
 		/data-init="(@get\('\/stream\?[^"]*)"/.exec(page)?.[1] ?? "";
 	const local = streamAction(renderSidebarPage());
 	assertStringIncludes(local, "retry: 'always'");
-	assertFalse(local.includes("openWhenHidden"));
+	assertStringIncludes(local, "openWhenHidden: true");
 
 	setRemoteMode(true);
 	try {

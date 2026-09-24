@@ -64,3 +64,17 @@ test("the login page starts with a doctype", () => {
 	const html = renderLoginPage({ next: "/", loginPath: "/session/login" });
 	assertEquals(html.startsWith("<!doctype html>"), true);
 });
+
+test("the login token input is at least 16px so iOS Safari doesn't zoom in on focus (RM1 audit open issue 7)", () => {
+	const html = renderLoginPage({ next: "/", loginPath: "/session/login" });
+	assertStringIncludes(html, "font-size: 16px");
+});
+
+test("the login token input reaches a real 44px touch target on coarse pointers, matching the button", () => {
+	const html = renderLoginPage({ next: "/", loginPath: "/session/login" });
+	assertStringIncludes(html, "@media (pointer: coarse)");
+	const coarseIndex = html.indexOf("@media (pointer: coarse)");
+	const afterCoarse = html.slice(coarseIndex, coarseIndex + 300);
+	assertStringIncludes(afterCoarse, "#login-token");
+	assertStringIncludes(afterCoarse, "2.75rem");
+});

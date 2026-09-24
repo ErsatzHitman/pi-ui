@@ -1,9 +1,14 @@
 import { test } from "bun:test";
 
-import { assertEquals, assertStringIncludes } from "#testing/assertions";
+import { assertEquals, assertFalse, assertStringIncludes } from "#testing/assertions";
 
 import { AuthRateLimiter } from "./auth-rate-limit.ts";
-import { checkAuthToken, type RequestIpSource, withAuthToken } from "./request-auth.ts";
+import {
+	checkAuthToken,
+	clientIp,
+	type RequestIpSource,
+	withAuthToken,
+} from "./request-auth.ts";
 
 const token = "secret-token-value";
 
@@ -130,6 +135,27 @@ test("an unauthenticated API-style request still gets a plain-text 401, not the 
 			result.response.headers.get("content-type"),
 			"text/plain; charset=utf-8",
 		);
+		const body = await result.response.text();
+		assertStringIncludes(body, "http://localhost/?token=<token>");
+	}
+});
+
+test("the plain-text 401 says https behind an HTTPS proxy, not a hard-coded http:// (RM1 audit open issue 5)", async () => {
+	const result = checkAuthToken(
+		new Request("http://origin-server/", {
+			headers: {
+				accept: "application/json",
+				"x-forwarded-proto": "https",
+				"x-forwarded-host": "pi.example.com",
+			},
+		}),
+		token,
+	);
+	assertEquals(result.ok, false);
+	if (!result.ok) {
+		const body = await result.response.text();
+		assertStringIncludes(body, "https://pi.example.com/?token=<token>");
+		assertFalse(body.includes("http://origin-server"));
 	}
 });
 
@@ -140,10 +166,21 @@ test("an unauthenticated browser navigation gets the login page instead of a bar
 	);
 	assertEquals(result.ok, false);
 	if (!result.ok) {
-		assertEquals(result.response.status, 401);
 		const html = await result.response.text();
 		assertStringIncludes(html, 'action="/session/login"');
 		assertStringIncludes(html, "/sessions/abc");
+	}
+});
+
+test("the login page navigation gets a plain 200, not 401, so the browser console stays empty (RM1 audit open issue 2)", async () => {
+	const result = checkAuthToken(
+		navigationRequest("http://localhost/sessions/abc"),
+		token,
+	);
+	assertEquals(result.ok, false);
+	if (!result.ok) {
+		assertEquals(result.response.status, 200);
+		assertEquals(result.response.headers.get("cache-control"), "no-store");
 	}
 });
 
@@ -279,6 +316,30 @@ test("a GET authenticated by cookie is never CSRF-checked", () => {
 	assertEquals(result.ok, true);
 });
 
+test("clientIp trusts the LAST X-Forwarded-For hop from a loopback peer, not the first (RM1 audit open issue 6)", () => {
+	// A proxy that *appends* to X-Forwarded-For (e.g. nginx's $proxy_add_x_forwarded_for)
+	// leaves any earlier, client-supplied hops in place — trusting the first hop would let
+	// a client pick its own rate-limit bucket by sending its own X-Forwarded-For. Caddy
+	// (this project's documented recipe) instead *replaces* the header with a single real
+	// hop, so this is safe either way; see docs/remote.md.
+	const request = new Request("http://localhost/", {
+		headers: { "x-forwarded-for": "attacker-supplied, 10.0.0.1, 203.0.113.9" },
+	});
+	assertEquals(clientIp(request, serverFor("127.0.0.1")), "203.0.113.9");
+});
+
+test("clientIp trusts X-Forwarded-For only from a loopback peer", () => {
+	const request = new Request("http://localhost/", {
+		headers: { "x-forwarded-for": "203.0.113.9" },
+	});
+	assertEquals(clientIp(request, serverFor("198.51.100.1")), "198.51.100.1");
+});
+
+test("clientIp falls back to the peer address with no X-Forwarded-For", () => {
+	const request = new Request("http://localhost/");
+	assertEquals(clientIp(request, serverFor("127.0.0.1")), "127.0.0.1");
+});
+
 test("repeated wrong tokens from one IP are rate-limited, but other IPs are unaffected", () => {
 	const rateLimiter = new AuthRateLimiter({ maxFailures: 3 });
 	const server = serverFor("9.9.9.9");
@@ -353,7 +414,7 @@ test("requests that present no credential at all never count as failed guesses",
 			rateLimiter,
 		});
 		assertEquals(result.ok, false);
-		if (!result.ok) assertEquals(result.response.status, 401);
+		if (!result.ok) assertEquals(result.response.status, 200);
 	}
 	const correct = checkAuthToken(
 		new Request("http://localhost/", {
@@ -374,7 +435,7 @@ test("a rejected stale cookie is cleared so the browser stops re-sending it", ()
 	);
 	assertEquals(result.ok, false);
 	if (!result.ok) {
-		assertEquals(result.response.status, 401);
+		assertEquals(result.response.status, 200);
 		assertStringIncludes(
 			result.response.headers.get("set-cookie") ?? "",
 			"pi_ui_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure",

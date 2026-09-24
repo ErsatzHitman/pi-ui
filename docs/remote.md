@@ -111,10 +111,10 @@ loginctl enable-linger $USER
 
 Without lingering, systemd still stops your user's services when your SSH session ends —
 this keeps pi-ui running after you log out. `pi-ui service install` accepts the same flags
-as the server itself (`--host`, `--port`, `--remote`, `--auth-token`, `--insecure-no-auth`;
-`--headless` forces headless detection if the installing shell happens to have a `$DISPLAY`,
-e.g. installing over an X-forwarded SSH session). Like the server, it refuses a remote-mode
-service with neither `--auth-token` nor `--insecure-no-auth`.
+as the server itself (`--host`, `--port`, `--remote`, `--auth-token`, `--insecure-no-auth`,
+`--workspace`; `--headless` forces headless detection if the installing shell happens to
+have a `$DISPLAY`, e.g. installing over an X-forwarded SSH session). Like the server, it
+refuses a remote-mode service with neither `--auth-token` nor `--insecure-no-auth`.
 
 ```sh
 pi-ui service uninstall   # stops it and removes the unit + env file
@@ -123,6 +123,29 @@ pi-ui service uninstall   # stops it and removes the unit + env file
 Prefer a system-wide service, independent of any login (its own `pi-ui` system user)?
 See [`deploy/pi-ui.service.example`](../deploy/pi-ui.service.example) instead — you manage
 its env file and updates yourself rather than through `pi-ui service install`.
+
+### Workspace
+
+pi-ui ignores the unit's `WorkingDirectory=` — its workspace (what the Files view browses,
+and where a fresh session starts) always defaults to whoever runs it's home directory. For
+the systemd install above, that's the whole home directory of the account you installed it
+as, `~/pi-ui-remote/token` and all, not just your git checkout(s).
+
+Two ways to narrow that:
+
+- **Recommended: give pi-ui its own dedicated user**, so "the whole home directory" is
+  nothing more than pi-ui's own workspace and agent data to begin with — the same "one
+  pi-ui per user" boundary the [security](#security) section already asks for, just
+  applied to the service account too.
+- **Or pass `--workspace <path>`** (env `PI_UI_WORKSPACE`) to point it at a specific
+  directory without creating a separate user:
+
+    ```sh
+    pi-ui service install --remote --auth-token "$(openssl rand -hex 32)" \
+      --workspace ~/projects
+    ```
+
+    `pi-ui service install` persists it to the same 0600 env file as the other options.
 
 ### Docker
 
@@ -195,6 +218,24 @@ What pi-ui does for you:
 - Rate-limits failed auth attempts per client IP: after 10 wrong tokens in 5 minutes that
   IP gets `429` for every credential it sends, the right one included, until the window
   passes (a correct token would otherwise tell a guesser it had won).
+
+**Trusted proxy behaviour for the rate limit.** pi-ui only trusts `X-Forwarded-For` from a
+loopback peer (your reverse proxy, on the same host) — a non-loopback peer's own
+`X-Forwarded-For` is always ignored, since anyone on the network could send one. When it
+does trust the header, it reads the **last** hop, not the first, because a proxy can
+handle the header two different ways:
+
+- **Replaces it** with a single real hop (Caddy's default, and this doc's recipe): first
+  and last hop are the same IP, so either choice works.
+- **Appends** to whatever the client already sent (e.g. nginx's default
+  `$proxy_add_x_forwarded_for`): the client's own, spoofable hops are still in the
+  header. Trusting the _first_ hop there would let a client pick its own rate-limit
+  bucket at will by sending its own `X-Forwarded-For`; the _last_ hop — the one your
+  proxy itself appended — is the one that actually can't be forged.
+
+If you put a different reverse proxy in front of pi-ui, confirm it either replaces
+`X-Forwarded-For` outright or appends the real peer address as the last hop, and never
+forwards an untouched client-supplied header as the only (and therefore last) one.
 
 What you're responsible for:
 
