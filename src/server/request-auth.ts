@@ -217,7 +217,7 @@ export function checkAuthToken(
 		if (provided) limiter?.recordFailure(ip);
 		const response = isBrowserNavigation(request)
 			? loginPageResponse(sanitizeNextPath(url.pathname + url.search))
-			: unauthorizedResponse();
+			: unauthorizedResponse(request);
 		// A stale cookie (e.g. from before the token was rotated) would otherwise ride
 		// along on every request — each one a failed guess — until it rate-limits its own
 		// browser out of the login form.
@@ -268,10 +268,19 @@ export function loginPageResponse(next: string, error?: string): Response {
 	);
 }
 
-function unauthorizedResponse(): Response {
+/** Behind an HTTPS reverse proxy the app itself always sees plain `http://` on
+ * `request.url` (TLS was terminated upstream) — a hard-coded `http://` here would tell
+ * someone to open a URL their browser would then refuse or silently upgrade. Uses the
+ * same scheme/host resolution as the rest of this module (RM1 audit open issue 5). */
+function unauthorizedResponse(request: Request): Response {
+	const scheme = isHttpsRequest(request) ? "https" : "http";
+	const host =
+		request.headers.get("x-forwarded-host") ??
+		request.headers.get("host") ??
+		new URL(request.url).host;
 	return new Response(
 		"Unauthorized. This pi-ui server requires its auth token: open " +
-			"http://<host>:<port>/?token=<token> once in this browser, or send an " +
+			`${scheme}://${host}/?token=<token> once in this browser, or send an ` +
 			"Authorization: Bearer <token> header.",
 		{
 			status: 401,

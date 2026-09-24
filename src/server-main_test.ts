@@ -8,7 +8,11 @@ import {
 } from "#testing/assertions";
 
 import { serverAutostartConfig, systemdService } from "./server-autostart.ts";
-import { buildServiceInstallAutostartConfig, createShutdown } from "./server-main.ts";
+import {
+	buildServiceInstallAutostartConfig,
+	createShutdown,
+	formatCliError,
+} from "./server-main.ts";
 
 // These tests exercise the exact function `main()`'s `pi-ui service install` branch calls
 // (`buildServiceInstallAutostartConfig`), not a hand-built `serverAutostartConfig` /
@@ -172,6 +176,19 @@ test("shutdown closes open SSE streams by default, in local mode too, so SIGTERM
 	);
 	await Promise.all([shutdown(), shutdown()]);
 	assertEquals(calls, ["stop(true)", "dispose"]);
+});
+
+test("formatCliError reduces an Error to its one-line message, no stack or source frame (RM1 audit open issue 5)", () => {
+	const error = new Error("--auth-token required for a remote install");
+	const formatted = formatCliError(error);
+	assertEquals(formatted, "--auth-token required for a remote install");
+	assertFalse(formatted.includes("\n"));
+	assertFalse(formatted.includes("at "));
+});
+
+test("formatCliError falls back to String() for a non-Error throw", () => {
+	assertEquals(formatCliError("plain string failure"), "plain string failure");
+	assertEquals(formatCliError(42), "42");
 });
 
 test("shutdown's closeActiveConnections is still overridable for callers that need it", async () => {

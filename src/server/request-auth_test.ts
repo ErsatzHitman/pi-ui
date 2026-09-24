@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 
-import { assertEquals, assertStringIncludes } from "#testing/assertions";
+import { assertEquals, assertFalse, assertStringIncludes } from "#testing/assertions";
 
 import { AuthRateLimiter } from "./auth-rate-limit.ts";
 import { checkAuthToken, type RequestIpSource, withAuthToken } from "./request-auth.ts";
@@ -130,6 +130,27 @@ test("an unauthenticated API-style request still gets a plain-text 401, not the 
 			result.response.headers.get("content-type"),
 			"text/plain; charset=utf-8",
 		);
+		const body = await result.response.text();
+		assertStringIncludes(body, "http://localhost/?token=<token>");
+	}
+});
+
+test("the plain-text 401 says https behind an HTTPS proxy, not a hard-coded http:// (RM1 audit open issue 5)", async () => {
+	const result = checkAuthToken(
+		new Request("http://origin-server/", {
+			headers: {
+				accept: "application/json",
+				"x-forwarded-proto": "https",
+				"x-forwarded-host": "pi.example.com",
+			},
+		}),
+		token,
+	);
+	assertEquals(result.ok, false);
+	if (!result.ok) {
+		const body = await result.response.text();
+		assertStringIncludes(body, "https://pi.example.com/?token=<token>");
+		assertFalse(body.includes("http://origin-server"));
 	}
 });
 

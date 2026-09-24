@@ -176,6 +176,14 @@ export function createShutdown(
 	};
 }
 
+/** Reduces a thrown value to a clean one-line message for the top-level CLI catch: no Bun
+ * stack trace or source frame (RM1 audit open issue 5) — `service install`/startup errors
+ * (a missing --auth-token, a bad "service install|uninstall" invocation, a systemd failure)
+ * are user mistakes or environment problems, not bugs to debug from a stack. */
+export function formatCliError(cause: unknown): string {
+	return cause instanceof Error ? cause.message : String(cause);
+}
+
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 
@@ -266,7 +274,7 @@ if (import.meta.main) {
 	});
 
 	main().catch((cause) => {
-		console.error(cause);
+		console.error(formatCliError(cause));
 		process.exitCode = 1;
 	});
 }

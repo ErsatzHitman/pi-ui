@@ -159,6 +159,10 @@ test("server options accept the insecure-no-auth escape hatch from a flag or the
 	assertEquals(parseServerOptions([]).insecureNoAuth, undefined);
 });
 
+test("serverUsage documents the service install --headless flag (RM1 audit open issue 5)", () => {
+	assertStringIncludes(serverUsage, "--headless");
+});
+
 test("serverUsage documents the insecure-no-auth escape hatch", () => {
 	assertStringIncludes(serverUsage, "--insecure-no-auth");
 	assertStringIncludes(serverUsage, "PI_UI_INSECURE_NO_AUTH");

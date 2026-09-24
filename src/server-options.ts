@@ -155,7 +155,7 @@ function parseServerOptionsCore(
 }
 
 export const serverUsage = `usage: pi-ui [options]
-       pi-ui service install|uninstall
+       pi-ui service install|uninstall [options] [--headless]
 
 options:
       --host <hostname>     listen hostname (default: ${defaultServerHostname}; env: PI_UI_HOST)
@@ -172,6 +172,11 @@ options:
                             PI_UI_INSECURE_NO_AUTH=1). Anyone who can reach the server gets
                             a full shell as you, with no login. Only for a network you
                             already fully trust.
+      --headless            "service install" only: force headless service detection (no
+                            graphical-session unit dependency) even when the installing
+                            shell has a $DISPLAY/$WAYLAND_DISPLAY, e.g. installing over SSH
+                            with X11 forwarding. Implied on Linux with no graphical session,
+                            --remote, or a non-loopback --host.
       --version             show the version
   -h, --help                show this help`;
 
