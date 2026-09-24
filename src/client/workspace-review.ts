@@ -858,6 +858,30 @@ export async function openLinkedWorkspaceFile(
 	focusAfterOpen(() => workspaceFiles.focusEditor());
 }
 
+/**
+ * Reveals a linked directory in the Files view (used in remote mode, where
+ * there is no host desktop to open a folder on). When the directory isn't
+ * part of this workspace's tree, shows a native pi-ui notice dialog (the same
+ * one used elsewhere in this module) rather than telling the caller to fall
+ * back to a browser `alert()`.
+ */
+export async function openLinkedWorkspaceDirectory(
+	path: string,
+	linkedWorkspacePath: string,
+): Promise<void> {
+	if (linkedWorkspacePath !== workspacePath)
+		throw new Error("The workspace changed. Open the file link again.");
+	visibility.open();
+	setPanelMode("files");
+	const revealed = await workspaceFiles.revealPath(path);
+	if (!revealed) {
+		await workspaceFiles.requestNotice(
+			"Folder is outside the workspace",
+			`This folder can't be shown here because it's outside the workspace: ${path}`,
+		);
+	}
+}
+
 function focusFiles(): void {
 	visibility.open();
 	setPanelMode("files");

@@ -4,6 +4,7 @@ import { detectSupportedImageMimeTypeFromFile } from "@earendil-works/pi-coding-
 
 import { openBrowser } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/utils/open-browser.js";
 import { fileUriToPath } from "../../../static/file-uri.js";
+import { isRemoteMode } from "../../remote-mode.ts";
 import { renderFilePickerResults } from "../../ui/pickers.tsx";
 import { readActionSignals, requiredString, stringField } from "../action-input.ts";
 import { datastarResponse } from "../datastar.ts";
@@ -65,6 +66,17 @@ async function openLinkedFile(
 			: relativePath;
 	const target = await resolvePath(workspacePath, filePath);
 	if (target.info.isDirectory()) {
+		// Opening a folder on the server's desktop only makes sense when
+		// someone is sitting at that desktop. In remote mode, hand the path
+		// back so the client can reveal it in pi-ui's own Files view instead.
+		if (isRemoteMode()) {
+			return Response.json({
+				opened: false,
+				directory: true,
+				path: filePath,
+				workspacePath,
+			});
+		}
 		openBrowser(target.path);
 		return Response.json({ opened: true });
 	}
