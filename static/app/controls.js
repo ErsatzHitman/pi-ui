@@ -64,10 +64,13 @@ function commandItems(menu) {
 	);
 }
 
-function visibleCommandItems(command) {
+/** Items the user can actually see: not `hidden` themselves and not inside a `hidden`
+ * group (the model picker hides whole provider groups, not their rows), so a refresh
+ * never marks an invisible row `.active` for Enter to pick. */
+export function visibleCommandItems(command) {
 	const { menu } = commandParts(command);
 	if (!(menu instanceof HTMLElement)) return [];
-	return commandItems(menu).filter((item) => !item.hidden);
+	return commandItems(menu).filter((item) => !item.closest("[hidden]"));
 }
 
 function refreshCommand(command) {
