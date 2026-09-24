@@ -171,7 +171,16 @@ function cancelFooter(): string {
 }
 
 function cancelCurrentAction(): string {
-	return postResponse("$extensionRequestId", "''", true);
+	// A native `<dialog>` fires its own "close" event both for a user closing
+	// it (Escape, `closedby="any"`, the Cancel button's `command="close"`) AND
+	// for the server's own `dialog.close()` script that closes this dialog on
+	// every OTHER client once one of them answers (`ui-renderer.ts`'s
+	// `pickerEffectScripts`) — indistinguishable at this event. That broadcast
+	// patches signals (clearing `extensionRequestId`) before running the close
+	// script, so an unconditional post here raced a real 400 out of the
+	// losing client (round RM2 multi-client #1, live-verified with two real
+	// clients). Only post when a request is still actually live.
+	return `if ($extensionRequestId) { ${postResponse("$extensionRequestId", "''", true)} }`;
 }
 
 function responseAction(id: string, value: string, expression = false): string {

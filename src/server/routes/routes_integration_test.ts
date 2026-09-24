@@ -888,6 +888,24 @@ test("auth prompt input rejects a malformed client id without reaching the runti
 	assertEquals(called, false);
 });
 
+test("a losing auth prompt input POST does not error visibly (RM2 multi-client)", async () => {
+	// `submitAuthInput` returns false when there is no active dialog to answer:
+	// someone else already answered it, the same race `/extensions/ui/respond`
+	// (above) resolves by ignoring its host call's return value entirely, not a
+	// client error. The losing tab must see a plain 204, the same as a winning
+	// submission, so it can show "Answered on another device" instead of an
+	// error toast.
+	const host = fakeHost({
+		submitAuthInput: () => false,
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest(endpoints.authInput, { authInput: "secret" }),
+	);
+
+	assertEquals(result.status, 204);
+});
+
 test("extension UI actions route to the active extension's pi_ui_event handler", async () => {
 	let dispatched: unknown;
 	const host = fakeHost({

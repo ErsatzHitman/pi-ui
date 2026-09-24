@@ -49,9 +49,13 @@ export const authRoutes = {
 			if (clientId !== undefined && !isDisplayClientId(clientId)) {
 				throw new ActionInputError("Invalid clientId.");
 			}
-			if (!requireHost(context).submitAuthInput(input, clientId)) {
-				throw new RouteError(409, "Authentication input was not accepted.");
-			}
+			// A `false` return means there was no active dialog to answer — most
+			// often another client already submitted it a moment earlier. That is
+			// not this client's error: like `extensions/ui/respond` above, the
+			// losing POST gets a plain 204, not a visible failure (round RM2
+			// multi-client #1). `AuthController.submitInput` has already told the
+			// winning client(s) via `notifyOtherClients`.
+			requireHost(context).submitAuthInput(input, clientId);
 			return datastarResponse();
 		},
 	},
