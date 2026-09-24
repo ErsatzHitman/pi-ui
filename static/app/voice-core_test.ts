@@ -11,6 +11,7 @@ import {
 	extensionForMime,
 	formatElapsed,
 	insertTranscript,
+	isRetryableUploadFailure,
 	isVoicedFrame,
 	LEVEL_TUNING,
 	LevelMeter,
@@ -70,6 +71,26 @@ test("blockedReason detects insecure context, missing MediaRecorder, and no-key"
 	assertEquals(blockedReason({ ...base, hasMediaRecorder: false }), "unsupported");
 	assertEquals(blockedReason({ ...base, voiceStatus: "no-key" }), "no-key");
 	assertEquals(blockedReason({ ...base, voiceStatus: "ready" }), "");
+});
+
+test("isRetryableUploadFailure lets a voice error code decide, else any 5xx", () => {
+	for (const code of [
+		"busy",
+		"rate-limited",
+		"provider-error",
+		"provider-timeout",
+		"provider-unreachable",
+	]) {
+		assert(isRetryableUploadFailure({ status: 502, code }), code);
+	}
+	assertFalse(isRetryableUploadFailure({ status: 502, code: "provider-unauthorized" }));
+	assertFalse(isRetryableUploadFailure({ status: 502, code: "provider-rejected" }));
+	assertFalse(isRetryableUploadFailure({ status: 503, code: "not-configured" }));
+	assertFalse(isRetryableUploadFailure({ status: 400, code: "invalid-audio" }));
+	// Generic route errors carry a message, not a voice code, in `error`.
+	assert(isRetryableUploadFailure({ status: 500, code: "Something broke." }));
+	assert(isRetryableUploadFailure({ status: 500, code: undefined }));
+	assertFalse(isRetryableUploadFailure({ status: 404, code: "Not found." }));
 });
 
 test("levelFromSamples: all-zero samples give zero RMS, a loud sine gives a high RMS", () => {

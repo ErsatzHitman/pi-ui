@@ -14,6 +14,7 @@ import {
 	extensionForMime,
 	formatElapsed,
 	insertTranscript,
+	isRetryableUploadFailure,
 	LevelMeter,
 	pickMimeType,
 	SpeechGate,
@@ -27,14 +28,6 @@ const ARMING_READY_FALLBACK_MS = 1500;
 const ARMING_PERMISSION_HINT_MS = 600;
 const NO_AUDIO_HINT_MS = 4000;
 const MAX_DURATION_WARNING_MS = 15_000;
-
-const RETRYABLE_CODES = new Set([
-	"busy",
-	"rate-limited",
-	"provider-error",
-	"provider-timeout",
-	"provider-unreachable",
-]);
 
 const MEDIA_ERROR_MESSAGES = {
 	"permission-denied":
@@ -371,6 +364,7 @@ function setUpObservers() {
 }
 
 async function start() {
+	if (voiceDisabled()) return;
 	if (blocked) {
 		showBlockedExplanation();
 		return;
@@ -628,7 +622,7 @@ function handleUploadFailure(result) {
 		return;
 	}
 	if (result.kind === "aborted") return;
-	const retryable = RETRYABLE_CODES.has(result.code) || result.status >= 500;
+	const retryable = isRetryableUploadFailure(result);
 	if (result.message) {
 		showError(result.message, { retryable });
 	} else {
@@ -724,7 +718,14 @@ async function retry() {
 	await uploadAndInsert({ blob, mimeType, activeMs, session: mySession });
 }
 
+/** The server config turned voice input off (`voice.enabled: false`); the mic button is hidden
+ * by CSS, and programmatic entry points (API, keybind) do nothing. */
+function voiceDisabled() {
+	return document.body?.dataset.voiceStatus === "disabled";
+}
+
 function toggle() {
+	if (voiceDisabled()) return;
 	if (blocked) {
 		showBlockedExplanation();
 		return;

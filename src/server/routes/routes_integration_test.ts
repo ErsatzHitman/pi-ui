@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import type { Jsonifiable } from "@starfederation/datastar-sdk/types";
 
 import { assertEquals, assertStringIncludes } from "#testing/assertions";
+import { startFakeGroqServer } from "#testing/fake-groq-server";
 import { makeTempDir, makeTempFile } from "#testing/temp";
 
 import { getToolPath } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/utils/tools-manager.js";
@@ -18,7 +19,13 @@ import { DatastarClientHub } from "../datastar-client-hub.ts";
 import { executeRoute } from "../route.ts";
 import { appRoutes } from "../routes.ts";
 import { SessionImageStore } from "../session-image-store.ts";
-import type { VoiceService, VoiceTranscribeResult } from "../voice/voice-service.ts";
+import { createGroqTranscriber } from "../voice/groq-transcriber.ts";
+import { defaultVoiceConfig } from "../voice/voice-config.ts";
+import {
+	createVoiceService,
+	type VoiceService,
+	type VoiceTranscribeResult,
+} from "../voice/voice-service.ts";
 import type { RouteContext, RuntimeResource } from "./context.ts";
 import { endpoints, filesPreviewBase, filePreviewUrl } from "./endpoints.ts";
 import { fileRoutes } from "./files.ts";
@@ -1853,6 +1860,60 @@ test("the page embeds the voice status, endpoint and max-seconds as body data at
 	assertStringIncludes(html, 'data-voice-endpoint="/voice/transcribe"');
 	assertStringIncludes(html, 'data-voice-status="ready"');
 	assertStringIncludes(html, 'data-voice-max-seconds="300"');
+});
+
+test("the page tells the client when the server has no Groq key or voice is disabled", async () => {
+	for (const status of ["no-key", "disabled"] as const) {
+		const context = fakeContext({
+			voice: fakeVoiceService({ status: () => ({ status, maxSeconds: 120 }) }),
+		});
+		context.renderer = new UiRenderer(context.store, new DatastarClientHub());
+		const response = await createRouter(context).fetch(
+			new Request("http://localhost/"),
+		);
+		const html = await response.text();
+		assertStringIncludes(html, `data-voice-status="${status}"`);
+		assertStringIncludes(html, 'data-voice-max-seconds="120"');
+	}
+});
+
+test("a browser-shaped recording flows through the real voice service and Groq client", async () => {
+	// Exactly what static/app/voice.js uploadBlob() sends: a Blob typed with the
+	// MediaRecorder mime (codecs parameter included), named voice.<ext>, plus
+	// the active duration. Everything past the route is real except Groq itself.
+	const groq = startFakeGroqServer();
+	try {
+		const voice = createVoiceService({
+			config: { ...defaultVoiceConfig, baseUrl: groq.url },
+			resolveKey: () => "test-key",
+			transcriber: createGroqTranscriber({ appVersion: "test-version" }),
+		});
+		const formData = new FormData();
+		formData.set(
+			"audio",
+			new Blob([new Uint8Array(2048).fill(7)], { type: "audio/webm;codecs=opus" }),
+			"voice.webm",
+		);
+		formData.set("durationMs", "3200");
+		const response = await createRouter(fakeContext({ voice })).fetch(
+			new Request(`http://localhost${endpoints.voiceTranscribe}`, {
+				method: "POST",
+				body: formData,
+			}),
+		);
+		assertEquals(response.status, 200);
+		assertEquals(await response.json(), { text: "hello from the fake groq server" });
+		assertEquals(groq.requests.length, 1);
+		const [recorded] = groq.requests;
+		assertEquals(recorded?.authorization, "Bearer test-key");
+		assertEquals(recorded?.fields.model, "whisper-large-v3-turbo");
+		assertEquals(recorded?.fields.response_format, "json");
+		assertEquals(recorded?.fields.language, null);
+		assertEquals(recorded?.file?.name, "voice.webm");
+		assertEquals(recorded?.file?.size, 2048);
+	} finally {
+		groq.stop();
+	}
 });
 
 function voiceUploadRequest(

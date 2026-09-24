@@ -25,6 +25,11 @@
 	.prompt-voice-button[data-voice-blocked]:not([data-voice-blocked=""]) {
 		opacity: 0.5;
 	}
+
+	/* `voice.enabled: false` in the server config (page.tsx renders `data-voice-status`). */
+	body[data-voice-status="disabled"] .prompt-voice-button {
+		display: none;
+	}
 	.prompt-surface:not([data-voice-state="idle"]) .prompt-voice-button,
 	.prompt-surface:not([data-voice-state="idle"]) .prompt-file-button,
 	.prompt-surface:not([data-voice-state="idle"]) .prompt-shortcut-hint {

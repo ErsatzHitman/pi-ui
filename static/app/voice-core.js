@@ -58,6 +58,40 @@ export function blockedReason({
 	return "";
 }
 
+/** Every `error` code `POST /voice/transcribe` answers with (DESIGN-voice.md §7.1). */
+const VOICE_ERROR_CODES = new Set([
+	"disabled",
+	"not-configured",
+	"invalid-audio",
+	"too-large",
+	"too-long",
+	"busy",
+	"rate-limited",
+	"provider-unauthorized",
+	"provider-rejected",
+	"provider-error",
+	"provider-timeout",
+	"provider-unreachable",
+]);
+
+const RETRYABLE_VOICE_ERROR_CODES = new Set([
+	"busy",
+	"rate-limited",
+	"provider-error",
+	"provider-timeout",
+	"provider-unreachable",
+]);
+
+/**
+ * Whether a failed upload keeps its recording and offers Retry (§7.1). A voice error code
+ * decides on its own, so a 502 `provider-unauthorized` or a 503 `not-configured` is not
+ * retryable; only a generic route error (`{ error: <message> }`) falls back to "any 5xx".
+ */
+export function isRetryableUploadFailure({ status, code }) {
+	if (VOICE_ERROR_CODES.has(code)) return RETRYABLE_VOICE_ERROR_CODES.has(code);
+	return status >= 500;
+}
+
 const MIME_CANDIDATES = [
 	"audio/webm;codecs=opus",
 	"audio/ogg;codecs=opus",
