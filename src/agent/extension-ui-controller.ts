@@ -110,6 +110,12 @@ export type ExtensionUiControllerHooks = {
 	 * function runs once it settles.
 	 */
 	onCustomPrompt?: (capturing: boolean) => () => void;
+	/**
+	 * Mount extension `setFooter`/`setHeader` components as terminal surfaces
+	 * (`extensions.terminalChrome`, see `extensions-config.ts`). Off by default:
+	 * the calls are accepted and ignored, like RPC mode.
+	 */
+	terminalChrome?: boolean;
 };
 
 /** Bridges pi extension UI requests to backend-owned web state. */
@@ -278,7 +284,7 @@ export class ExtensionUiController {
 				this.store.setExtensionWidgets(this.#widgets.values().toArray());
 			},
 			setFooter: (factory) => {
-				if (!isActive()) return;
+				if (!isActive() || !this.hooks.terminalChrome) return;
 				if (!factory) {
 					if (this.#footerMounted)
 						this.#terminalSurfaces.dispose(footerSurfaceId);
@@ -295,7 +301,7 @@ export class ExtensionUiController {
 				});
 			},
 			setHeader: (factory) => {
-				if (!isActive()) return;
+				if (!isActive() || !this.hooks.terminalChrome) return;
 				if (!factory) {
 					if (this.#headerMounted)
 						this.#terminalSurfaces.dispose(headerSurfaceId);

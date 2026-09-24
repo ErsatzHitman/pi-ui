@@ -108,6 +108,16 @@ const schema = Type.Object(
 								"hatch.",
 						}),
 					),
+					terminalChrome: Type.Optional(
+						Type.Boolean({
+							default: defaultExtensionsConfig.terminalChrome,
+							description:
+								"Draw extension setHeader/setFooter components (TUI banners and " +
+								"terminal status lines) around the prompt. Off by default: pi-ui's " +
+								"own prompt footer already shows the workspace, extension " +
+								"statuses, model, thinking level and usage.",
+						}),
+					),
 				},
 				{
 					description: "How pi-ui binds pi SDK extensions.",

@@ -5,7 +5,7 @@ import { ensureTool } from "../../node_modules/@earendil-works/pi-coding-agent/d
 import { parseAutoTitleConfig, type AutoTitleConfig } from "../agent/auto-title.ts";
 import {
 	applyExtensionsHostMarker,
-	type ExtensionsMode,
+	type ExtensionsConfig,
 	parseExtensionsConfig,
 } from "../agent/extensions-config.ts";
 import { RuntimeController } from "../agent/runtime-controller.ts";
@@ -95,6 +95,7 @@ export async function createApp() {
 	const host = await RuntimeController.create(store, undefined, {
 		autoTitle,
 		extensionsMode: extensions.mode,
+		extensionsTerminalChrome: extensions.terminalChrome,
 		transitionController: transitions,
 		sendWebPush: (details, background) =>
 			pushService.notifySessionFinished(details, background),
@@ -127,14 +128,7 @@ export async function createApp() {
 		themeLab: process.env.PI_UI_THEME_LAB === "1",
 		serveStatic: (request) => staticAssets.serve(request),
 		openWorkspace: (path) =>
-			openWorkspace(
-				path,
-				store,
-				resources,
-				transitions,
-				autoTitle,
-				extensions.mode,
-			),
+			openWorkspace(path, store, resources, transitions, autoTitle, extensions),
 	};
 	let disposal: Promise<void> | undefined;
 	return {
@@ -160,7 +154,7 @@ async function openWorkspace(
 	resources: RouteResources,
 	transitions: SessionTransitionController,
 	autoTitle: AutoTitleConfig,
-	extensionsMode: ExtensionsMode,
+	extensions: ExtensionsConfig,
 ): Promise<boolean> {
 	const requestedPath = workspacePath.trim();
 	const transition = await transitions.run(
@@ -173,7 +167,8 @@ async function openWorkspace(
 			if (!resources.host) {
 				resources.host = await RuntimeController.create(store, realPath, {
 					autoTitle,
-					extensionsMode,
+					extensionsMode: extensions.mode,
+					extensionsTerminalChrome: extensions.terminalChrome,
 					refreshWorkspaces: false,
 					transitionController: transitions,
 				});

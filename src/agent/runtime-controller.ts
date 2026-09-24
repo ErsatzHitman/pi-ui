@@ -269,6 +269,8 @@ export type RuntimeControllerActivationOptions = {
 	 * runtime this controller creates, forks, resumes, or switches to. See
 	 * `extensions-config.ts`. Defaults to `"tui"`. */
 	extensionsMode?: ExtensionsMode;
+	/** Draw extension `setHeader`/`setFooter` components (`extensions.terminalChrome`). */
+	extensionsTerminalChrome?: boolean;
 };
 
 export class RuntimeController {
@@ -322,6 +324,7 @@ export class RuntimeController {
 			activationOptions.dependencies ?? runtimeControllerDependencies;
 		this.sessionDir = sessionDir;
 		this.extensionUi = new ExtensionUiController(state, {
+			terminalChrome: this.activationOptions.extensionsTerminalChrome === true,
 			// PIUI `channel` ops and the `pi.events` tap feed ONE channel store (the
 			// LiveWorkspaceController, published into `AppStore.extensionChannels`).
 			onChannel: (channel, payload) => {

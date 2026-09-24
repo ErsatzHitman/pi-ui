@@ -629,9 +629,30 @@ test("a custom() surface's real Theme reflects the client's reported color schem
 	assertEquals(defaultThemeName, "pi-ui-dark");
 });
 
-test("setWidget/setFooter/setHeader component factories mount persistent terminal surfaces", () => {
+test("extension setFooter/setHeader are accepted but not drawn by default", () => {
 	const store = new AppStore();
 	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	ui.setWidget("panel", () => staticComponent(["widget line"]) as never);
+	ui.setFooter(() => staticComponent(["footer line"]) as never);
+	ui.setHeader(() => staticComponent(["header line"]) as never);
+	assertEquals(
+		store.snapshot().terminalSurfaces.map((s) => s.kind),
+		["widget"],
+	);
+
+	ui.setFooter(undefined);
+	ui.setHeader(undefined);
+	assertEquals(
+		store.snapshot().terminalSurfaces.map((s) => s.kind),
+		["widget"],
+	);
+});
+
+test("setWidget/setFooter/setHeader component factories mount persistent terminal surfaces", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store, { terminalChrome: true });
 	const ui = controller.context(() => true, fakeRuntimeKey());
 
 	ui.setWidget("panel", () => staticComponent(["widget line"]) as never);

@@ -35,9 +35,21 @@ export type ExtensionsMode = "tui" | "rpc";
 
 export type ExtensionsConfig = Readonly<{
 	mode: ExtensionsMode;
+	/**
+	 * Draw extension `setHeader`/`setFooter` components (a TUI banner, a
+	 * terminal status line) as terminal surfaces around the prompt. Off by
+	 * default: they are terminal chrome that duplicates pi-ui's own prompt
+	 * footer (workspace, extension statuses, model, thinking, usage), and they
+	 * render as a foreign terminal block inside the prompt card. The calls are
+	 * still accepted, as RPC mode does, so extensions never see an error.
+	 */
+	terminalChrome: boolean;
 }>;
 
-export const defaultExtensionsConfig: ExtensionsConfig = { mode: "tui" };
+export const defaultExtensionsConfig: ExtensionsConfig = {
+	mode: "tui",
+	terminalChrome: false,
+};
 
 /** The env var extensions' `lib/bridge.ts` can check to keep their PIUI-bridge
  * (native HTML) path live even when pi-ui binds them as `"tui"`. Set once, before
@@ -50,7 +62,7 @@ export function parseExtensionsConfig(value: JsonValue | undefined): ExtensionsC
 		isString(value.mode) && isExtensionsMode(value.mode)
 			? value.mode
 			: defaultExtensionsConfig.mode;
-	return { mode };
+	return { mode, terminalChrome: value.terminalChrome === true };
 }
 
 function isExtensionsMode(value: string): value is ExtensionsMode {
