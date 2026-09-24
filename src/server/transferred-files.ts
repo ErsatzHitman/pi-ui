@@ -1,8 +1,50 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { isNotFound } from "../utils/fs-errors.ts";
+
+const TRANSFER_DIR_PREFIX = "pi-ui-transfers-";
+
+/**
+ * Removes `pi-ui-transfers-*` directories left behind by a previous process
+ * that crashed before it could dispose of its own store (a graceful shutdown
+ * always cleans up; see `TransferredFileStore.dispose`). Only directories
+ * older than this process's own start time are touched, so a directory a
+ * concurrent pi-ui instance is actively using is never raced. Ownership is
+ * checked where the platform reports it (POSIX `uid`), so one user's server
+ * never removes another's leftovers on a shared host. Best-effort: any
+ * failure here must never stop the server from starting.
+ */
+export async function cleanupStaleTransferDirs(
+	tempRoot: string = tmpdir(),
+): Promise<void> {
+	const cutoff = Date.now() - process.uptime() * 1000;
+	const ourUid = process.getuid?.();
+	let entries: string[];
+	try {
+		entries = await readdir(tempRoot);
+	} catch {
+		return;
+	}
+	await Promise.all(
+		entries
+			.filter((name) => name.startsWith(TRANSFER_DIR_PREFIX))
+			.map(async (name) => {
+				const path = join(tempRoot, name);
+				try {
+					const info = await stat(path);
+					if (!info.isDirectory()) return;
+					if (info.mtimeMs >= cutoff) return;
+					if (ourUid !== undefined && info.uid !== ourUid) return;
+					await rm(path, { recursive: true, force: true });
+				} catch (error) {
+					if (isNotFound(error)) return;
+					// Best-effort: leave anything we can't inspect or remove alone.
+				}
+			}),
+	);
+}
 
 export const MAX_TRANSFER_FILES = 10;
 export const MAX_TRANSFER_FILE_BYTES = 20 * 1024 * 1024;
@@ -107,9 +149,9 @@ export class TransferredFileStore {
 	static async create(
 		options: { tempRoot?: string } = {},
 	): Promise<TransferredFileStore> {
-		const rootPath = await mkdtemp(
-			join(options.tempRoot ?? tmpdir(), "pi-ui-transfers-"),
-		);
+		const tempRoot = options.tempRoot ?? tmpdir();
+		await cleanupStaleTransferDirs(tempRoot);
+		const rootPath = await mkdtemp(join(tempRoot, TRANSFER_DIR_PREFIX));
 		return new TransferredFileStore(rootPath);
 	}
 

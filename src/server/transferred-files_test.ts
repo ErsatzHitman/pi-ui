@@ -1,11 +1,12 @@
 import { test } from "bun:test";
-import { readdir, rm, stat } from "node:fs/promises";
-import { sep } from "node:path";
+import { mkdir, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { join, sep } from "node:path";
 
 import { assert, assertEquals, assertRejects } from "#testing/assertions";
 import { makeTempDir } from "#testing/temp";
 
 import {
+	cleanupStaleTransferDirs,
 	MAX_TRANSFER_FILES,
 	MAX_TRANSFER_FILE_BYTES,
 	MAX_TRANSFER_REQUEST_BYTES,
@@ -176,6 +177,62 @@ test("store disposal is idempotent and scoped to its owned root", async () => {
 
 		await stat(sibling);
 		await assertRejects(() => stat(store.rootPath));
+	});
+});
+
+test("stale transfer dirs from a crashed process are removed, fresh and unrelated entries are kept", async () => {
+	await withTempRoot(async (tempRoot) => {
+		const stalePath = join(tempRoot, "pi-ui-transfers-stale");
+		const freshPath = join(tempRoot, "pi-ui-transfers-fresh");
+		const unrelatedDir = join(tempRoot, "some-other-dir");
+		const nonDirEntry = join(tempRoot, "pi-ui-transfers-not-a-dir");
+		await mkdir(stalePath);
+		await Bun.write(join(stalePath, "leftover.txt"), "leftover");
+		await mkdir(freshPath);
+		await mkdir(unrelatedDir);
+		await writeFile(nonDirEntry, "not a directory");
+
+		// Back-date the stale directory well before this process started.
+		const longAgo = new Date(Date.now() - 1_000_000_000);
+		await utimes(stalePath, longAgo, longAgo);
+
+		await cleanupStaleTransferDirs(tempRoot);
+
+		const remaining = new Set(await readdir(tempRoot));
+		assert(!remaining.has("pi-ui-transfers-stale"), "Expected the stale dir removed");
+		assert(remaining.has("pi-ui-transfers-fresh"), "Expected the fresh dir kept");
+		assert(remaining.has("some-other-dir"), "Expected the unrelated dir kept");
+		assert(
+			remaining.has("pi-ui-transfers-not-a-dir"),
+			"Expected the non-directory kept",
+		);
+	});
+});
+
+test("cleanup tolerates a missing temp root", async () => {
+	await withTempRoot(async (tempRoot) => {
+		await rm(tempRoot, { recursive: true, force: true });
+		await cleanupStaleTransferDirs(tempRoot);
+	});
+});
+
+test("creating a store cleans up stale sibling transfer dirs first", async () => {
+	await withTempRoot(async (tempRoot) => {
+		const stalePath = join(tempRoot, "pi-ui-transfers-stale");
+		await mkdir(stalePath);
+		const longAgo = new Date(Date.now() - 1_000_000_000);
+		await utimes(stalePath, longAgo, longAgo);
+
+		const store = await TransferredFileStore.create({ tempRoot });
+		try {
+			const remaining = await readdir(tempRoot);
+			assert(
+				!remaining.includes("pi-ui-transfers-stale"),
+				"Expected the stale dir removed on startup",
+			);
+		} finally {
+			await store.dispose();
+		}
 	});
 });
 
