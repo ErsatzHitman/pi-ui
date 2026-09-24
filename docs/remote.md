@@ -7,9 +7,9 @@ over HTTPS. No new protocol, no separate agent to deploy.
 
 ```
  Web browser ─────────┐
-                       │  HTTPS (one origin; token cookie or Bearer)
- Android (browser, or ─┤  • POST /…      client → server (prompts, actions, dialog answers)
-  the Capacitor app)   │  • GET  /stream  SSE server → client (all live UI)
+  (desktop or phone,  │  HTTPS (one origin; token cookie or Bearer)
+  installable as a ───┤  • POST /…      client → server (prompts, actions, dialog answers)
+  PWA — see below)     │  • GET  /stream  SSE server → client (all live UI)
                        ▼
       ┌──────────── TLS + network gate ─────────────┐
       │ Tailscale (recommended) │ CF Tunnel+Access │ Caddy+LE │
@@ -17,7 +17,7 @@ over HTTPS. No new protocol, no separate agent to deploy.
                               │ plain HTTP, loopback / tailnet only
  ┌────────────────────────────▼──── remote host (VPS / home server / spare laptop) ─┐
  │ pi-ui server (this repo's Bun server, `--remote`, systemd or Docker)             │
- │   auth gate → REST routes + /stream (SSE) → your browser/Android client          │
+ │   auth gate → REST routes + /stream (SSE) → your browser/PWA client             │
  │   pi SDK in-process: sessions, tools (bash, fs, git), provider calls             │
  │ Disk: ~/.pi/agent/{sessions/*.jsonl, auth.json, settings.json, extensions/},     │
  │       ~/.config/pi-ui/config.json, your repo checkout(s)                        │
@@ -219,8 +219,44 @@ Two things to know:
   client sets it, so opening pi-ui on your phone while your desktop has one open will
   narrow the desktop's view too.
 
-## Android
+## Install as an app (PWA)
 
-See the [main README](../README.md) once the Capacitor app ships (tracked separately) —
-until then, pi-ui's web UI is fully usable from a phone browser over whichever network
-path you picked above.
+pi-ui is a web app on purpose — no separate Android app, no app store. Every browser
+below can install it as a standalone app instead: same origin, same cookie, same
+`/stream`, just its own window/icon and no address bar.
+
+- **Android Chrome.** Open your pi-ui URL, then menu (⋮) → **Install app** (or Chrome
+  offers it itself after a visit or two). It gets a home-screen icon and its own task in
+  the app switcher.
+- **Desktop Chrome or Edge.** The address bar shows an install icon; or menu → **Install
+  pi-ui…**. It opens as a normal windowed app.
+- **iOS/iPadOS Safari.** Share icon → **Add to Home Screen**. Safari does not show a
+  browser-native install prompt for this the way Chrome does, but the result is the same
+  kind of standalone app.
+
+### Push notifications
+
+The "Notify on completion" bell (in the Live Workspace pane) covers two cases:
+
+- **A tab is open** (foreground or a hidden background tab): you get a normal in-page Web
+  Notification, same as running locally.
+- **No tab is open at all** — the installed PWA is closed, or you never opened one: a
+  background session finishing instead sends a **Web Push** notification, which opens or
+  focuses the app when tapped. This only ever fires when no tab is connected, so you never
+  get the same notification twice.
+
+Requirements:
+
+- Push only activates in remote mode; running locally never registers a push
+  subscription (there'd be nothing useful to reach).
+- **iOS/iPadOS**: Safari only delivers Web Push to an **installed** PWA (Add to Home
+  Screen first) — it does not support push for an ordinary browser tab.
+- Grant the browser's notification permission when the bell toggle asks for it (a
+  permission prompt only ever appears from that click, never on page load).
+- The subscription is tied to that browser/device; installing on a second device (or
+  reinstalling) registers its own subscription, so completions reach every device you've
+  opted in on.
+
+Nothing here is cached for offline use — pi-ui always needs a live connection to its
+server. If the connection drops, the installed app shows a small "Can't reach your pi-ui
+server" page instead of the browser's own offline error, and retries automatically.

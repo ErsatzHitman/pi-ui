@@ -17,7 +17,23 @@ import { endpoints } from "./routes/endpoints.ts";
 const cookieName = "pi_ui_token";
 const cookieMaxAgeSeconds = 60 * 60 * 24 * 30;
 
-const publicAssetPaths = new Set(["/app.css", "/theme.js", "/favicon.svg"]);
+const publicAssetPaths = new Set([
+	"/app.css",
+	"/theme.js",
+	"/favicon.svg",
+	// The PWA manifest and its icons (round RM2 "pwa"): a browser's install-prompt
+	// machinery fetches these with no cookie (and the login page below links them too,
+	// for the same reason — see `login-page.tsx`), so they must be reachable
+	// unauthenticated. None of them carry user data.
+	"/manifest.webmanifest",
+	"/icon-180.png",
+	"/icon-192.png",
+	"/icon-512.png",
+	// The service worker's offline fallback page (round RM2 "pwa"): it must cache
+	// the real page, not a 401 login page, at install time — see
+	// `service-worker-script.ts` and `offline.html`. No user data either.
+	"/offline.html",
+]);
 
 /** The app's own front-end bundle: no user data, safe to serve to a browser with no
  * cookie yet — it's what the login page itself is built from. Everything else stays

@@ -35,6 +35,8 @@ import {
 } from "./pickers.js";
 import { createPromptHistory } from "./prompt-history.js";
 import { focusPromptEnd, setPromptValue } from "./prompt.js";
+import { bindPushOptIn } from "./push.js";
+import { registerServiceWorker } from "./service-worker.js";
 import {
 	readTransitionState,
 	startSessionPerformanceMeasurement,
@@ -117,6 +119,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 	bindTerminalSurfaces();
 	bindExtensionKeys();
 	bindDebugFps();
+	const serviceWorkerReady = registerServiceWorker();
 
 	await Promise.all([
 		import("../../src/client/fonts.ts"),
@@ -124,6 +127,12 @@ window.addEventListener("DOMContentLoaded", async () => {
 		import("../../src/client/workspace-review.ts"),
 		import("../../src/client/live-workspace.ts"),
 	]);
+
+	// After live-workspace.ts (above) has set `window.piUi.liveWorkspace`, whose
+	// `notificationsOptedIn()` this reads to sync a returning visitor's already-on
+	// preference, not just a fresh click of the bell toggle.
+	await serviceWorkerReady;
+	bindPushOptIn();
 });
 
 function bindDebugFps() {

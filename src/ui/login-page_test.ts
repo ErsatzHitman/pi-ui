@@ -60,6 +60,12 @@ test("the login page reuses the app's real stylesheet, theme script, and native 
 	assertStringIncludes(html, 'name="theme-color"');
 });
 
+test("the login page links the PWA manifest and icons, so it's installable before signing in", () => {
+	const html = renderLoginPage({ next: "/", loginPath: "/session/login" });
+	assertStringIncludes(html, 'rel="manifest" href="/manifest.webmanifest"');
+	assertStringIncludes(html, 'rel="apple-touch-icon" href="/icon-180.png"');
+});
+
 test("the login page starts with a doctype", () => {
 	const html = renderLoginPage({ next: "/", loginPath: "/session/login" });
 	assertEquals(html.startsWith("<!doctype html>"), true);

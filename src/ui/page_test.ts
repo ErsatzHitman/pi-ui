@@ -110,3 +110,19 @@ test("in remote mode the SSE stream stays open while the tab is hidden", () => {
 		setRemoteMode(false);
 	}
 });
+
+test("exposes remote mode and the VAPID public key to static/app/push.js as body data attributes", () => {
+	const withKey = renderPage(
+		{ ...appRenderSnapshot({}), messages: [] },
+		{ pushPublicKey: "abc123" },
+	);
+	assertStringIncludes(withKey, 'data-push-public-key="abc123"');
+	assertFalse(withKey.includes("data-remote-mode"));
+
+	setRemoteMode(true);
+	try {
+		assertStringIncludes(renderSidebarPage(), "data-remote-mode");
+	} finally {
+		setRemoteMode(false);
+	}
+});

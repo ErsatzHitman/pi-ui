@@ -118,6 +118,19 @@ test("pi-ui's own CSS, theme script, and favicon are served with no token at all
 	}
 });
 
+test("the PWA manifest, its icons, and the offline fallback page are served with no token, so an install prompt and a precache can fetch them", () => {
+	for (const path of [
+		"/manifest.webmanifest",
+		"/icon-180.png",
+		"/icon-192.png",
+		"/icon-512.png",
+		"/offline.html",
+	]) {
+		const result = checkAuthToken(new Request(`http://localhost${path}`), token);
+		assertEquals(result.ok, true);
+	}
+});
+
 test("an unauthenticated API-style request still gets a plain-text 401, not the login page", async () => {
 	const result = checkAuthToken(
 		new Request("http://localhost/", { headers: { accept: "application/json" } }),

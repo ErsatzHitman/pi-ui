@@ -47,6 +47,10 @@ export type PageRenderOptions = {
 	toolOutputHidden?: boolean;
 	toolbarHidden?: boolean;
 	themeLab?: boolean;
+	/** Raw VAPID public key (base64url) for `static/app/push.js`'s
+	 * `PushManager.subscribe`. Omitted (rather than a magic empty string) when
+	 * a caller — a test, mainly — doesn't care about push. */
+	pushPublicKey?: string;
 };
 
 export function renderPage(
@@ -60,6 +64,7 @@ export function renderPage(
 		toolOutputHidden = false,
 		toolbarHidden = false,
 		themeLab = false,
+		pushPublicKey,
 	}: PageRenderOptions = {},
 ): string {
 	const staticBase = `/static/${appVersion}`;
@@ -147,6 +152,8 @@ export function renderPage(
 					data-attr:data-code-theme-light="$_codeThemeLight"
 					data-attr:data-code-theme-dark="$_codeThemeDark"
 					data-toolbar-hidden={toolbarHidden}
+					data-remote-mode={isRemoteMode()}
+					data-push-public-key={pushPublicKey}
 					data-signals={initialSignals}
 					data-signals:_minimal-mode__ifmissing={minimalMode ? "true" : "false"}
 					data-signals:_tool-output-hidden__ifmissing={
