@@ -617,6 +617,57 @@ test("the prompt-column hint is measured from #prompt-box's own padded width", (
 	}
 });
 
+test("the prompt-column hint subtracts a surface's own chrome and a scrollbar gutter", () => {
+	const box = new FakeGridElement({ width: 0, height: 0 });
+	box.clientWidth = 900;
+	box.computedStyle = { paddingInlineStart: "0px", paddingInlineEnd: "0px" };
+	const appended: string[] = [];
+	let removed = 0;
+	const host = {
+		appendChild: (el: { className: string }) => appended.push(el.className),
+	};
+	const element = (tag: string) => ({
+		className: "",
+		style: { cssText: "" },
+		// The replica body: the surface's grid border and the body's own box sit inside the host.
+		clientWidth: tag === "pre" ? 780 : 0,
+		computedStyle:
+			tag === "pre" ? { paddingInlineStart: "10px", paddingInlineEnd: "10px" } : {},
+		setAttribute() {},
+		appendChild() {},
+		remove: () => {
+			removed += 1;
+		},
+	});
+	const restore = patchGlobal("document", {
+		documentElement: { computedStyle: {} },
+		getElementById: (id: string) =>
+			id === "prompt-box"
+				? box
+				: id === "terminal-surface-persistent"
+					? { parentElement: host }
+					: undefined,
+		createElement: element,
+	});
+	const restoreStyle = patchGlobal(
+		"getComputedStyle",
+		(el: { computedStyle?: Record<string, string> }) => ({
+			...el.computedStyle,
+			getPropertyValue: (name: string) =>
+				name === "--terminal-scrollbar-size" ? "15px" : "",
+		}),
+	);
+	try {
+		// (780 - 20 padding - 15 gutter) px / 7px cells = 106 cols, not the box's 900 / 7 = 128.
+		assertEquals(measurePromptColumnCells({ width: 7, height: 14 }), 106);
+		assertEquals(appended, ["terminal-surface terminal-surface-widget"]);
+		assertEquals(removed, 1);
+	} finally {
+		restore();
+		restoreStyle();
+	}
+});
+
 test("the prompt-column hint is undefined before #prompt-box exists in the DOM", () => {
 	const restore = patchGlobal("document", { getElementById: () => undefined });
 	try {

@@ -197,13 +197,55 @@ function measureCell() {
  * the viewport, so on a phone that gap alone was a further ~150ms of first-paint overflow after
  * the Round 6 fix (see `r6-audit.md`'s open item, and `TerminalSurfaceController`'s use of this
  * hint). `undefined` before `#prompt-box` exists in the DOM (there is no column to measure yet).
+ *
+ * A surface's cells start inside its own chrome (the grid's border, the body's padding) and
+ * beside the scrollbar `#terminal-surface-persistent` shows once it overflows, so the box's own
+ * width over-seeded every prompt-column surface by about six cells: a ~150ms first-paint
+ * overflow at every viewport width (R7 final audit). The width is therefore measured from a
+ * replica of a surface where one would mount, less a scrollbar gutter, falling back to the
+ * box's own width when that host isn't in the DOM. Too narrow by a cell or two only means a
+ * surface grows once its own resize report lands; too wide means it overflows until then.
  */
 export function measurePromptColumnCells(cell) {
 	const box = document.getElementById("prompt-box");
 	if (!box) return undefined;
-	const width = box.clientWidth - inlinePadding(box);
+	const width = measurePromptSurfaceWidth() ?? box.clientWidth - inlinePadding(box);
 	if (!(width > 0)) return undefined;
 	return Math.max(20, Math.floor(width / cell.width));
+}
+
+/** The px width a prompt-column surface's cells get, from a short-lived, invisible replica of
+ * `renderTerminalSurfaceBlock`'s nesting inside the persistent surfaces' own parent. */
+function measurePromptSurfaceWidth() {
+	const host = document.getElementById("terminal-surface-persistent")?.parentElement;
+	if (!host) return undefined;
+	let surface;
+	try {
+		surface = document.createElement("div");
+		surface.className = "terminal-surface terminal-surface-widget";
+		surface.setAttribute("aria-hidden", "true");
+		surface.style.cssText =
+			"visibility:hidden;pointer-events:none;height:0;overflow:hidden;margin:0;";
+		const grid = document.createElement("div");
+		grid.className = "terminal-surface-grid";
+		const body = document.createElement("pre");
+		body.className = "terminal-surface-body";
+		grid.appendChild(body);
+		surface.appendChild(grid);
+		host.appendChild(surface);
+		const scrollbar =
+			Number.parseFloat(
+				getComputedStyle(document.documentElement).getPropertyValue(
+					"--terminal-scrollbar-size",
+				),
+			) || 0;
+		const width = body.clientWidth - inlinePadding(body) - scrollbar;
+		return width > 0 ? width : undefined;
+	} catch {
+		return undefined;
+	} finally {
+		surface?.remove();
+	}
 }
 
 /**

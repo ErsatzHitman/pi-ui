@@ -401,7 +401,7 @@ test("a new percentage-width overlay uses the client's chrome-adjusted hint inst
 	controller.disposeAll();
 });
 
-test("a fixed-width overlay ignores the chrome-adjusted percentage hint", async () => {
+test("a fixed-width overlay is also seeded from the chrome-adjusted hint", async () => {
 	const controller = new TerminalSurfaceController({
 		onUpdate: () => {},
 		viewportHint: () => ({ columns: 180, rows: 50, overlayPercentColumns: 158 }),
@@ -414,9 +414,10 @@ test("a fixed-width overlay ignores the chrome-adjusted percentage hint", async 
 		factory: () => staticComponent(["fixed"]),
 	});
 	await flush();
-	// A fixed-width overlay's initial grid still spans the raw viewport (only the *resolved*
-	// component width is 60 — `TuiShim.render` clamps `options.width` to the surface it's given).
-	assertEquals(controller.snapshot()[0]?.cols, 180);
+	// No dialog can show more cells than the viewport less its chrome, so the initial grid is
+	// that (the *resolved* component width stays 60 — `TuiShim.render` clamps `options.width`
+	// to the surface it's given). On a phone, the raw viewport let the panel overflow the sheet.
+	assertEquals(controller.snapshot()[0]?.cols, 158);
 	controller.disposeAll();
 });
 

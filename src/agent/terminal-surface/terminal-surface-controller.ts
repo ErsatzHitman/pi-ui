@@ -445,18 +445,13 @@ export class TerminalSurfaceController {
 		let hintColumns = hint?.columns;
 		if (hint) {
 			if (params.overlay) {
-				// R7-B item 3: a percentage-width overlay resolves its `N%` against this mount's
-				// initial terminal width, and the raw whole-viewport hint overshoots that by the
-				// dialog's own fixed chrome a real client resize report later subtracts
-				// (`percentOverlayAvailableWidth` in `terminal-keys.js`) — about 5% at common
-				// widths. Peeking at the not-yet-mounted overlay's own options (safe: already
-				// exception-guarded inside `overlayOptionsResolver`, and read again every commit
-				// regardless) lets this use the chrome-adjusted hint only for that case; a
-				// fixed-width or unsized overlay still spans the raw viewport, same as before.
-				if (
-					hint.overlayPercentColumns !== undefined &&
-					isPercentOverlayWidth(params.overlayOptionsResolver?.())
-				) {
+				// No overlay can have more cells than the viewport less the dialog's own fixed
+				// chrome (`overlayPercentColumns`, mirroring `percentOverlayAvailableWidth` in
+				// `terminal-keys.js`), so that seeds every overlay when a client reported it. The
+				// raw viewport hint overshot a percentage overlay by about 5% (R7-B item 3), and
+				// let a fixed-width or unsized overlay (an MCP panel) first paint wider than a
+				// phone sheet can show: 55px of overflow for ~150ms at 390px (R7 final audit).
+				if (hint.overlayPercentColumns !== undefined) {
 					hintColumns = hint.overlayPercentColumns;
 				}
 			} else {
@@ -579,11 +574,6 @@ export function resolveOverlayOptions(
 		}
 	}
 	return overlayOptions;
-}
-
-/** Whether a (already-resolved) `OverlayOptions.width` is a `N%` string — see `#create`'s use. */
-function isPercentOverlayWidth(options: OverlayOptions | undefined): boolean {
-	return isString(options?.width) && /^\d+(?:\.\d+)?%$/.test(options.width);
 }
 
 function toTerminalSurfaceOverlayOptions(
