@@ -1546,8 +1546,8 @@ export class RuntimeController {
 		return this.auth.startLogin(providerId, authType);
 	}
 
-	submitAuthInput(value: string): boolean {
-		return this.auth.submitInput(value);
+	submitAuthInput(value: string, clientId?: string): boolean {
+		return this.auth.submitInput(value, clientId);
 	}
 
 	logout(providerId: string): boolean {
@@ -1574,8 +1574,9 @@ export class RuntimeController {
 		requestId: string,
 		response: string | undefined,
 		cancelled: boolean,
+		clientId?: string,
 	): boolean {
-		return this.extensionUi.respond(requestId, response, cancelled);
+		return this.extensionUi.respond(requestId, response, cancelled, clientId);
 	}
 
 	/** Routes a raw terminal byte sequence to a mounted terminal surface. */

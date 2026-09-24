@@ -805,6 +805,107 @@ test("extension UI responses return to the active agent backend", async () => {
 	});
 });
 
+test("extension UI responses forward the answering client's id (RM1 multi-client #1)", async () => {
+	let receivedClientId: string | undefined;
+	const clientId = crypto.randomUUID();
+	const host = fakeHost({
+		respondExtensionUi: (_requestId, _value, _cancelled, thisClientId) => {
+			receivedClientId = thisClientId;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest("/extensions/ui/respond", {
+			extensionRequestId: "request-1",
+			extensionResponse: "selected",
+			extensionCancelled: false,
+			clientId,
+		}),
+	);
+
+	assertEquals(result.status, 204);
+	assertEquals(receivedClientId, clientId);
+});
+
+test("extension UI responses reject a malformed client id without reaching the runtime", async () => {
+	let called = false;
+	const host = fakeHost({
+		respondExtensionUi: () => {
+			called = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest("/extensions/ui/respond", {
+			extensionRequestId: "request-1",
+			extensionResponse: "selected",
+			extensionCancelled: false,
+			clientId: "not-a-uuid",
+		}),
+	);
+
+	assertEquals(result.status, 400);
+	assertEquals(called, false);
+});
+
+test("auth prompt input forwards the answering client's id (RM1 multi-client #1)", async () => {
+	let receivedClientId: string | undefined;
+	const clientId = crypto.randomUUID();
+	const host = fakeHost({
+		submitAuthInput: (_value, thisClientId) => {
+			receivedClientId = thisClientId;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest(endpoints.authInput, { authInput: "secret", clientId }),
+	);
+
+	assertEquals(result.status, 204);
+	assertEquals(receivedClientId, clientId);
+});
+
+test("auth prompt input rejects a malformed client id without reaching the runtime", async () => {
+	let called = false;
+	const host = fakeHost({
+		submitAuthInput: () => {
+			called = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest(endpoints.authInput, {
+			authInput: "secret",
+			clientId: "not-a-uuid",
+		}),
+	);
+
+	assertEquals(result.status, 400);
+	assertEquals(called, false);
+});
+
+test("a losing auth prompt input POST does not error visibly (RM2 multi-client)", async () => {
+	// `submitAuthInput` returns false when there is no active dialog to answer:
+	// someone else already answered it, the same race `/extensions/ui/respond`
+	// (above) resolves by ignoring its host call's return value entirely, not a
+	// client error. The losing tab must see a plain 204, the same as a winning
+	// submission, so it can show "Answered on another device" instead of an
+	// error toast.
+	const host = fakeHost({
+		submitAuthInput: () => false,
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest(endpoints.authInput, { authInput: "secret" }),
+	);
+
+	assertEquals(result.status, 204);
+});
+
 test("extension UI actions route to the active extension's pi_ui_event handler", async () => {
 	let dispatched: unknown;
 	const host = fakeHost({

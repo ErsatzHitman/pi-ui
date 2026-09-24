@@ -167,7 +167,7 @@ export class UiRenderer implements AppStorePresentation {
 					}
 					return view;
 				},
-				{ onDisconnect: disconnect },
+				{ onDisconnect: disconnect, clientId },
 			);
 		} catch (error) {
 			disconnect();
@@ -579,6 +579,19 @@ export class UiRenderer implements AppStorePresentation {
 			}
 			if (effect.type === "scroll-transcript-bottom") {
 				scripts.push("window.piUi.messageScroll.scrollBottom()");
+			}
+			if (effect.type === "toast") {
+				// There is no per-client wire (every connected client's SSE stream
+				// gets the exact same broadcast script), so the exclusion happens
+				// IN the script itself: each client's own copy compares its own
+				// `displayClientId` (see `page.tsx`) and only the excluded one
+				// skips showing it (round RM1 multi-client #1).
+				const guard = effect.excludeClientId
+					? `document.body?.dataset?.displayClientId !== ${JSON.stringify(effect.excludeClientId)}`
+					: "true";
+				scripts.push(
+					`if (${guard}) window.piUi.toast?.show(${JSON.stringify(effect.message)});`,
+				);
 			}
 			if (effect.type === "session-finished") {
 				// Reaches every connected client (see `AppStore.notifySessionFinished`);

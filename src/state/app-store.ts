@@ -247,6 +247,22 @@ export type UiCommitEffect =
 	| { type: "scroll-transcript-bottom" }
 	| { type: "signal-overrides"; values: JsonObject }
 	| {
+			/**
+			 * A brief, native-looking notice broadcast to every connected client —
+			 * currently only "Answered on another device" (round RM1 multi-client
+			 * #1). `excludeClientId`, when set, is the display client id
+			 * (`page.tsx`'s `displayClientId`) that should NOT show it: every
+			 * client still receives the same broadcast script (there is no
+			 * per-client wire), so the script itself compares
+			 * `document.body.dataset.displayClientId` against this id and skips
+			 * showing the toast when they match — see `UiRenderer`'s "toast"
+			 * effect handling.
+			 */
+			type: "toast";
+			message: string;
+			excludeClientId?: string;
+	  }
+	| {
 			type: "session-finished";
 			workspace: string;
 			sessionPath: string | undefined;
@@ -930,6 +946,20 @@ export class AppStore {
 				},
 			});
 		}
+	}
+	/**
+	 * Broadcasts a brief informational toast to every connected client, except
+	 * `originClientId`'s own tab when one is given — see the `UiCommitEffect`
+	 * "toast" variant's doc comment. Purely presentational: it touches no
+	 * `AppStore` field, so it has nothing to add to `snapshot()` and nothing a
+	 * fresh connection needs to replay.
+	 */
+	notifyOtherClients(message: string, originClientId: string | undefined): void {
+		this.presentation?.requestCommit({
+			type: "toast",
+			message,
+			excludeClientId: originClientId,
+		});
 	}
 	setExtensionStatuses(statuses: AppExtensionStatus[]): void {
 		this.extensionStatuses = statuses.map((status) => ({ ...status }));

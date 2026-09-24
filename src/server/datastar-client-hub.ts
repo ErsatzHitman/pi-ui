@@ -8,6 +8,16 @@ export type DatastarClient = Pick<
 export type DatastarStreamFactory = typeof datastarStream;
 export type DatastarClientStreamOptions = {
 	onDisconnect?: () => void;
+	/**
+	 * The tab/WebView's stable per-connection id (`page.tsx`'s `displayClientId`).
+	 * When a new stream arrives for a `clientId` that already has one registered —
+	 * a reconnect race, or a duplicated connection from the same tab — the hub
+	 * closes the older stream first, so that tab never receives every patch
+	 * twice and never holds two live SSE connections at once (round RM1
+	 * multi-client #2). Omit it (as every caller but `UiRenderer` does, e.g. a
+	 * raw test double) to opt out of dedup entirely.
+	 */
+	clientId?: string;
 };
 
 /**
@@ -24,6 +34,14 @@ const defaultHeartbeatIntervalMs = 20_000;
 export class DatastarClientHub {
 	private readonly clients = new Map<string, DatastarClient>();
 	private readonly disconnectCallbacks = new Map<string, () => void>();
+	/**
+	 * The currently-registered internal stream id for each display client id
+	 * that has one open, plus its inverse — see `DatastarClientStreamOptions.clientId`.
+	 * Both directions are kept so `disconnect()` can drop a stale entry in O(1)
+	 * without scanning every connected client.
+	 */
+	private readonly streamIdByClientId = new Map<string, string>();
+	private readonly clientIdByStreamId = new Map<string, string>();
 	private readonly heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 
 	constructor(
@@ -59,6 +77,20 @@ export class DatastarClientHub {
 		options: DatastarClientStreamOptions = {},
 	): Response {
 		const id = crypto.randomUUID();
+		if (options.clientId) {
+			// Reconnect race / duplicated connection: the tab already has a live
+			// stream registered, so close it before this one takes over — never
+			// leave both delivering patches to the same tab (round RM1
+			// multi-client #2).
+			const staleStreamId = this.streamIdByClientId.get(options.clientId);
+			const staleClient =
+				staleStreamId !== undefined ? this.clients.get(staleStreamId) : undefined;
+			if (staleStreamId !== undefined && staleClient) {
+				this.disconnect(staleStreamId, staleClient);
+			}
+			this.streamIdByClientId.set(options.clientId, id);
+			this.clientIdByStreamId.set(id, options.clientId);
+		}
 		return this.streamFactory(
 			(stream) => {
 				this.clients.set(id, stream);
@@ -184,6 +216,14 @@ export class DatastarClientHub {
 
 	private disconnect(id: string, client: DatastarClient): void {
 		if (!this.clients.delete(id)) return;
+		const clientId = this.clientIdByStreamId.get(id);
+		this.clientIdByStreamId.delete(id);
+		// Only drop the display-client-id mapping if it still points at THIS
+		// stream: a stale stream being force-closed by a fresher one for the
+		// same tab must not clobber the fresh one's just-set entry.
+		if (clientId !== undefined && this.streamIdByClientId.get(clientId) === id) {
+			this.streamIdByClientId.delete(clientId);
+		}
 		const onDisconnect = this.disconnectCallbacks.get(id);
 		this.disconnectCallbacks.delete(id);
 		onDisconnect?.();
