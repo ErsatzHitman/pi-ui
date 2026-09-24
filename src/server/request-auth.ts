@@ -29,10 +29,16 @@ const publicAssetPaths = new Set([
 	"/icon-180.png",
 	"/icon-192.png",
 	"/icon-512.png",
+	"/icon-maskable-192.png",
+	"/icon-maskable-512.png",
 	// The service worker's offline fallback page (round RM2 "pwa"): it must cache
 	// the real page, not a 401 login page, at install time — see
 	// `service-worker-script.ts` and `offline.html`. No user data either.
 	"/offline.html",
+	// The icon a service-worker push notification shows (`service-worker-script.ts`):
+	// the browser fetches it for the notification, possibly long after the cookie
+	// expired. No user data.
+	"/notification-icon.png",
 ]);
 
 /** The app's own front-end bundle: no user data, safe to serve to a browser with no

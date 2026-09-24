@@ -60,5 +60,40 @@ self.addEventListener("fetch", (event) => {
 		fetch(event.request).catch(() => caches.match(OFFLINE_URL)),
 	);
 });
+
+// Web Push "session finished" (src/server/push/push-service.ts): the server only
+// pushes while no tab has an open /stream, so this never doubles an in-page
+// notification. Every push shows one (the subscription is userVisibleOnly); a
+// payload that can't be read still gets a generic one rather than none.
+self.addEventListener("push", (event) => {
+	let data = {};
+	try {
+		data = (event.data && event.data.json()) || {};
+	} catch {
+		data = {};
+	}
+	const title = typeof data.title === "string" && data.title ? data.title : "pi-ui";
+	event.waitUntil(
+		self.registration.showNotification(title, {
+			body: typeof data.body === "string" ? data.body : "",
+			tag: typeof data.tag === "string" && data.tag ? data.tag : "pi-ui-session-finished",
+			icon: "/notification-icon.png",
+			data: { sessionPath: data.sessionPath },
+		}),
+	);
+});
+
+// Focus an open pi-ui window, or open the app (the installed PWA when there is one).
+self.addEventListener("notificationclick", (event) => {
+	event.notification.close();
+	event.waitUntil(
+		self.clients
+			.matchAll({ type: "window", includeUncontrolled: true })
+			.then((windows) => {
+				const open = windows.find((client) => client.url.startsWith(self.location.origin));
+				return open ? open.focus() : self.clients.openWindow("/");
+			}),
+	);
+});
 `;
 }

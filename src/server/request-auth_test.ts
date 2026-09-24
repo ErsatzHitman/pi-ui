@@ -130,6 +130,7 @@ test("the PWA manifest, its icons, and the offline fallback page are served with
 		"/icon-192.png",
 		"/icon-512.png",
 		"/offline.html",
+		"/notification-icon.png",
 	]) {
 		const result = checkAuthToken(new Request(`http://localhost${path}`), token);
 		assertEquals(result.ok, true);
@@ -453,5 +454,23 @@ test("a rejected stale cookie is cleared so the browser stops re-sending it", ()
 			result.response.headers.get("set-cookie") ?? "",
 			"pi_ui_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure",
 		);
+	}
+});
+
+test("every icon the PWA manifest names exists and is served with no token (the login page links /manifest.webmanifest)", async () => {
+	const manifest = (await Bun.file(
+		new URL("../../static/manifest.webmanifest", import.meta.url),
+	).json()) as { icons: Array<{ src: string; purpose: string }> };
+	const maskable = manifest.icons.filter((icon) => icon.purpose === "maskable");
+	// Maskable icons need their own full-bleed art with the glyph inside the safe zone.
+	assertEquals(
+		maskable.every((icon) => icon.src.startsWith("icon-maskable-")),
+		true,
+	);
+	for (const icon of manifest.icons) {
+		const file = Bun.file(new URL(`../../static/${icon.src}`, import.meta.url));
+		assertEquals(await file.exists(), true);
+		const result = checkAuthToken(new Request(`http://localhost/${icon.src}`), token);
+		assertEquals(result.ok, true);
 	}
 });
