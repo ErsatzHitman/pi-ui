@@ -245,7 +245,15 @@ export type UiCommitEffect =
 	  }
 	| { type: "document-title"; title: string }
 	| { type: "scroll-transcript-bottom" }
-	| { type: "signal-overrides"; values: JsonObject };
+	| { type: "signal-overrides"; values: JsonObject }
+	| {
+			type: "session-finished";
+			workspace: string;
+			sessionPath: string | undefined;
+			/** Monotonically increasing per server process; lets a client dedupe a
+			 * notification it has already shown for this event (round RM1 "notifications"). */
+			id: number;
+	  };
 
 export interface AppStorePresentation {
 	beginUpdate(): void;
@@ -401,6 +409,7 @@ export class AppStore {
 	readonly debugUi = debugUiEnabled();
 	readonly datastarInspector = datastarInspectorEnabled();
 	documentTitle = "pi-ui";
+	private sessionFinishedSequence = 0;
 	updateAvailable: AvailableUpdate | undefined;
 	promptEditorText = "";
 	models: AppModel[] = [];
@@ -1106,6 +1115,22 @@ export class AppStore {
 	setDocumentTitle(title: string): void {
 		this.documentTitle = title;
 		this.presentation?.requestCommit({ type: "document-title", title });
+	}
+	/**
+	 * Broadcasts a "session finished" effect to every connected client over the existing
+	 * SSE stream (`UiRenderer.mainEffectScripts` turns it into a script executed on each
+	 * client — see `static/app/notifications.js`). Unlike the host-side `notifySessionDone`
+	 * (Linux `notify-send`, local mode only), this always fires: each browser tab decides
+	 * for itself, from `document.hidden`/`hasFocus()`, whether to show a Web Notification.
+	 */
+	notifySessionFinished(details: { workspace: string; sessionPath?: string }): void {
+		this.sessionFinishedSequence += 1;
+		this.presentation?.requestCommit({
+			type: "session-finished",
+			workspace: details.workspace,
+			sessionPath: details.sessionPath,
+			id: this.sessionFinishedSequence,
+		});
 	}
 	setPromptEditorText(text: string, options: { broadcast?: boolean } = {}): void {
 		this.promptEditorText = text;

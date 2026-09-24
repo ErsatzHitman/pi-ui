@@ -51,8 +51,10 @@ function requestNotificationPermission(): void {
 }
 
 /** Reads the toggle's own `aria-pressed`, which the server keeps in sync with the persisted
- * `liveWorkspacePreferences.notifications` signal — avoids a second source of truth here. */
-function notificationsOptedIn(): boolean {
+ * `liveWorkspacePreferences.notifications` signal — avoids a second source of truth here.
+ * Exported on `window.piUi.liveWorkspace` so `static/app/notifications.js`'s background-session
+ * notifier (round RM1 "notifications") reads the same opt-in instead of a second one. */
+export function notificationsOptedIn(): boolean {
 	return (
 		document
 			.getElementById("live-workspace-notifications-toggle")
@@ -123,6 +125,7 @@ function watchTurnPhase(): void {
 window.piUi.liveWorkspace = {
 	applyOpen: bindLiveWorkspace().applyOpen,
 	requestNotificationPermission,
+	notificationsOptedIn,
 };
 
 watchTurnPhase();
