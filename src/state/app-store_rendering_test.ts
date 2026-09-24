@@ -1338,9 +1338,48 @@ test("hot app views exclude independently owned regions", () => {
 	}
 });
 
+test("reconnecting with the same display client id supersedes the stale stream (RM1 multi-client #2)", async () => {
+	const state = createState();
+	const staleController = new AbortController();
+	const stale = state.createStream(staleController.signal, "tab-1");
+	const freshController = new AbortController();
+	connections.push(freshController);
+	// The dedup happens synchronously inside this second `createStream` call
+	// (round RM1 multi-client #2), so `stale` is already force-closed by now.
+	const freshReader = responseReader(
+		state.createStream(freshController.signal, "tab-1"),
+	);
+
+	state.replaceMessages([{ role: "user", text: "hello", timestamp }]);
+	const freshBody = await readUntil(freshReader, (text) => text.includes("hello"));
+	freshController.abort();
+
+	assertIncludes(freshBody, "hello");
+	assertNotIncludes(await stale.text(), "hello");
+});
+
+test("a dialog answered on one client broadcasts a toast the others can filter themselves out of", async () => {
+	const state = createState();
+	const aController = new AbortController();
+	const bController = new AbortController();
+	connections.push(aController, bController);
+	const aReader = responseReader(state.createStream(aController.signal, "client-a"));
+	const bReader = responseReader(state.createStream(bController.signal, "client-b"));
+	await readUntil(aReader, (text) => text.includes("event: datastar-patch-signals"));
+	await readUntil(bReader, (text) => text.includes("event: datastar-patch-signals"));
+
+	state.notifyOtherClients("Answered on another device", "client-a");
+
+	const bText = await readUntil(bReader, (text) =>
+		text.includes("Answered on another device"),
+	);
+	assertIncludes(bText, "Answered on another device");
+	assertIncludes(bText, "client-a");
+});
+
 type TestStore = AppStore & {
 	readonly renderer: UiRenderer;
-	createStream(signal: AbortSignal): Response;
+	createStream(signal: AbortSignal, clientId?: string): Response;
 };
 
 function createState(options: MessageRenderServiceOptions = {}): TestStore {
@@ -1348,7 +1387,8 @@ function createState(options: MessageRenderServiceOptions = {}): TestStore {
 	const renderer = new UiRenderer(store, new DatastarClientHub(), options);
 	return Object.assign(store, {
 		renderer,
-		createStream: (signal: AbortSignal) => renderer.createStream(signal),
+		createStream: (signal: AbortSignal, clientId?: string) =>
+			renderer.createStream(signal, clientId),
 	});
 }
 

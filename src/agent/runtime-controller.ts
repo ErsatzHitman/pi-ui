@@ -1574,8 +1574,9 @@ export class RuntimeController {
 		requestId: string,
 		response: string | undefined,
 		cancelled: boolean,
+		clientId?: string,
 	): boolean {
-		return this.extensionUi.respond(requestId, response, cancelled);
+		return this.extensionUi.respond(requestId, response, cancelled, clientId);
 	}
 
 	/** Routes a raw terminal byte sequence to a mounted terminal surface. */

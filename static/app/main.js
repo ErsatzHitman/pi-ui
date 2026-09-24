@@ -40,6 +40,7 @@ import {
 } from "./session-performance.js";
 import { bindStreamReconnect } from "./stream-reconnect.js";
 import { bindTerminalSurfaces } from "./terminal-keys.js";
+import { showToast } from "./toast.js";
 import { bindTooltips } from "./tooltips.js";
 import { bindVimScroll } from "./vim-scroll.js";
 import { windowFocus } from "./window-focus.js";
@@ -79,6 +80,7 @@ window.piUi = {
 		observe: readTransitionState,
 		start: startSessionPerformanceMeasurement,
 	},
+	toast: { show: showToast },
 	windowFocus,
 	workspaceReview: { applyOpen: () => {} },
 	liveWorkspace: { applyOpen: () => {} },

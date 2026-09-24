@@ -804,6 +804,51 @@ test("extension UI responses return to the active agent backend", async () => {
 	});
 });
 
+test("extension UI responses forward the answering client's id (RM1 multi-client #1)", async () => {
+	let receivedClientId: string | undefined;
+	const clientId = crypto.randomUUID();
+	const host = fakeHost({
+		respondExtensionUi: (_requestId, _value, _cancelled, thisClientId) => {
+			receivedClientId = thisClientId;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest("/extensions/ui/respond", {
+			extensionRequestId: "request-1",
+			extensionResponse: "selected",
+			extensionCancelled: false,
+			clientId,
+		}),
+	);
+
+	assertEquals(result.status, 204);
+	assertEquals(receivedClientId, clientId);
+});
+
+test("extension UI responses reject a malformed client id without reaching the runtime", async () => {
+	let called = false;
+	const host = fakeHost({
+		respondExtensionUi: () => {
+			called = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest("/extensions/ui/respond", {
+			extensionRequestId: "request-1",
+			extensionResponse: "selected",
+			extensionCancelled: false,
+			clientId: "not-a-uuid",
+		}),
+	);
+
+	assertEquals(result.status, 400);
+	assertEquals(called, false);
+});
+
 test("extension UI actions route to the active extension's pi_ui_event handler", async () => {
 	let dispatched: unknown;
 	const host = fakeHost({

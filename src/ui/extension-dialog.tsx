@@ -183,9 +183,16 @@ function responseAction(id: string, value: string, expression = false): string {
 }
 
 function postResponse(id: string, value: string, cancelled: boolean): string {
+	// `document.body?.dataset?.displayClientId` — same runtime read as
+	// `terminal-keys.js`'s resize report — so the server can tell other
+	// clients "answered elsewhere" without confusing this one (round RM1
+	// multi-client #1). A raw expression, not a literal: unlike `page.tsx`'s
+	// embedded ids, this dialog is patched independently of the page's own
+	// per-render template.
 	return `@post('${endpoints.extensionUiResponse}', { payload: {
 		extensionRequestId: ${id},
 		extensionResponse: ${value},
 		extensionCancelled: ${cancelled},
+		clientId: document.body?.dataset?.displayClientId,
 	} })`;
 }

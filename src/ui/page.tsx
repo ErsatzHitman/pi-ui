@@ -234,6 +234,16 @@ export function renderPage(
 					{state.datastarInspector && <datastar-inspector />}
 					{themeLab && renderThemeLab()}
 					{renderDebugOverlay(state)}
+					{/* Populated purely client-side by `window.piUi.toast.show(...)` —
+					 * see `toast.js` and `ui-renderer.ts`'s "toast" commit effect
+					 * (round RM1 multi-client #1's "answered on another device"
+					 * notice). Never server-rendered content of its own. */}
+					<div
+						id="toast-region"
+						class="toast-region"
+						aria-live="polite"
+						aria-atomic="true"
+					></div>
 					<div
 						id="file-drop-overlay"
 						class="file-drop-overlay"

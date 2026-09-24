@@ -486,12 +486,29 @@ export class ExtensionUiController {
 		return runtimeStore;
 	}
 
-	respond(id: string, value: string | undefined, cancelled: boolean): boolean {
+	/**
+	 * `clientId` is the answering tab's display client id (`page.tsx`'s
+	 * `displayClientId`), passed through from the `/extensions/ui/respond`
+	 * route. A stale POST for a dialog that's no longer active (another
+	 * client already answered it, or it timed out) simply returns `false`
+	 * here — never throws — so that client's request completes quietly (round
+	 * RM1 multi-client #1's "the losing POST must not error visibly").
+	 */
+	respond(
+		id: string,
+		value: string | undefined,
+		cancelled: boolean,
+		clientId?: string,
+	): boolean {
 		if (this.#active?.dialog.id !== id) return false;
 		const active = this.#active;
 		this.finish(active);
 		active.respond(value, cancelled);
 		this.showNext();
+		// Every other client still showing this (now-answered) dialog closes it
+		// as soon as the broadcast "dialog" effect reaches it; this toast just
+		// explains why (round RM1 multi-client #1).
+		this.store.notifyOtherClients("Answered on another device", clientId);
 		return true;
 	}
 

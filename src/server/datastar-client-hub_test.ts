@@ -48,6 +48,64 @@ test("hub broadcasts to multiple clients and disconnects them independently", as
 	assertStringIncludes(await second.text(), "second only");
 });
 
+test("hub closes a stale stream when a new one connects with the same display client id", async () => {
+	const hub = new DatastarClientHub();
+	const firstController = new AbortController();
+	const secondController = new AbortController();
+	let firstDisconnected = false;
+	const first = hub.createStream(
+		firstController.signal,
+		() => ({ elements: '<main id="app">first</main>', signals: "{}" }),
+		{ clientId: "tab-1", onDisconnect: () => (firstDisconnected = true) },
+	);
+	assertEquals(hub.clientCount, 1);
+
+	const second = hub.createStream(
+		secondController.signal,
+		() => ({ elements: '<main id="app">second</main>', signals: "{}" }),
+		{ clientId: "tab-1" },
+	);
+
+	// The reconnect race (round RM1 multi-client #2): a duplicate `/stream` for the
+	// same tab replaces, rather than adds to, the hub's registered clients.
+	assertEquals(hub.clientCount, 1);
+	assertEquals(firstDisconnected, true);
+
+	hub.patchView('<main id="app">broadcast</main>', "{}", []);
+	secondController.abort();
+
+	assertStringExcludes(await first.text(), "broadcast");
+	assertStringIncludes(await second.text(), "broadcast");
+});
+
+test("hub tracks distinct display client ids as separate connections", () => {
+	const hub = new DatastarClientHub();
+	const first = new AbortController();
+	const second = new AbortController();
+	hub.createStream(first.signal, () => ({ elements: "", signals: "{}" }), {
+		clientId: "tab-1",
+	});
+	hub.createStream(second.signal, () => ({ elements: "", signals: "{}" }), {
+		clientId: "tab-2",
+	});
+	assertEquals(hub.clientCount, 2);
+	first.abort();
+	assertEquals(hub.clientCount, 1);
+	second.abort();
+	assertEquals(hub.clientCount, 0);
+});
+
+test("hub does not dedupe connections that carry no display client id", () => {
+	const hub = new DatastarClientHub();
+	const first = new AbortController();
+	const second = new AbortController();
+	hub.createStream(first.signal, () => ({ elements: "", signals: "{}" }));
+	hub.createStream(second.signal, () => ({ elements: "", signals: "{}" }));
+	assertEquals(hub.clientCount, 2);
+	first.abort();
+	second.abort();
+});
+
 test("hub runs disconnect lifecycle once across overlapping close signals", () => {
 	const hub = new DatastarClientHub();
 	const controller = new AbortController();
