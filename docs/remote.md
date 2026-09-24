@@ -127,7 +127,7 @@ its env file and updates yourself rather than through `pi-ui service install`.
 ### Workspace
 
 pi-ui ignores the unit's `WorkingDirectory=` — its workspace (what the Files view browses,
-and where a fresh session starts) always defaults to whoever runs it's home directory. For
+and where a fresh session starts) always defaults to the home directory of whoever runs it. For
 the systemd install above, that's the whole home directory of the account you installed it
 as, `~/pi-ui-remote/token` and all, not just your git checkout(s).
 
@@ -185,14 +185,15 @@ or set the provider's API key as an environment variable in the same env file
 
 ## Persistence and backups
 
-| Data                     | Location                                  | Back it up?                         |
-| ------------------------ | ----------------------------------------- | ----------------------------------- |
-| Sessions (append-only)   | `~/.pi/agent/sessions/**.jsonl`           | Yes — cheap with `restic`/`rsync`   |
-| Credentials              | `~/.pi/agent/auth.json`                   | Yes, encrypted                      |
-| pi settings & extensions | `~/.pi/agent/{settings.json,extensions/}` | Keep them in git if you can         |
-| pi-ui config             | `~/.config/pi-ui/config.json`             | Optional                            |
-| Workspace(s)             | your git checkout(s)                      | Their own remotes                   |
-| Pasted images            | in-memory only                            | Lost on restart — not yet persisted |
+| Data                     | Location                                  | Back it up?                                                    |
+| ------------------------ | ----------------------------------------- | -------------------------------------------------------------- |
+| Sessions (append-only)   | `~/.pi/agent/sessions/**.jsonl`           | Yes — cheap with `restic`/`rsync`                              |
+| Credentials              | `~/.pi/agent/auth.json`                   | Yes, encrypted                                                 |
+| pi settings & extensions | `~/.pi/agent/{settings.json,extensions/}` | Keep them in git if you can                                    |
+| pi-ui config             | `~/.config/pi-ui/config.json`             | Optional                                                       |
+| Workspace(s)             | your git checkout(s)                      | Their own remotes                                              |
+| Pasted images            | `~/.local/share/pi-ui/session-images/`    | Optional (size-capped cache)                                   |
+| Web Push keys & devices  | `~/.local/share/pi-ui/push-*.json` (0600) | Yes — without the VAPID key, re-toggle the bell on each device |
 
 A crashed process can leave behind a stale `pi-ui-transfers-*` temp directory (in-flight
 file uploads); pi-ui removes its own on the next start.
@@ -279,12 +280,19 @@ below can install it as a standalone app instead: same origin, same cookie, same
 
 The "Notify on completion" bell (in the Live Workspace pane) covers two cases:
 
-- **A tab is open** (foreground or a hidden background tab): you get a normal in-page Web
-  Notification, same as running locally.
-- **No tab is open at all** — the installed PWA is closed, or you never opened one: a
-  background session finishing instead sends a **Web Push** notification, which opens or
-  focuses the app when tapped. This only ever fires when no tab is connected, so you never
-  get the same notification twice.
+- **Someone is looking** (a pi-ui tab or app window is visible on any device): no push.
+  A desktop tab that is open but not focused still shows a normal in-page notification.
+- **Nobody is looking** — every connected tab is hidden (the PWA is in the background, the
+  phone is locked, the tab is behind another one) or none is open at all: a finished turn
+  ("Turn finished") or background session ("Background session finished") sends a **Web
+  Push** notification to every device you opted in on. Tapping it focuses or opens the
+  app. A hidden tab of a subscribed browser leaves it to the push, so you never get the
+  same notification twice.
+
+The bell is one setting shared by all your devices (it lives on the server). On a new
+device it may already show as on: tap it once to grant this browser's permission and
+subscribe it — that tap does not switch it off for your other devices. Switching it off
+stops pushes to every device.
 
 Requirements:
 
@@ -299,5 +307,10 @@ Requirements:
   opted in on.
 
 Nothing here is cached for offline use — pi-ui always needs a live connection to its
-server. If the connection drops, the installed app shows a small "Can't reach your pi-ui
-server" page instead of the browser's own offline error, and retries automatically.
+server. If the connection drops, or pi-ui itself is down or restarting behind your proxy
+(a 502/503/504), the installed app shows a small "Can't reach your pi-ui server" page
+instead of the browser's own error, and retries automatically.
+
+On a flaky connection the app reconnects its live stream on its own (when the network
+comes back, or when you return to the app) and replays only what it missed rather than
+re-downloading the whole view.
