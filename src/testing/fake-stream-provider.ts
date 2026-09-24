@@ -19,6 +19,9 @@ import {
 import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
+import type { JsonObject } from "../utils/json-types.ts";
+import { isJsonObject } from "../utils/type-guards.ts";
+
 /** Provider and model ids the fixture registers; pass `fakeStreamModelRef` to `RuntimeController.setModel`. */
 export const fakeStreamProviderId = "pi-ui-fake-stream";
 export const fakeStreamModelId = "scripted-1";
@@ -50,6 +53,13 @@ export const fakeDirectives = {
 	 * roughly `1000 / intervalMs` events/second. */
 	fleet: (count: number, intervalMs = 10) =>
 		`Dispatch the fleet. [[FLEET:${count}:${intervalMs}]]`,
+	/** A tool call to any registered tool by name, with arbitrary JSON args — for
+	 * scripting a turn against a tool this fixture doesn't itself register, such as
+	 * an extension's own (e.g. `ask_user`, loaded from a real or fixture agent dir
+	 * alongside this provider). Unlike the other directives, the args can contain
+	 * `]` (e.g. an `options` array) without truncating the directive early. */
+	tool: (name: string, args: JsonObject = {}) =>
+		`Call a tool. [[TOOL:${name}:${JSON.stringify(args)}]]`,
 } as const;
 
 function contentToText(content: string | Array<{ type: string; text?: string }>): string {
@@ -74,9 +84,29 @@ type Directive =
 	| { kind: "read"; path: string }
 	| { kind: "bigOutput"; lines: number }
 	| { kind: "fleet"; count: number; intervalMs: number }
+	| { kind: "tool"; name: string; args: JsonObject }
 	| { kind: "none" };
 
 function parseDirective(prompt: string): Directive {
+	// Tried first, and anchored to the *last* `]]` in the prompt (`[\s\S]*`, greedy):
+	// a TOOL directive's JSON args may themselves contain `]` (an `options` array,
+	// ask_user's shape), which the generic directive regex below — bounded to
+	// `[^\]]*`, correct for the other directives' plain-text payloads — would cut
+	// off at the first one.
+	const toolMatch = /\[\[TOOL:([a-zA-Z_][\w.-]*):([\s\S]*)\]\]\s*$/.exec(prompt);
+	if (toolMatch) {
+		const [, name, rawArgs] = toolMatch;
+		let args: JsonObject = {};
+		try {
+			const parsed: unknown = JSON.parse(rawArgs ?? "{}");
+			if (isJsonObject(parsed)) args = parsed;
+		} catch {
+			// Malformed args JSON: call the tool with no args rather than failing the
+			// whole scripted turn — a test author's bug shows up as a tool-schema
+			// validation error, which is easier to diagnose than a silent hang.
+		}
+		return { kind: "tool", name, args };
+	}
 	const match = /\[\[(\w+)(?::([^\]]*))?\]\]/.exec(prompt);
 	if (!match) return { kind: "none" };
 	const [, name, raw = ""] = match;
@@ -160,6 +190,14 @@ const scriptedTurn: FauxResponseFactory = (context) => {
 						count: directive.count,
 						intervalMs: directive.intervalMs,
 					}),
+				],
+				{ stopReason: "toolUse" },
+			);
+		case "tool":
+			return fauxAssistantMessage(
+				[
+					fauxThinking(`Calling ${directive.name}.`),
+					fauxToolCall(directive.name, directive.args),
 				],
 				{ stopReason: "toolUse" },
 			);

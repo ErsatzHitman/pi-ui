@@ -460,7 +460,10 @@ type PiUiFieldSpec = {
 	kind: string;
 	label?: string;
 	placeholder?: string;
-	options: Array<{ id: string; label: string }>;
+	/** e.g. ask-user.ts's `buildBridgeFields()`: `searchable: true` on a `select`/
+	 * `multiselect` field asks for a live filter box above its option rows. */
+	searchable: boolean;
+	options: Array<{ id: string; label: string; description?: string }>;
 };
 
 function renderPanelBody(element: PiUiElement): string {
@@ -541,11 +544,12 @@ function normalizeFields(value: JsonValue | undefined): PiUiFieldSpec[] {
 		const record = raw;
 		const kind = textField(record.kind) ?? "text";
 		const id = textField(record.id) ?? `field-${index}`;
-		const options: Array<{ id: string; label: string }> = [];
+		const options: Array<{ id: string; label: string; description?: string }> = [];
 		if (Array.isArray(record.options)) {
 			for (const option of record.options) {
 				if (!isJsonObject(option)) continue;
 				const optionRecord = option;
+				const description = textField(optionRecord.description);
 				options.push({
 					id: textField(optionRecord.id) ?? textField(optionRecord.value) ?? "",
 					label:
@@ -553,6 +557,7 @@ function normalizeFields(value: JsonValue | undefined): PiUiFieldSpec[] {
 						textField(optionRecord.title) ??
 						textField(optionRecord.id) ??
 						"",
+					description: description ? description : undefined,
 				});
 			}
 		}
@@ -561,6 +566,7 @@ function normalizeFields(value: JsonValue | undefined): PiUiFieldSpec[] {
 			kind,
 			label: textField(record.label) ?? textField(record.title),
 			placeholder: textField(record.placeholder),
+			searchable: isBoolean(record.searchable) ? record.searchable : false,
 			options,
 		});
 	}
@@ -591,31 +597,94 @@ function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 		);
 	}
 	if (field.kind === "select") {
+		// Plain native <select> unless there's something a bare <option> can't show
+		// (a description) or the sender asked for a filter box (`searchable`) — e.g.
+		// ask-user.ts's options carry both, todo.ts's plain status field carries
+		// neither and keeps today's dropdown.
+		const useOptionRows =
+			field.searchable || field.options.some((option) => option.description);
+		if (!useOptionRows) {
+			return syncHtml(
+				<div class="field">
+					{field.label && <label safe>{field.label}</label>}
+					<select data-signals={`{${signal}: ''}`} data-bind={signal}>
+						{field.options.map((option) => (
+							<option value={option.id} safe>
+								{option.label}
+							</option>
+						))}
+					</select>
+				</div>,
+			);
+		}
+		const groupName = optionsGroupName(signal);
+		const filterSig = optionsFilterSignal(signal);
 		return syncHtml(
 			<div class="field">
 				{field.label && <label safe>{field.label}</label>}
-				<select data-signals={`{${signal}: ''}`} data-bind={signal}>
+				{field.searchable && renderOptionFilter(field, filterSig)}
+				<div class="piui-option-rows" data-signals={`{${signal}: ''}`}>
 					{field.options.map((option) => (
-						<option value={option.id} safe>
-							{option.label}
-						</option>
+						<label
+							class="piui-option-row"
+							data-show={
+								field.searchable
+									? optionRowFilterExpr(filterSig, option)
+									: undefined
+							}
+						>
+							<input
+								type="radio"
+								name={groupName}
+								value={option.id}
+								data-bind={signal}
+							/>
+							<span class="piui-option-row-text">
+								<span class="piui-option-title" safe>
+									{option.label}
+								</span>
+								{option.description && (
+									<span class="piui-option-description" safe>
+										{option.description}
+									</span>
+								)}
+							</span>
+						</label>
 					))}
-				</select>
+				</div>
 			</div>,
 		);
 	}
 	if (field.kind === "multiselect") {
+		const filterSig = optionsFilterSignal(signal);
 		return syncHtml(
 			<fieldset class="field piui-multiselect">
 				{field.label && <legend safe>{field.label}</legend>}
+				{field.searchable && renderOptionFilter(field, filterSig)}
 				<div data-signals={`{${signal}: []}`}>
 					{field.options.map((option) => (
-						<label class="piui-multiselect-option">
+						<label
+							class="piui-multiselect-option piui-option-row"
+							data-show={
+								field.searchable
+									? optionRowFilterExpr(filterSig, option)
+									: undefined
+							}
+						>
 							<input
 								type="checkbox"
 								data-on:change={`$${signal} = evt.target.checked ? [...$${signal}, ${JSON.stringify(option.id)}] : $${signal}.filter((value) => value !== ${JSON.stringify(option.id)})`}
 							/>
-							<span safe>{option.label}</span>
+							<span class="piui-option-row-text">
+								<span class="piui-option-title" safe>
+									{option.label}
+								</span>
+								{option.description && (
+									<span class="piui-option-description" safe>
+										{option.description}
+									</span>
+								)}
+							</span>
 						</label>
 					))}
 				</div>
@@ -723,6 +792,48 @@ function fieldSignal(element: PiUiElement, field: PiUiFieldSpec): string {
 
 function signalPart(value: string): string {
 	return value.replaceAll(/[^a-zA-Z0-9_]/g, "_");
+}
+
+/** The `name` a `select`/`multiselect` field's option rows share so a `select`
+ * field's `<input type=radio>` rows form one native radio group — giving the
+ * plan's "arrows navigate options" for free from the browser, no client JS. */
+function optionsGroupName(signal: string): string {
+	return `${signal}_options`;
+}
+
+/** The Datastar signal holding a searchable field's live filter text. */
+function optionsFilterSignal(signal: string): string {
+	return `${signal}_filter`;
+}
+
+/** The filter box above a searchable `select`/`multiselect`'s option rows —
+ * same "type to filter, entirely client-side" idiom as font-dialog.tsx's font
+ * search box. */
+function renderOptionFilter(field: PiUiFieldSpec, filterSignal: string): string {
+	return syncHtml(
+		<input
+			type="search"
+			class="piui-option-filter"
+			placeholder={field.placeholder ?? "Type to filter..."}
+			data-signals={`{${filterSignal}: ''}`}
+			data-bind={filterSignal}
+			autocomplete="off"
+		/>,
+	);
+}
+
+/**
+ * A row's `data-show` expression: visible when the filter is empty, or the
+ * filter text (trimmed, lower-cased) is found in the row's own label +
+ * description — matched entirely in the browser against a literal baked into
+ * the row's own markup, same shape as font-dialog.tsx's `data-show` filter.
+ */
+function optionRowFilterExpr(
+	filterSignal: string,
+	option: { label: string; description?: string },
+): string {
+	const haystack = `${option.label} ${option.description ?? ""}`.toLocaleLowerCase();
+	return `!$${filterSignal}.trim() || ${JSON.stringify(haystack)}.includes($${filterSignal}.trim().toLocaleLowerCase())`;
 }
 
 /**

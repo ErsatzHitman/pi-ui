@@ -167,6 +167,124 @@ test("actions send the namespaced elementId lib/bridge.ts expects", () => {
 	assertStringIncludes(html, "elementId: &#34;ask-user:panel&#34;");
 });
 
+// ask-user.ts's `buildBridgeFields()` sends a `select`/`multiselect` field with
+// `options: [{ value, label, description }]` and `searchable: true` once its own
+// `bridgeIsLive()` is fixed (round ux/ask-user-native) — these render it as a
+// native selectable-rows-with-filter list, not a bare `<select>`, so the option
+// descriptions the extension sends are not silently dropped.
+test("a searchable select field renders option descriptions and a filter box, as radio rows sharing one name", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				data: {
+					fields: [
+						{
+							id: "selection",
+							kind: "select",
+							label: "Where to next?",
+							placeholder: "Type to filter...",
+							searchable: true,
+							options: [
+								{
+									value: "career",
+									label: "Career or education",
+									description: "Jobs, school, skills",
+								},
+								{ value: "health", label: "Health", description: "" },
+							],
+						},
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, "Career or education");
+	assertStringIncludes(html, "Jobs, school, skills");
+	assertStringIncludes(html, 'placeholder="Type to filter..."');
+	assertStringIncludes(html, 'type="radio"');
+	// Both rows share one `name` so the browser's native radio-group arrow-key
+	// navigation moves between them without any client-side JS.
+	assertStringIncludes(html, 'name="_piuiField_ask_user_panel_selection_options"');
+	assertStringExcludes(html, "<select");
+});
+
+test("a select field with no description and not marked searchable stays a plain select (no filter box, no regression for other bridge callers)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				ns: "todo",
+				data: {
+					fields: [
+						{
+							id: "status",
+							kind: "select",
+							label: "Status",
+							options: [{ id: "open", label: "Open" }],
+						},
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, "<select");
+	assertStringExcludes(html, 'type="search"');
+	assertStringExcludes(html, 'type="radio"');
+});
+
+test("a searchable multiselect field renders option descriptions and a filter box alongside its checkboxes", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				data: {
+					fields: [
+						{
+							id: "selections",
+							kind: "multiselect",
+							label: "Pick any",
+							placeholder: "Type to filter...",
+							searchable: true,
+							options: [
+								{ value: "a", label: "Option A", description: "First" },
+								{ value: "b", label: "Option B", description: "Second" },
+							],
+						},
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, "Option A");
+	assertStringIncludes(html, "First");
+	assertStringIncludes(html, 'placeholder="Type to filter..."');
+	assertStringIncludes(html, 'type="checkbox"');
+});
+
+test("the select/multiselect filter hides rows whose label and description do not match, client-side, via data-show", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				data: {
+					fields: [
+						{
+							id: "selection",
+							kind: "select",
+							label: "Q",
+							searchable: true,
+							options: [
+								{ value: "career", label: "Career", description: "Jobs" },
+							],
+						},
+					],
+				},
+			}),
+		],
+	});
+	// The row's own visibility expression checks the filter signal against its
+	// own label/description text, case-insensitively, entirely in the browser.
+	assertStringIncludes(html, "data-show=");
+	assertStringIncludes(html, "toLocaleLowerCase");
+});
+
 test("a pinned roster renders as a compact summary strip, not a full row list", () => {
 	const html = renderPiUiWidgets({
 		extensionElements: [
