@@ -8,8 +8,13 @@ import {
 	enableServerAutostart,
 	serverAutostartConfig,
 	type ServerAutostartOverrides,
+	type ServerAutostartServiceEnvironment,
 } from "./server-autostart.ts";
-import { explicitServerOptions, parseServerOptions, serverUsage } from "./server-options.ts";
+import {
+	explicitServerOptions,
+	parseServerOptions,
+	serverUsage,
+} from "./server-options.ts";
 import { AuthRateLimiter } from "./server/auth-rate-limit.ts";
 import { withAuthToken, type AuthCheckDeps } from "./server/request-auth.ts";
 import { endpoints } from "./server/routes/endpoints.ts";
@@ -100,6 +105,10 @@ function remoteAuthRefusalMessage(): string {
  * desktop install where none existed before, changing desktop behaviour that must stay
  * exactly as today. `remote`/`authToken` are already opt-in with no default value, so no
  * such tracking is needed for them.
+ *
+ * A remote service (`--remote` or a non-loopback `--host`) with neither `--auth-token` nor
+ * `--insecure-no-auth` is rejected here, at install time: the server itself refuses to
+ * start that way, so installing it would only leave a unit that fails on every restart.
  */
 export function buildServiceInstallAutostartConfig(
 	rest: readonly string[],
@@ -108,11 +117,13 @@ export function buildServiceInstallAutostartConfig(
 		port?: string;
 		authToken?: string;
 		remote?: string;
+		insecureNoAuth?: string;
 	} = {
 		host: process.env.PI_UI_HOST,
 		port: process.env.PI_UI_PORT,
 		authToken: process.env.PI_UI_AUTH_TOKEN,
 		remote: process.env.PI_UI_REMOTE,
+		insecureNoAuth: process.env.PI_UI_INSECURE_NO_AUTH,
 	},
 ): ServerAutostartOverrides {
 	const headlessIndex = rest.indexOf("--headless");
@@ -123,15 +134,21 @@ export function buildServiceInstallAutostartConfig(
 			: [...rest.slice(0, headlessIndex), ...rest.slice(headlessIndex + 1)];
 	const options = parseServerOptions(filteredRest, environment);
 	const explicit = explicitServerOptions(filteredRest, environment);
-	return {
-		headless,
-		serviceEnvironment: {
-			hostname: explicit.hostname ? options.hostname : undefined,
-			port: explicit.port ? options.port : undefined,
-			remote: options.remote,
-			authToken: options.authToken,
-		},
+	if (resolveRemoteMode(options) && !options.authToken && !options.insecureNoAuth) {
+		throw new Error(
+			"pi-ui service install refuses a remote-mode service without an auth token, " +
+				"since the server would refuse to start. Pass --auth-token <token> (or set " +
+				"PI_UI_AUTH_TOKEN), or explicitly accept the risk with --insecure-no-auth.",
+		);
+	}
+	const serviceEnvironment: ServerAutostartServiceEnvironment = {
+		hostname: explicit.hostname ? options.hostname : undefined,
+		port: explicit.port ? options.port : undefined,
+		remote: options.remote,
+		authToken: options.authToken,
 	};
+	if (options.insecureNoAuth) serviceEnvironment.insecureNoAuth = true;
+	return { headless, serviceEnvironment };
 }
 
 async function main(): Promise<void> {

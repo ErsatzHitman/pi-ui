@@ -98,6 +98,10 @@ stop pi-ui and remove the service:
 pi-ui service uninstall
 ```
 
+on a headless linux host (a VPS or a laptop you reach over SSH), `service install` also takes
+the server's `--host`/`--port`/`--remote`/`--auth-token` flags and persists them for the
+service — see [`docs/remote.md`](docs/remote.md).
+
 ### homebrew
 
 homebrew manages the service separately:

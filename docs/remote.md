@@ -111,9 +111,10 @@ loginctl enable-linger $USER
 
 Without lingering, systemd still stops your user's services when your SSH session ends —
 this keeps pi-ui running after you log out. `pi-ui service install` accepts the same flags
-as the server itself (`--host`, `--port`, `--remote`, `--auth-token`; `--headless` forces
-headless detection if the installing shell happens to have a `$DISPLAY`, e.g. installing
-over an X-forwarded SSH session).
+as the server itself (`--host`, `--port`, `--remote`, `--auth-token`, `--insecure-no-auth`;
+`--headless` forces headless detection if the installing shell happens to have a `$DISPLAY`,
+e.g. installing over an X-forwarded SSH session). Like the server, it refuses a remote-mode
+service with neither `--auth-token` nor `--insecure-no-auth`.
 
 ```sh
 pi-ui service uninstall   # stops it and removes the unit + env file

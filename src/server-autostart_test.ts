@@ -218,6 +218,21 @@ test("writeSystemdServiceEnvironment writes a 0600 file with the persisted optio
 	}
 });
 
+test("writeSystemdServiceEnvironment persists --insecure-no-auth for a remote service", async () => {
+	const home = await makeTempDir();
+	const config = serverAutostartConfig(
+		"linux",
+		{ executable: "/usr/bin/pi-ui", standalone: true },
+		{ serviceEnvironment: { remote: true, insecureNoAuth: true } },
+	);
+
+	const path = await writeSystemdServiceEnvironment({ ...config, home });
+
+	const contents = await Bun.file(path).text();
+	assertStringIncludes(contents, "PI_UI_REMOTE=1");
+	assertStringIncludes(contents, "PI_UI_INSECURE_NO_AUTH=1");
+});
+
 test("writeSystemdServiceEnvironment removes a stale file when nothing is persisted", async () => {
 	const home = await makeTempDir();
 	const withEnvironment = {

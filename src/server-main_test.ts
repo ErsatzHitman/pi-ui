@@ -1,6 +1,11 @@
 import { test } from "bun:test";
 
-import { assertEquals, assertFalse, assertStringIncludes } from "#testing/assertions";
+import {
+	assertEquals,
+	assertFalse,
+	assertStringIncludes,
+	assertThrows,
+} from "#testing/assertions";
 
 import { serverAutostartConfig, systemdService } from "./server-autostart.ts";
 import { buildServiceInstallAutostartConfig } from "./server-main.ts";
@@ -48,7 +53,8 @@ test("a plain desktop `pi-ui service install` (no flags) keeps the systemd unit 
 
 test("service install persists an explicit --host/--port flag", () => {
 	const config = buildServiceInstallAutostartConfig(
-		["--host", "0.0.0.0", "--port", "8080"],
+		// A non-loopback host implies remote mode, which needs a token to install.
+		["--host", "0.0.0.0", "--port", "8080", "--auth-token", "secret"],
 		{},
 	);
 
@@ -56,7 +62,7 @@ test("service install persists an explicit --host/--port flag", () => {
 		hostname: "0.0.0.0",
 		port: 8080,
 		remote: undefined,
-		authToken: undefined,
+		authToken: "secret",
 	});
 });
 
@@ -64,13 +70,14 @@ test("service install persists an explicit PI_UI_HOST/PI_UI_PORT environment var
 	const config = buildServiceInstallAutostartConfig([], {
 		host: "0.0.0.0",
 		port: "9000",
+		authToken: "secret",
 	});
 
 	assertEquals(config.serviceEnvironment, {
 		hostname: "0.0.0.0",
 		port: 9000,
 		remote: undefined,
-		authToken: undefined,
+		authToken: "secret",
 	});
 });
 
@@ -116,4 +123,33 @@ test("a headless VPS `pi-ui service install --host 0.0.0.0 --remote --auth-token
 	assertStringIncludes(service, "EnvironmentFile=-");
 	assertStringIncludes(service, "WantedBy=default.target");
 	assertFalse(service.includes("secret"));
+});
+
+test("service install refuses a remote service with no auth token, since the server would refuse to start", () => {
+	assertThrows(
+		() => buildServiceInstallAutostartConfig(["--remote"], {}),
+		Error,
+		"--auth-token",
+	);
+	// A non-loopback --host implies remote mode just like it does for `pi-ui` itself.
+	assertThrows(
+		() => buildServiceInstallAutostartConfig(["--host", "0.0.0.0"], {}),
+		Error,
+		"--auth-token",
+	);
+});
+
+test("service install persists --insecure-no-auth so an explicitly unauthenticated remote service still starts", () => {
+	const overrides = buildServiceInstallAutostartConfig(
+		["--remote", "--insecure-no-auth"],
+		{},
+	);
+
+	assertEquals(overrides.serviceEnvironment, {
+		hostname: undefined,
+		port: undefined,
+		remote: true,
+		authToken: undefined,
+		insecureNoAuth: true,
+	});
 });
