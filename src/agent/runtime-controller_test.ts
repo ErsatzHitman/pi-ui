@@ -1849,3 +1849,25 @@ test("RuntimeController rejects /export targets that name a directory", async ()
 	assertEquals(fake.promptInputs, []);
 	await controller.dispose();
 });
+
+test("RuntimeController keeps extension UI live after an in-place session switch", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime("/sessions/a.jsonl");
+	const controller = await activate(state, [fake], "/workspace");
+	// Like the SDK: invalidate, swap the session, then run the rebind callback.
+	fake.runtime.switchSession = async (sessionPath) => {
+		await fake.beforeInvalidate.at(-1)?.();
+		fake.runtime.session.sessionManager.getSessionFile = () => sessionPath;
+		await fake.rebind.at(-1)?.();
+		return { cancelled: false };
+	};
+
+	assertEquals(await controller.resumeSession("/sessions/b.jsonl"), {
+		status: "success",
+	});
+	assertEquals(state.currentSessionPath, "/sessions/b.jsonl");
+	// The resumed session's extensions talk to the UI through the context bound during rebind.
+	fake.extensionBindings.at(-1)?.uiContext?.setStatus("resumed", "still live");
+	assertEquals(state.extensionStatuses, [{ key: "resumed", text: "still live" }]);
+	await controller.dispose();
+});

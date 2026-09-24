@@ -1325,7 +1325,15 @@ export class RuntimeController {
 				);
 				if (!result.cancelled) {
 					sessionPerformance.recordSessionOpen(transitionId);
-					this.adoptRuntime(this.runtime);
+					// The SDK's in-place switch already ran the rebind callback, which bound
+					// the new session's extensions to the current foreground generation. A
+					// fresh generation here would make that extension UI context inactive
+					// for good: every `ctx.ui` call (notify, setWidget, custom(), dialogs)
+					// in the resumed session was silently dropped.
+					this.adoptRuntime(this.runtime, {
+						generation: this.foregroundGeneration,
+						observedRunning: this.runtime.session.isStreaming,
+					});
 					sessionPerformance.recordOwnershipDiagnostics(
 						{
 							sourceLocationAfter: "disposed",
