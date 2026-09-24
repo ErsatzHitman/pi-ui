@@ -190,6 +190,10 @@ test("a pinned roster renders as a compact summary strip, not a full row list", 
 	assertStringIncludes(html, ">Open</button>");
 	// The full per-row list belongs to the Live Workspace Extensions tab, not this strip.
 	assertStringExcludes(html, "piui-roster-row");
+	// Sessions and Live Workspace are mutually exclusive (sidebar-exclusive): this "Open"
+	// button opens Live Workspace, so it must also close Sessions if it's open.
+	assertStringIncludes(html, "$_liveWorkspaceOpen = true;");
+	assertStringIncludes(html, "getElementById('session-sidebar')");
 });
 
 test("a pinned progress element keeps its one-line bar inside the summary strip", () => {

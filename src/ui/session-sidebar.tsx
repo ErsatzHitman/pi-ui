@@ -1,3 +1,4 @@
+import { closeLiveWorkspaceAction } from "../commands/actions.ts";
 import { activeKeybind, keybindActions, keybindAria } from "../keybinds.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import {
@@ -80,6 +81,7 @@ export function renderSessionSidebar(
 					el.toggleAttribute('data-animate-open', evt.source !== null && !evt.source.matches(':focus-visible'));
 					if (!el.open) el.closedBy === 'any' ? el.showModal() : el.show();
 					el.querySelector('.session-sidebar-scroller').scrollLeft = 0;
+					if ($_liveWorkspaceOpen) { ${closeLiveWorkspaceAction()} }
 				};
 					if (evt.command === '--toggle' && el.closedBy !== 'any') @post('${endpoints.sessionSidebar}', { payload: { sessionSidebar: { open: el.open } } });
 				`}

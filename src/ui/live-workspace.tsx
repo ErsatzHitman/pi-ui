@@ -114,17 +114,17 @@ function ratioResizeHandleAttributes() {
 	};
 }
 
-/** The toolbar button that opens/closes the pane; rendered in `page.tsx`'s toolbar-end column. */
+/**
+ * One segment of the "Sessions | Live" switch (PLAN-ux.md "sidebar-exclusive") that replaces the
+ * old standalone icon-only toggle; `page.tsx` renders it beside the Sessions segment inside their
+ * shared `.segmented-control`. Sessions and Live Workspace are mutually exclusive, so opening this
+ * one closes Sessions (`toggleLiveWorkspaceAction`).
+ */
 export function renderLiveWorkspaceToggle(_state: AppStateSnapshot): string {
 	return syncHtml(
 		<button
 			id="live-workspace-toggle"
 			type="button"
-			class="btn live-workspace-toggle"
-			data-variant="ghost"
-			data-attr:data-variant="$_liveWorkspaceOpen ? 'secondary' : 'ghost'"
-			data-size="icon-sm"
-			aria-label="Toggle Live Workspace"
 			aria-pressed="false"
 			data-attr:aria-pressed="$_liveWorkspaceOpen ? 'true' : 'false'"
 			aria-keyshortcuts={keybindAria("toggle-live-workspace")}
@@ -138,6 +138,7 @@ export function renderLiveWorkspaceToggle(_state: AppStateSnapshot): string {
 			data-align="end"
 		>
 			<Icon icon={Activity} />
+			<span>Live</span>
 			<ShortcutTooltip
 				label="Toggle Live Workspace"
 				shortcut={activeKeybind("toggle-live-workspace")}

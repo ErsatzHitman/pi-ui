@@ -49,15 +49,30 @@ export function toggleWorkspaceReviewAction(): string {
 }
 
 /**
+ * Closes the Sessions sidebar exactly the way its own toolbar button does — dispatching the same
+ * `--toggle` command the dialog's `data-on:command` handler (`session-sidebar.tsx`) already
+ * listens for, so the one close-and-persist code path runs whichever caller asks for it. A no-op
+ * when Sessions is already closed. Sessions and Live Workspace share the right-hand area and are
+ * mutually exclusive (PLAN-ux.md "sidebar-exclusive"): opening one must close the other from
+ * every entry point (toolbar button, keybind, command palette, PIUI-driven links).
+ */
+export function closeSessionSidebarAction(): string {
+	return `const sessionSidebar = document.getElementById('session-sidebar');
+		if (sessionSidebar?.open) sessionSidebar.dispatchEvent(new CommandEvent('command', { command: '--toggle' }));`;
+}
+
+/**
  * Sets `$_liveWorkspaceOpen` and persists the new value as the saved preference (A#15):
  * `$_liveWorkspaceOpen` is the live, instantly-applied signal the pane's CSS reads, while
  * `$liveWorkspacePreferences.open` is what's posted to the backend and seeds the signal on the
  * next load — the same split `pi-ui-live-workspace-preferences` event already uses for `tab`
- * and `ratio`.
+ * and `ratio`. Opening the pane (the guard only ever fires when `$_liveWorkspaceOpen` ends up
+ * `true`, never on a close) also closes Sessions, keeping the two mutually exclusive.
  */
 function setLiveWorkspaceOpenAction(valueExpression: string): string {
 	return `
 		$_liveWorkspaceOpen = ${valueExpression};
+		if ($_liveWorkspaceOpen) { ${closeSessionSidebarAction()} }
 		document.body.dispatchEvent(new CustomEvent(
 			'pi-ui-live-workspace-preferences',
 			{ detail: { open: $_liveWorkspaceOpen } },
