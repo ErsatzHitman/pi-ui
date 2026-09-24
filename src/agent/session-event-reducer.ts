@@ -1,4 +1,4 @@
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionEvent, CustomEntry } from "@earendil-works/pi-coding-agent";
 
 import type {
 	FinishedAssistantIds,
@@ -103,6 +103,19 @@ export type SessionEventReducerContext = {
 		message: EventOf<"message_start">["message"],
 		timestamp: Date,
 	) => readonly TranscriptMessageInput[];
+	/**
+	 * Projects an `entry_appended` event's `CustomEntry` (`pi.appendEntry`,
+	 * `type: "custom"`) into transcript messages — see
+	 * `TranscriptProjector.customEntry`. `entry_appended` also fires for
+	 * ordinary message/context-edit/label/cache-warming entries already
+	 * covered by their own dedicated events, so the reducer below only calls
+	 * this for `entry.type === "custom"`; every other entry type is ignored
+	 * here to avoid double-appending it to the transcript.
+	 */
+	convertEntry?: (
+		entry: CustomEntry,
+		timestamp: Date,
+	) => readonly TranscriptMessageInput[];
 	formatToolStart: (event: EventOf<"tool_execution_start">) => ToolMessageView;
 	formatToolPreview: (toolName: string, args: ToolArguments) => ToolMessageView;
 	formatToolUpdate: (
@@ -175,6 +188,9 @@ export function reduceSessionEvent(
 				}
 				if (message.details !== undefined) {
 					options.details = message.details;
+				}
+				if (message.customRenderHtml !== undefined) {
+					options.customRenderHtml = message.customRenderHtml;
 				}
 				state.appendMessage(message.role, message.text, options);
 			}
@@ -320,6 +336,23 @@ export function reduceSessionEvent(
 		}
 		case "queue_update":
 			state.setQueuedMessages(event.steering, event.followUp);
+			break;
+		case "entry_appended":
+			// Every other `entry_appended` entry type (message, context_edit, label,
+			// cache-warming) already reaches the transcript through its own dedicated
+			// event — see `convertEntry`'s doc comment.
+			if (event.entry.type === "custom" && context.convertEntry) {
+				for (const message of context.convertEntry(
+					event.entry,
+					context.now?.() ?? new Date(),
+				)) {
+					state.appendMessage(message.role, message.text, {
+						meta: message.meta,
+						customRenderHtml: message.customRenderHtml,
+						customRenderError: message.customRenderError,
+					});
+				}
+			}
 			break;
 		case "agent_end":
 			break;

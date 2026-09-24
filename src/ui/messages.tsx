@@ -688,8 +688,30 @@ function renderErrorMessage(message: AppMessage): string {
 	);
 }
 
+function renderCustomComponentOutput(message: AppMessage): string {
+	if (message.customRenderError) {
+		return syncHtml(
+			<p class="message-custom-render-error" safe>
+				{message.customRenderError}
+			</p>,
+		);
+	}
+	// `customRenderHtml` lines are already safe, pre-escaped HTML from
+	// `CustomRendererHost` (`ansiLineToHtml`, the same pipeline
+	// `terminal-surface.tsx` uses for `custom()` overlays) — never re-escaped
+	// here, matching how that module embeds the same kind of output.
+	return syncHtml(
+		<div class="message-custom-render">
+			{(message.customRenderHtml ?? []).join("\n")}
+		</div>,
+	);
+}
+
 function renderContextMessage(message: AppMessage): string {
 	const isCustom = message.role === "custom";
+	const hasCustomRender = Boolean(
+		isCustom && (message.customRenderHtml || message.customRenderError),
+	);
 	const label = isCustom
 		? message.meta || "custom"
 		: message.role === "compaction"
@@ -716,7 +738,13 @@ function renderContextMessage(message: AppMessage): string {
 			<details class="context-details" data-preserve-attr="open" open={isCustom}>
 				<summary class="context-summary">
 					<span class="tool-state-dot status-dot" aria-hidden="true">
-						<span class="tool-status-ball tool-status-success" />
+						<span
+							class={`tool-status-ball ${
+								message.customRenderError
+									? "tool-status-error"
+									: "tool-status-success"
+							}`}
+						/>
 					</span>
 					<span class="context-title">
 						<span safe>{label}</span>
@@ -731,12 +759,16 @@ function renderContextMessage(message: AppMessage): string {
 					</span>
 				</summary>
 				<div class="tool-output-surface context-output">
-					<div class="markdown-content">
-						<div>
-							{message.renderedHtml ??
-								renderMarkdownStreaming(message.text)}
+					{hasCustomRender ? (
+						renderCustomComponentOutput(message)
+					) : (
+						<div class="markdown-content">
+							<div>
+								{message.renderedHtml ??
+									renderMarkdownStreaming(message.text)}
+							</div>
 						</div>
-					</div>
+					)}
 					{isCustom && message.details && (
 						<details class="context-details context-details-nested">
 							<summary class="context-summary context-summary-nested">

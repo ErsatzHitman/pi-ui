@@ -49,6 +49,24 @@ export type TranscriptMessage = {
 	 * caller (see `tool-presentation.ts`'s `summarizeValue`). Never LLM context.
 	 */
 	details?: string;
+	/**
+	 * Pre-rendered HTML lines from an extension's `pi.registerMessageRenderer`/
+	 * `registerEntryRenderer` (a `pi-tui` `Component`), produced by
+	 * `CustomRendererHost` through the same ANSI→HTML pipeline
+	 * `TerminalSurfaceController` uses for `custom()` overlays. Already safe,
+	 * pre-escaped HTML (see `ansiLineToHtml`) — never raw ANSI or untrusted
+	 * markup. `role: "custom"` only; when present it renders instead of
+	 * `text`'s markdown (round-7 "custom message + entry renderers").
+	 */
+	customRenderHtml?: readonly string[];
+	/**
+	 * Set only when a `registerEntryRenderer` (never a message renderer — see
+	 * `CustomRendererHost`'s doc comment) throws. Mirrors the real interactive
+	 * mode's `CustomEntryComponent`: a visible `"[type] renderer failed: …"`
+	 * line instead of silently falling back, since a `CustomEntry` has no
+	 * text/markdown fallback to fall back to.
+	 */
+	customRenderError?: string;
 };
 
 export type TranscriptMessageOptions = Pick<
@@ -61,6 +79,8 @@ export type TranscriptMessageOptions = Pick<
 	| "attachments"
 	| "noticeTone"
 	| "details"
+	| "customRenderHtml"
+	| "customRenderError"
 >;
 
 export type TranscriptMessageInput = Omit<TranscriptMessage, "id">;

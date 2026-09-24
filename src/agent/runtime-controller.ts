@@ -8,6 +8,7 @@ import {
 	createAgentSessionRuntime,
 	type CreateAgentSessionRuntimeFactory,
 	createAgentSessionServices,
+	type CustomEntry,
 	getAgentDir,
 	ProjectTrustStore,
 	SessionManager,
@@ -63,6 +64,7 @@ import {
 	parseSlashCommand,
 } from "./builtin-commands.ts";
 import { detectCacheMiss, formatCacheMissNotice } from "./cache-miss.ts";
+import { CustomRendererHost } from "./custom-renderer-host.ts";
 import {
 	findExtensionShortcut,
 	listExtensionShortcuts,
@@ -109,6 +111,8 @@ import {
 	SessionTransitionController,
 	type SessionTransitionResult,
 } from "./session-transition-controller.ts";
+import { defaultTerminalColumns } from "./terminal-surface/headless-terminal.ts";
+import { resolveTerminalTheme } from "./terminal-surface/theme.ts";
 import {
 	formatToolResult,
 	formatToolStart,
@@ -117,7 +121,10 @@ import {
 	toolTitle,
 	toolTitleParts,
 } from "./tool-presentation.ts";
-import { TranscriptProjector } from "./transcript-projector.ts";
+import {
+	type TranscriptCustomRenderers,
+	TranscriptProjector,
+} from "./transcript-projector.ts";
 import { type TreeNavigationResult, TreeProjector } from "./tree-projector.ts";
 import { UsageController } from "./usage-controller.ts";
 
@@ -249,6 +256,7 @@ export class RuntimeController {
 	private readonly usage: UsageController;
 	private readonly extensionUi: ExtensionUiController;
 	private readonly transcript = new TranscriptProjector();
+	private readonly customRenderers = new CustomRendererHost();
 	private readonly tree: TreeProjector;
 	private foregroundGeneration: number;
 	private foregroundObservedRunning: boolean;
@@ -2153,19 +2161,74 @@ export class RuntimeController {
 			.finally(() => this.autoTitlesInFlight.delete(path));
 	}
 
+	/**
+	 * Builds fresh `TranscriptCustomRenderers` closures, bound to the current
+	 * runtime's `extensionRunner` plus the requesting client's last reported
+	 * terminal width/color scheme (R7-A "custom message + entry renderers") —
+	 * see `TranscriptCustomRenderers`' and `CustomRendererHost`'s doc
+	 * comments. Read fresh on every call (never cached across calls) because
+	 * `this.runtime` changes on session switch/fork/resume, and the client's
+	 * reported width/scheme can change between messages.
+	 */
+	private customTranscriptRenderers(): TranscriptCustomRenderers {
+		const extensionRunner = this.runtime.session.extensionRunner;
+		// Mirrors `TerminalSurfaceController`'s own non-overlay cap (round 6 F2):
+		// the viewport hint is the whole browser window, which only an overlay
+		// can span — a transcript message sits in the prompt column, so on a
+		// wide screen the raw hint would render it far wider than its box.
+		const width = Math.min(
+			this.state.clientViewportCells?.columns ?? defaultTerminalColumns,
+			defaultTerminalColumns,
+		);
+		const colorScheme = this.state.clientColorScheme;
+		const theme = resolveTerminalTheme(colorScheme);
+		const outputPad = this.runtime.session.settingsManager?.getOutputPad() ?? 1;
+		const renderOptions = { width, colorScheme, expanded: true };
+		return {
+			renderMessage: (message) => {
+				const renderer = extensionRunner.getMessageRenderer(message.customType);
+				if (!renderer) return undefined;
+				// A live-streamed message carries no persisted entry id yet (that's
+				// assigned when the session file is written, after the event fires);
+				// `customType` + the message's own millisecond timestamp is unique
+				// enough for a chat transcript's cache key either way.
+				return this.customRenderers.render(
+					`msg:${message.customType}:${message.timestamp}`,
+					renderOptions,
+					() => renderer(message, { expanded: true, outputPad }, theme),
+				);
+			},
+			renderEntry: (entry: CustomEntry) => {
+				const renderer = extensionRunner.getEntryRenderer(entry.customType);
+				if (!renderer) return undefined;
+				return this.customRenderers.render(
+					`entry:${entry.id}`,
+					renderOptions,
+					() => renderer(entry, { expanded: true }, theme),
+				);
+			},
+		};
+	}
+
 	private reduceEvent(
 		event: AgentSessionEvent,
 		state: SessionEventStateSink,
 		tools: SessionEventToolState,
 		syncUsage?: () => void,
 	) {
+		const customRenderers = this.customTranscriptRenderers();
 		return reduceSessionEvent(event, {
 			state,
 			tools,
 			convertMessage: (message, timestamp) =>
-				this.transcript.message(message, timestamp, {
-					includeAssistantError: false,
-				}),
+				this.transcript.message(
+					message,
+					timestamp,
+					{ includeAssistantError: false },
+					customRenderers,
+				),
+			convertEntry: (entry, timestamp) =>
+				this.transcript.customEntry(entry, timestamp, customRenderers),
 			formatToolStart: (toolEvent) =>
 				this.formatRunningTool(toolEvent.toolName, toolEvent.args),
 			formatToolPreview: (toolName, args) =>
@@ -2321,7 +2384,7 @@ export class RuntimeController {
 	}
 
 	private loadCurrentSessionMessages(): void {
-		this.transcript.load(this.runtime, this.state);
+		this.transcript.load(this.runtime, this.state, this.customTranscriptRenderers());
 		this.usage.sync();
 	}
 }

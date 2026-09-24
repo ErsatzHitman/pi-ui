@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionEvent, CustomEntry } from "@earendil-works/pi-coding-agent";
 
 import { assertEquals } from "#testing/assertions";
 
@@ -15,7 +15,7 @@ import {
 	type SessionEventReducerContext,
 	type SessionEventStateSink,
 } from "./session-event-reducer.ts";
-import { agentSessionEventStub } from "./test-fixtures.ts";
+import { agentSessionEventStub, sessionEntryStub } from "./test-fixtures.ts";
 
 class FakeState implements SessionEventStateSink {
 	readonly appended: Array<{
@@ -649,4 +649,77 @@ test("failed compaction appends the error", () => {
 		text: "Compaction failed",
 		options: {},
 	});
+});
+
+test("entry_appended renders a CustomEntry through convertEntry", () => {
+	const { state, context } = fixture();
+	const entry = sessionEntryStub({
+		type: "custom",
+		customType: "memory",
+		data: { note: "hi" },
+	}) as CustomEntry;
+	let received: CustomEntry | undefined;
+	const ctx: SessionEventReducerContext = {
+		...context,
+		convertEntry: (input, timestamp) => {
+			received = input;
+			return [
+				{
+					role: "custom",
+					text: "",
+					timestamp,
+					meta: input.customType,
+					customRenderHtml: ["<span>rendered</span>"],
+				},
+			];
+		},
+	};
+
+	reduceSessionEvent(agentSessionEventStub({ type: "entry_appended", entry }), ctx);
+
+	assertEquals(received, entry);
+	assertEquals(state.appended, [
+		{
+			id: "message-1",
+			role: "custom",
+			text: "",
+			options: {
+				meta: "memory",
+				customRenderHtml: ["<span>rendered</span>"],
+				customRenderError: undefined,
+			},
+		},
+	]);
+});
+
+test("entry_appended ignores entry types other than custom", () => {
+	const { state, context } = fixture();
+	const ctx: SessionEventReducerContext = {
+		...context,
+		convertEntry: () => {
+			throw new Error("must not be called for a non-custom entry");
+		},
+	};
+
+	reduceSessionEvent(
+		agentSessionEventStub({
+			type: "entry_appended",
+			entry: sessionEntryStub({ type: "label", targetId: "x", label: "y" }),
+		}),
+		ctx,
+	);
+
+	assertEquals(state.appended, []);
+});
+
+test("entry_appended is a no-op with no convertEntry hook", () => {
+	const { state, context } = fixture();
+	const entry = sessionEntryStub({
+		type: "custom",
+		customType: "memory",
+	}) as CustomEntry;
+
+	reduceSessionEvent(agentSessionEventStub({ type: "entry_appended", entry }), context);
+
+	assertEquals(state.appended, []);
 });
