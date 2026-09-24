@@ -154,24 +154,39 @@ test("service install persists --insecure-no-auth so an explicitly unauthenticat
 	});
 });
 
-test("shutdown closes open SSE streams in remote mode, so SIGTERM never waits on a connected client", async () => {
-	for (const remote of [true, false]) {
-		const calls: string[] = [];
-		const shutdown = createShutdown(
-			{
-				stop: async (closeActiveConnections?: boolean) => {
-					calls.push(`stop(${closeActiveConnections === true})`);
-				},
+test("shutdown closes open SSE streams by default, in local mode too, so SIGTERM never waits on a connected client", async () => {
+	// `systemctl stop/restart` (remote) or Ctrl+C (local, a tab left open) with a client
+	// still connected used to hang for Bun's default graceful stop / systemd's 90s stop
+	// timeout and end in SIGKILL, with disposeApp never running. RM1 audit open issue 4:
+	// this is a real local bug too, so it's unconditional now, not gated on remote mode.
+	const calls: string[] = [];
+	const shutdown = createShutdown(
+		{
+			stop: async (closeActiveConnections?: boolean) => {
+				calls.push(`stop(${closeActiveConnections === true})`);
 			},
-			async () => {
-				calls.push("dispose");
+		},
+		async () => {
+			calls.push("dispose");
+		},
+	);
+	await Promise.all([shutdown(), shutdown()]);
+	assertEquals(calls, ["stop(true)", "dispose"]);
+});
+
+test("shutdown's closeActiveConnections is still overridable for callers that need it", async () => {
+	const calls: string[] = [];
+	const shutdown = createShutdown(
+		{
+			stop: async (closeActiveConnections?: boolean) => {
+				calls.push(`stop(${closeActiveConnections === true})`);
 			},
-			remote,
-		);
-		await Promise.all([shutdown(), shutdown()]);
-		// Remote: `systemctl stop/restart` with a phone still connected used to hang for
-		// systemd's 90 s stop timeout and end in SIGKILL (disposeApp never ran). Local
-		// keeps Bun's default graceful stop.
-		assertEquals(calls, [`stop(${remote})`, "dispose"]);
-	}
+		},
+		async () => {
+			calls.push("dispose");
+		},
+		false,
+	);
+	await shutdown();
+	assertEquals(calls, ["stop(false)", "dispose"]);
 });

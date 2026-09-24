@@ -154,16 +154,17 @@ export function buildServiceInstallAutostartConfig(
 /**
  * SIGINT/SIGTERM handler: stop accepting connections, then dispose the app (runtimes,
  * watchers, transfer dirs). Bun's default `server.stop()` waits for in-flight requests,
- * and a connected client's `/stream` SSE never finishes on its own — so in remote mode,
- * where a phone or laptop is typically still connected, `systemctl stop/restart` hung
- * for systemd's 90 s stop timeout and ended in SIGKILL without disposing anything. Remote
- * mode closes those connections instead (clients reconnect on their own); local mode
- * keeps the default. Runs once however many signals arrive.
+ * and a connected client's `/stream` SSE never finishes on its own — so `systemctl
+ * stop/restart` with a phone still connected, or a local Ctrl+C with a tab left open,
+ * hung for systemd's 90 s stop timeout / indefinitely and ended in SIGKILL without
+ * disposing anything. Unconditional (RM1 audit open issue 4): a real local bug too, not
+ * only a remote one; connected clients simply reconnect on their own either way. Runs
+ * once however many signals arrive.
  */
 export function createShutdown(
 	server: { stop(closeActiveConnections?: boolean): Promise<void> },
 	disposeApp: () => Promise<void>,
-	closeActiveConnections: boolean = isRemoteMode(),
+	closeActiveConnections: boolean = true,
 ): () => Promise<void> {
 	let stopping: Promise<void> | undefined;
 	return () => {
