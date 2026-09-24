@@ -253,6 +253,11 @@ export type RuntimeControllerActivationOptions = {
 	dependencies?: RuntimeControllerDependencies;
 	isApplicationFocused?: () => boolean | Promise<boolean>;
 	notifySessionDone?: (details: SessionDoneNotification) => Promise<void>;
+	/** Web Push for "session finished" (round RM2 "pwa") when no client has an
+	 * open `/stream` — see `PushService.notifySessionFinished`, wired from
+	 * `app.ts`. Fire-and-forget, like `notifySessionDone`: a push failure must
+	 * never affect the session runtime. */
+	sendWebPush?: (details: SessionDoneNotification) => void | Promise<void>;
 	autoTitle?: AutoTitleConfig;
 	/** How extensions are bound (`session.bindExtensions({ mode })`) for every
 	 * runtime this controller creates, forks, resumes, or switches to. See
@@ -1980,6 +1985,10 @@ export class RuntimeController {
 			// this stays background-only to avoid firing both for the same completion. See
 			// `AppStore.notifySessionFinished`.
 			this.state.notifySessionFinished(details);
+			// Web Push (round RM2 "pwa"): reaches a device with no tab open at all,
+			// which the SSE broadcast above cannot. `PushService` itself decides
+			// whether one is actually needed (remote mode, no connected client).
+			void this.activationOptions.sendWebPush?.(details);
 		}
 		void this.notifyRuntimeDoneWhenAppropriate(details, background);
 	}

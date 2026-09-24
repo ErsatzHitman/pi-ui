@@ -1568,6 +1568,34 @@ test("RuntimeController broadcasts a session-finished effect for completed backg
 	await controller.dispose();
 });
 
+test("RuntimeController calls sendWebPush for completed background work only", async () => {
+	const pushDetails: SessionDoneNotification[] = [];
+	const background = fakeRuntime("/sessions/background.jsonl");
+	const foreground = fakeRuntime("/sessions/foreground.jsonl");
+	background.setStreaming(true);
+	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
+		dependencies: dependencies([background, foreground]),
+		isApplicationFocused: () => true,
+		notifySessionDone: () => Promise.resolve(),
+		sendWebPush: (details) => {
+			pushDetails.push(details);
+		},
+	});
+	controller.activate();
+	assertEquals((await controller.newSession()).status, "success");
+
+	foreground.emit(agentSessionEventStub({ type: "agent_end" }));
+	foreground.emit(agentSessionEventStub({ type: "agent_settled" }));
+	assertEquals(pushDetails, []);
+
+	background.emit(agentSessionEventStub({ type: "agent_end" }));
+	background.emit(agentSessionEventStub({ type: "agent_settled" }));
+	assertEquals(pushDetails, [
+		{ workspace: "/workspace", sessionPath: "/sessions/background.jsonl" },
+	]);
+	await controller.dispose();
+});
+
 test("RuntimeController disposes a prepared runtime when extension binding fails", async () => {
 	const fake = fakeRuntime();
 	fake.runtime.session.bindExtensions = () => Promise.reject(new Error("bind failed"));

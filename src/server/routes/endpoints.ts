@@ -95,5 +95,7 @@ export const endpoints = {
 	filesImport: "/files/import",
 	filesOpen: "/files/open",
 	filesPreview: `${filesPreviewBase}*`,
+	pushSubscribe: "/push/subscribe",
+	pushUnsubscribe: "/push/unsubscribe",
 	inspector: "/vendor/datastar-inspector.min.js",
 } as const;

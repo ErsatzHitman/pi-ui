@@ -707,6 +707,74 @@ test("file imports report content-detected image MIME types", async () => {
 	}
 });
 
+test("GET /sw.js renders a versioned, classic-script service worker", async () => {
+	const response = await createRouter(fakeContext()).fetch(
+		new Request("http://localhost/sw.js"),
+	);
+	assertEquals(response.status, 200);
+	assertEquals(response.headers.get("content-type"), "text/javascript; charset=utf-8");
+	const body = await response.text();
+	assertStringIncludes(body, 'const CACHE_NAME = "pi-ui-offline-test-version"');
+	assertEquals(body.includes("import "), false);
+});
+
+test("push subscribe stores a valid subscription and returns 204", async () => {
+	const added: unknown[] = [];
+	const response = await createRouter(
+		fakeContext({
+			pushSubscriptions: {
+				add: async (record) => {
+					added.push(record);
+				},
+				remove: async () => {},
+			},
+		}),
+	).fetch(
+		new Request("http://localhost/push/subscribe", {
+			method: "POST",
+			body: JSON.stringify({
+				endpoint: "https://push.example/abc",
+				keys: { p256dh: "p", auth: "a" },
+			}),
+		}),
+	);
+	assertEquals(response.status, 204);
+	assertEquals(added, [
+		{ endpoint: "https://push.example/abc", p256dh: "p", auth: "a" },
+	]);
+});
+
+test("push subscribe rejects a malformed body", async () => {
+	const response = await createRouter(fakeContext()).fetch(
+		new Request("http://localhost/push/subscribe", {
+			method: "POST",
+			body: JSON.stringify({ endpoint: "https://push.example/abc" }),
+		}),
+	);
+	assertEquals(response.status, 400);
+});
+
+test("push unsubscribe removes the subscription and returns 204", async () => {
+	const removed: string[] = [];
+	const response = await createRouter(
+		fakeContext({
+			pushSubscriptions: {
+				add: async () => {},
+				remove: async (endpoint) => {
+					removed.push(endpoint);
+				},
+			},
+		}),
+	).fetch(
+		new Request("http://localhost/push/unsubscribe", {
+			method: "POST",
+			body: JSON.stringify({ endpoint: "https://push.example/abc" }),
+		}),
+	);
+	assertEquals(response.status, 204);
+	assertEquals(removed, ["https://push.example/abc"]);
+});
+
 test("accepted prompts do not clear a newer frontend draft", async () => {
 	const router = createRouter(fakeContext());
 	for (const path of ["/prompt", "/prompt/follow-up"]) {
@@ -1649,6 +1717,7 @@ function fakeContext(
 		toolbarHidden?: boolean;
 		themeLab?: boolean;
 		transferredFiles?: RouteContext["transferredFiles"];
+		pushSubscriptions?: RouteContext["pushSubscriptions"];
 	} = {},
 ): RouteContext {
 	const store = new AppStore();
@@ -1674,6 +1743,11 @@ function fakeContext(
 			sessionImages: new SessionImageStore(),
 		},
 		transferredFiles: overrides.transferredFiles ?? { importFiles: async () => [] },
+		pushPublicKey: "test-push-public-key",
+		pushSubscriptions: overrides.pushSubscriptions ?? {
+			add: async () => {},
+			remove: async () => {},
+		},
 		openWorkspace: async () => true,
 		serveStatic: async () => new Response("static"),
 	};
