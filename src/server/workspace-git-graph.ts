@@ -223,36 +223,29 @@ export async function readWorkspaceGitGraphCommit(
 	if (!/^[0-9a-f]{7,40}$/i.test(commitHash)) return undefined;
 	const root = await findGitRoot(workspacePath);
 	if (!root) return undefined;
-	const [metadataResult, statusResult] = await Promise.all([
-		git(root, "show", "-s", commitDetailFormat, commitHash),
-		git(
-			root,
-			"diff-tree",
-			"--root",
-			"--no-commit-id",
-			"--name-status",
-			"-r",
-			"-z",
-			"--find-renames",
-			"--diff-merges=first-parent",
-			commitHash,
-		),
-	]);
-	if (metadataResult.code !== 0 || statusResult.code !== 0) return undefined;
-	const entry = parseGitGraphLog(metadataResult.stdout)[0];
-	if (!entry) return undefined;
-	const numstatResult = await git(
-		root,
+	const diffTreeArgs = (statFormat: string) => [
 		"diff-tree",
 		"--root",
 		"--no-commit-id",
-		"--numstat",
+		statFormat,
 		"-r",
 		"-z",
 		"--find-renames",
 		"--diff-merges=first-parent",
 		commitHash,
-	);
+	];
+	// All three git processes run concurrently rather than the numstat call waiting on
+	// the other two to finish first: it doesn't depend on their output, and on Windows,
+	// where spawning a git.exe process is comparatively expensive, serializing them turned
+	// a commit detail's first open into three back-to-back process-spawn round trips.
+	const [metadataResult, statusResult, numstatResult] = await Promise.all([
+		git(root, "show", "-s", commitDetailFormat, commitHash),
+		git(root, ...diffTreeArgs("--name-status")),
+		git(root, ...diffTreeArgs("--numstat")),
+	]);
+	if (metadataResult.code !== 0 || statusResult.code !== 0) return undefined;
+	const entry = parseGitGraphLog(metadataResult.stdout)[0];
+	if (!entry) return undefined;
 	const stats = new Map<string, { additions: number; deletions: number }>();
 	if (numstatResult.code === 0) {
 		const records = numstatResult.stdout.split("\0");
