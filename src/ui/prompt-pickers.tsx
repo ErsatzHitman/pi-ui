@@ -254,6 +254,22 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 						data-multi-pane={providers.length > 1 ? "true" : undefined}
 						data-active-pane={activePane}
 						data-active-provider={activeProvider}
+						data-searching="false"
+						// `data-active-pane`/`data-active-provider`/`data-searching` are the
+						// picker's live pane/provider/search state — set by this render, then
+						// mutated client-side by `window.piUi.modelPicker`/`modelSearch`
+						// (static/app/model-picker.js, model-search.js) as the user browses or
+						// types, all *while this same popover stays open*. Any other dirty-region
+						// re-render (another client changing the model, this client toggling a
+						// model's star, a thinking-level change, …) re-renders this whole picker
+						// from scratch and would otherwise morph these three attributes back to
+						// this render's values, silently discarding which pane/provider the user
+						// had drilled into (or that they were mid-search) even though the popover
+						// never closed. `reset()` (called on open, via `data-on:beforetoggle`
+						// above) is the one place meant to resync them, deriving the truth from
+						// the fresh `aria-current` markers this render always keeps up to date
+						// rather than trusting these three attributes.
+						data-preserve-attr="data-active-pane data-active-provider data-searching"
 					>
 						<header>
 							<input
@@ -365,8 +381,27 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 								</div>
 								{providers.map((provider) => (
 									<div
+										// `modelPickerProviders` orders providers by each provider's
+										// first-appearing model, and `enabledModels`/scoping toggles
+										// re-sort `state.models` scoped/current-first — so a scope
+										// toggle can reorder these groups between renders. A stable,
+										// globally-unique id lets the morph engine (idiomorph-style
+										// `getElementById` reuse in static/vendor/datastar.js) track
+										// each provider's own group NODE across that reorder instead
+										// of positionally reassigning fresh content onto whichever
+										// node happens to sit in a given slot — without it, the
+										// `data-preserve-attr="hidden"` below could end up preserved
+										// on the wrong provider's node after a reorder.
+										id={`model-group-body-${encodeURIComponent(provider.provider)}`}
 										role="group"
 										data-provider-group={provider.provider}
+										// Client-owned narrowing (`applyActiveProvider()` in
+										// static/app/model-picker.js sets `hidden` here to show only
+										// the active provider's group): this render never sets
+										// `hidden` itself, so without this guard a later re-render's
+										// morph would strip it back out from under the open popover.
+										// Same reasoning as the `.model-option` rows below.
+										data-preserve-attr="hidden"
 										aria-labelledby={
 											providers.length > 1
 												? `model-group-${encodeURIComponent(provider.provider)}`

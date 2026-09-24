@@ -416,6 +416,55 @@ test("model picker is a dual-pane provider -> model picker", () => {
 	assertStringIncludes(html, "data-pane-back");
 });
 
+test("model picker protects client-owned narrowing state from server re-renders", () => {
+	// Regression (verifier fix pass): `applyActiveProvider()` (static/app/model-picker.js)
+	// narrows the models pane by setting `hidden` on every non-active
+	// `[data-provider-group]`, and `data-active-pane`/`data-active-provider`/
+	// `data-searching` on the `.command` root track which pane/provider/search state is
+	// live. None of this is server-rendered (the SSR markup below never sets `hidden` on
+	// a provider group, nor `data-searching` at all), so without `data-preserve-attr`
+	// Datastar's morph strips it back out on the next unrelated re-render of this dirty
+	// region (e.g. another connected client changing the model, or this client toggling a
+	// model's star) while the popover is still open — every provider's models reappear at
+	// once and the active pane/provider/search flags silently reset. `.model-option` rows
+	// a few lines below already guard themselves this way (`data-preserve-attr="class
+	// hidden"`); the provider-group wrapper and the command root need the same guard.
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "claude-sonnet",
+					provider: "anthropic",
+					name: "Claude Sonnet",
+					configured: true,
+					scoped: false,
+				},
+				{
+					id: "gpt-5.6",
+					provider: "openai-codex",
+					name: "GPT 5.6",
+					configured: false,
+					scoped: false,
+				},
+			],
+			currentModel: "anthropic/claude-sonnet",
+		}),
+	);
+
+	assertStringIncludes(
+		html,
+		'data-provider-group="anthropic" data-preserve-attr="hidden"',
+	);
+	assertStringIncludes(
+		html,
+		'data-provider-group="openai-codex" data-preserve-attr="hidden"',
+	);
+	assertStringIncludes(
+		html,
+		'data-preserve-attr="data-active-pane data-active-provider data-searching"',
+	);
+});
+
 test("model picker falls back to the providers pane with no model selected yet", () => {
 	const html = renderModelPicker(
 		appRenderSnapshot({
