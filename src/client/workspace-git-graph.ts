@@ -22,7 +22,9 @@ const maxLaneAreaWidth = 120;
 
 function renderRefBadge(ref: GitGraphRef): HTMLElement {
 	const badge = document.createElement("span");
-	badge.className = "review-graph-ref";
+	// Reuses the shared `.badge` primitive (pill shape, base colors) and layers
+	// `.review-graph-ref` on top for the denser sizing a commit row needs.
+	badge.className = "badge review-graph-ref";
 	badge.dataset.kind = ref.kind;
 	if (ref.main) badge.dataset.main = "";
 	if (ref.current) badge.dataset.current = "";

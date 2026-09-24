@@ -399,18 +399,21 @@
 	.review-graph-working .review-graph-subject {
 		color: inherit;
 	}
+
+	/* A denser `.badge` variant for a commit row: same pill shape and colors
+	   from the shared primitive, sized down to fit a 28px graph row alongside
+	   the dot, subject, hash, author and time. */
 	.review-graph-ref {
 		overflow: hidden;
 		flex-shrink: 0;
 		max-inline-size: 9rem;
-		border-radius: 999px;
+		height: auto;
 		padding: 0.0625rem 0.375rem;
 		color: var(--text-muted);
 		background: var(--surface-muted);
 		font-size: var(--text-3xs);
 		font-family: var(--font-mono);
 		text-overflow: ellipsis;
-		white-space: nowrap;
 	}
 	.review-graph-ref[data-kind="tag"] {
 		border-radius: var(--radius-sm);
@@ -482,6 +485,20 @@
 		.review-graph-author,
 		.review-graph-time {
 			display: none;
+		}
+
+		/* At this width the sidebar's 14rem floor (`.review-body`) leaves the
+		   graph column too narrow for hash + full-size ref badges alongside
+		   the lane graph and subject; let them shrink instead of overflowing
+		   so the row stays within the pane. The full hash is still one click
+		   away in the commit detail. */
+		.review-graph-hash {
+			display: none;
+		}
+		.review-graph-ref {
+			flex-shrink: 1;
+			min-inline-size: 2rem;
+			max-inline-size: 4rem;
 		}
 	}
 
