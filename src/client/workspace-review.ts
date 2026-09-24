@@ -858,6 +858,23 @@ export async function openLinkedWorkspaceFile(
 	focusAfterOpen(() => workspaceFiles.focusEditor());
 }
 
+/**
+ * Reveals a linked directory in the Files view (used in remote mode, where
+ * there is no host desktop to open a folder on). Returns false when the
+ * directory isn't part of this workspace's tree, so the caller can tell the
+ * person it can't be shown.
+ */
+export async function openLinkedWorkspaceDirectory(
+	path: string,
+	linkedWorkspacePath: string,
+): Promise<boolean> {
+	if (linkedWorkspacePath !== workspacePath)
+		throw new Error("The workspace changed. Open the file link again.");
+	visibility.open();
+	setPanelMode("files");
+	return await workspaceFiles.revealPath(path);
+}
+
 function focusFiles(): void {
 	visibility.open();
 	setPanelMode("files");

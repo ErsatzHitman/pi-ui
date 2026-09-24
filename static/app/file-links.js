@@ -41,6 +41,18 @@ async function followFileLink(uri) {
 		}
 		const result = await response.json();
 		if (result.opened) return;
+		if (result.directory) {
+			const { openLinkedWorkspaceDirectory } =
+				await import("../../src/client/workspace-review.ts");
+			const revealed = await openLinkedWorkspaceDirectory(
+				result.path,
+				result.workspacePath,
+			);
+			if (!revealed) {
+				alert(`This folder is outside the workspace: ${result.path}`);
+			}
+			return;
+		}
 		const { openLinkedWorkspaceFile } =
 			await import("../../src/client/workspace-review.ts");
 		await openLinkedWorkspaceFile(result.path, result.workspacePath);
