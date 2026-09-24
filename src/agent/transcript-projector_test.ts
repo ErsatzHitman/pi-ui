@@ -2,10 +2,13 @@ import { test } from "bun:test";
 
 import type { CustomEntry } from "@earendil-works/pi-coding-agent";
 
-import { assertEquals } from "#testing/assertions";
+import { assertEquals, assertExists } from "#testing/assertions";
 
+import type { ExtensionActivity } from "../extension-activity-types.ts";
+import { encodeActivityEntry } from "../extension-activity/persistence.ts";
 import { sessionEntryStub } from "./test-fixtures.ts";
 import {
+	projectExtensionActivities,
 	TranscriptProjector,
 	type TranscriptCustomRenderers,
 } from "./transcript-projector.ts";
@@ -209,4 +212,108 @@ test("a live custom AgentMessage with display:false renders nothing, renderer or
 		}),
 	);
 	assertEquals(messages, []);
+});
+
+function activityFixture(overrides: Partial<ExtensionActivity> = {}): ExtensionActivity {
+	return {
+		v: 1,
+		id: "xa-1",
+		extension: { id: "jev", label: "JEV", path: "/jev.ts", source: "local" },
+		trigger: { kind: "hook", event: "before_agent_start" },
+		title: "Consult",
+		state: "working",
+		startedAt: 0,
+		output: [],
+		...overrides,
+	};
+}
+
+test("entry() skips a pi-ui.extension-activity CustomEntry (rendered separately)", () => {
+	const projector = new TranscriptProjector();
+	const entry = sessionEntryStub({
+		type: "custom",
+		customType: "pi-ui.extension-activity",
+		data: encodeActivityEntry("start", activityFixture()),
+	}) as CustomEntry;
+	assertEquals(projector.entry(entry, new Map(), undefined, renderers()), []);
+});
+
+test("projectExtensionActivities merges a start+finish pair into one message at the start entry's index", () => {
+	const started = activityFixture({ state: "working", workingAt: 0 });
+	const finished = activityFixture({
+		state: "done",
+		workingAt: 0,
+		finishedAt: 1500,
+		summary: "Consulted jev",
+	});
+	const entries = [
+		sessionEntryStub({
+			type: "custom",
+			customType: "pi-ui.extension-activity",
+			data: encodeActivityEntry("start", started),
+			timestamp: new Date(100).toISOString(),
+		}),
+		sessionEntryStub({ type: "message" }),
+		sessionEntryStub({
+			type: "custom",
+			customType: "pi-ui.extension-activity",
+			data: encodeActivityEntry("finish", finished),
+			timestamp: new Date(200).toISOString(),
+		}),
+	];
+	const byIndex = projectExtensionActivities(entries);
+	assertEquals([...byIndex.keys()], [0]);
+	const messages = byIndex.get(0);
+	assertExists(messages);
+	assertEquals(messages?.length, 1);
+	const message = messages?.[0];
+	assertExists(message);
+	assertEquals(message?.role, "extension-activity");
+	assertEquals(message?.text, "Consulted jev");
+	assertEquals(message?.extension, finished.extension);
+	assertEquals(message?.toolCallId, undefined);
+	assertEquals(message?.state, "success");
+	assertEquals(message?.activities?.[0]?.durationText, "1.5s");
+});
+
+test("projectExtensionActivities carries an anchored activity's toolCallId onto the message", () => {
+	const activity = activityFixture({
+		state: "done",
+		finishedAt: 50,
+		anchor: { toolCallId: "call-1" },
+	});
+	const entries = [
+		sessionEntryStub({
+			type: "custom",
+			customType: "pi-ui.extension-activity",
+			data: encodeActivityEntry("finish", activity),
+		}),
+	];
+	const byIndex = projectExtensionActivities(entries);
+	const message = byIndex.get(0)?.[0];
+	assertExists(message);
+	assertEquals(message?.toolCallId, "call-1");
+});
+
+test("projectExtensionActivities reports a start-only (interrupted) activity as cancelled", () => {
+	const started = activityFixture({ state: "working", workingAt: 0 });
+	const entries = [
+		sessionEntryStub({
+			type: "custom",
+			customType: "pi-ui.extension-activity",
+			data: encodeActivityEntry("start", started),
+		}),
+	];
+	const byIndex = projectExtensionActivities(entries);
+	const message = byIndex.get(0)?.[0];
+	assertExists(message);
+	assertEquals(message?.state, "error");
+	assertEquals(message?.activities?.[0]?.state, "cancelled");
+});
+
+test("projectExtensionActivities ignores an unrelated CustomEntry customType", () => {
+	const entries = [
+		sessionEntryStub({ type: "custom", customType: "workflow-help", data: {} }),
+	];
+	assertEquals(projectExtensionActivities(entries).size, 0);
 });

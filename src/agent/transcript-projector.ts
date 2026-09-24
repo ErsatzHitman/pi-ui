@@ -6,6 +6,9 @@ import {
 	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 
+import type { ExtensionActivity } from "../extension-activity-types.ts";
+import { extensionActivityEntryType } from "../extension-activity-types.ts";
+import { rebuildActivitiesFromEntries } from "../extension-activity/persistence.ts";
 import type {
 	TranscriptMessageInput,
 	TranscriptState,
@@ -81,6 +84,67 @@ function customMessageInput(
 }
 
 /**
+ * Rebuilds every `pi-ui.extension-activity` `CustomEntry` on the branch
+ * (start/finish pairs merged by activity id, last phase wins — see
+ * `rebuildActivitiesFromEntries`) into one `TranscriptMessageInput` per
+ * activity, keyed by the branch-array index of that activity's *first*
+ * entry so `load()` can splice each one in right after the entry that
+ * introduced it, preserving transcript order across a session switch,
+ * restart or `/resume` (`DESIGN-ext-activity.md` §2.4's "Projection on
+ * load" bullet).
+ */
+export function projectExtensionActivities(
+	entries: readonly SessionEntry[],
+): Map<number, TranscriptMessageInput[]> {
+	const payloads: unknown[] = [];
+	const entryIndexByPayloadPosition: number[] = [];
+	entries.forEach((entry, index) => {
+		if (entry.type === "custom" && entry.customType === extensionActivityEntryType) {
+			payloads.push(entry.data);
+			entryIndexByPayloadPosition.push(index);
+		}
+	});
+	const byEntryIndex = new Map<number, TranscriptMessageInput[]>();
+	for (const { activity, firstSeenIndex } of rebuildActivitiesFromEntries(payloads)) {
+		const entryIndex = entryIndexByPayloadPosition[firstSeenIndex];
+		if (entryIndex === undefined) continue;
+		const timestamp = new Date(entries[entryIndex]?.timestamp ?? Date.now());
+		const existing = byEntryIndex.get(entryIndex) ?? [];
+		existing.push(extensionActivityMessageInput(activity, timestamp));
+		byEntryIndex.set(entryIndex, existing);
+	}
+	return byEntryIndex;
+}
+
+function extensionActivityMessageInput(
+	activity: ExtensionActivity,
+	timestamp: Date,
+): TranscriptMessageInput {
+	const durationText = formatActivityDuration(activity);
+	return {
+		role: "extension-activity",
+		text: activity.summary ?? activity.progress ?? activity.title,
+		timestamp,
+		extension: activity.extension,
+		toolCallId: activity.anchor?.toolCallId,
+		activities: [durationText ? { ...activity, durationText } : activity],
+		state:
+			activity.state === "error" || activity.state === "cancelled"
+				? "error"
+				: activity.state === "started" || activity.state === "working"
+					? "running"
+					: "success",
+	};
+}
+
+function formatActivityDuration(activity: ExtensionActivity): string | undefined {
+	if (activity.finishedAt === undefined) return undefined;
+	const start = activity.workingAt ?? activity.startedAt;
+	const ms = Math.max(0, activity.finishedAt - start);
+	return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
  * Renders `pi.registerMessageRenderer`/`registerEntryRenderer` output for one
  * `customType`, supplied by the caller (`RuntimeController`) already bound to
  * the live `session.extensionRunner`, the requesting client's terminal width
@@ -109,20 +173,25 @@ export class TranscriptProjector {
 		const misses = runtime.session.settingsManager?.getShowCacheMissNotices()
 			? collectCacheMisses(entries, runtime.session.modelRuntime)
 			: undefined;
-		state.replaceMessages(
-			entries.flatMap((entry: SessionEntry) => {
-				const miss =
-					entry.type === "message" && entry.message.role === "assistant"
-						? misses?.get(entry.message)
-						: undefined;
-				return this.entry(
+		const activityMessagesByEntryIndex = projectExtensionActivities(entries);
+		const projected: TranscriptMessageInput[] = [];
+		entries.forEach((entry: SessionEntry, index) => {
+			const miss =
+				entry.type === "message" && entry.message.role === "assistant"
+					? misses?.get(entry.message)
+					: undefined;
+			projected.push(
+				...this.entry(
 					entry,
 					pending,
 					miss ? formatCacheMissNotice(miss) : undefined,
 					renderers,
-				);
-			}),
-		);
+				),
+			);
+			const activityMessages = activityMessagesByEntryIndex.get(index);
+			if (activityMessages) projected.push(...activityMessages);
+		});
+		state.replaceMessages(projected);
 	}
 
 	entry(
@@ -169,6 +238,12 @@ export class TranscriptProjector {
 			];
 		}
 		if (entry.type === "custom") {
+			// Rendered separately, as a rebuilt run across the whole branch (see
+			// `projectExtensionActivities`/`load()`) rather than entry-by-entry —
+			// a "start"/"finish" pair for the same activity must merge into one
+			// card, which needs every entry of this `customType` in hand at once.
+			// Terminal pi has no `EntryRenderer` for it either way (F13/F14).
+			if (entry.customType === extensionActivityEntryType) return [];
 			return this.customEntry(entry, timestamp, renderers);
 		}
 		if (entry.type === "compaction") {
