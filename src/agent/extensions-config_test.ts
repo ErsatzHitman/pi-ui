@@ -58,9 +58,18 @@ test("extension activity tracking/persistence default on and are opt-out only", 
 	assertEquals(parseExtensionsConfig(undefined).activityTracking, true);
 	assertEquals(parseExtensionsConfig(undefined).activityPersist, true);
 	assertEquals(parseExtensionsConfig({}).activityTracking, true);
-	assertEquals(parseExtensionsConfig({ activityTracking: "no" }).activityTracking, true);
-	assertEquals(parseExtensionsConfig({ activityTracking: false }).activityTracking, false);
-	assertEquals(parseExtensionsConfig({ activityPersist: false }).activityPersist, false);
+	assertEquals(
+		parseExtensionsConfig({ activityTracking: "no" }).activityTracking,
+		true,
+	);
+	assertEquals(
+		parseExtensionsConfig({ activityTracking: false }).activityTracking,
+		false,
+	);
+	assertEquals(
+		parseExtensionsConfig({ activityPersist: false }).activityPersist,
+		false,
+	);
 	assertEquals(
 		parseExtensionsConfig({ activityTracking: false, activityPersist: false }),
 		{ ...tui, activityTracking: false, activityPersist: false },
