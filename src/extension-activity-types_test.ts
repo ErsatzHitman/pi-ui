@@ -51,7 +51,11 @@ test("extensionActivityTriggerLabel formats each trigger kind", () => {
 		"ctrl+j",
 	);
 	assertEquals(
-		extensionActivityTriggerLabel({ kind: "ui", signal: "widget", key: "jev-decompose" }),
+		extensionActivityTriggerLabel({
+			kind: "ui",
+			signal: "widget",
+			key: "jev-decompose",
+		}),
 		"widget:jev-decompose",
 	);
 });

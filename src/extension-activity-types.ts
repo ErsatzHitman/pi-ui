@@ -7,6 +7,8 @@
  * updating every stream — see `DESIGN-ext-activity.md` §2.1 and §6.3.
  */
 
+import { isRecord } from "./utils/type-guards.ts";
+
 /** `CustomEntry.customType` this feature persists under. Terminal pi has no
  * renderer for it, so it stays invisible there and is never model context
  * (see the design's F13/F14). */
@@ -24,9 +26,16 @@ export const extensionActivitySchemaVersion = 1;
  * is not its own state — output fills `progress`/`output` while `working`
  * and is kept after the activity finishes.
  */
-export type ExtensionActivityState = "started" | "working" | "done" | "error" | "cancelled";
+export type ExtensionActivityState =
+	| "started"
+	| "working"
+	| "done"
+	| "error"
+	| "cancelled";
 
-export function isExtensionActivityState(value: unknown): value is ExtensionActivityState {
+export function isExtensionActivityState(
+	value: unknown,
+): value is ExtensionActivityState {
 	return (
 		value === "started" ||
 		value === "working" ||
@@ -149,12 +158,10 @@ export type ExtensionActivityEntryData = Readonly<{
 export function isExtensionActivityEntryData(
 	value: unknown,
 ): value is ExtensionActivityEntryData {
-	if (typeof value !== "object" || value === null) return false;
-	const record = value as Record<string, unknown>;
+	if (!isRecord(value)) return false;
 	return (
-		record.v === extensionActivitySchemaVersion &&
-		(record.phase === "start" || record.phase === "finish") &&
-		typeof record.activity === "object" &&
-		record.activity !== null
+		value.v === extensionActivitySchemaVersion &&
+		(value.phase === "start" || value.phase === "finish") &&
+		isRecord(value.activity)
 	);
 }
