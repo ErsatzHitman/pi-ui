@@ -55,6 +55,8 @@ export const endpoints = {
 	workspaceReviewHistory: "/workspace/review/history",
 	workspaceReviewPreferences: "/workspace/review/preferences",
 	workspaceReviewSubmit: "/workspace/review/submit",
+	workspaceGitGraphCommit: "/workspace/review/graph/commit",
+	workspaceGitGraphMore: "/workspace/review/graph/more",
 	liveWorkspacePreferences: "/live-workspace/preferences",
 	liveWorkspaceClearActivity: "/live-workspace/clear-activity",
 	liveWorkspaceActivityExport: "/live-workspace/activity/export",

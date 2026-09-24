@@ -374,6 +374,7 @@ export function renderPage(
 								state.workspaceTreeRevision,
 								state.workspaceReview,
 								state.workspaceReviewPreferences,
+								state.workspaceGitGraph,
 							)}
 							{renderLiveWorkspace(
 								state.liveWorkspace,

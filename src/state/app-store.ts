@@ -24,6 +24,10 @@ import type { JsonObject } from "../utils/json-types.ts";
 import { formatShortcut } from "../utils/keyboard.ts";
 import { defaultWorkspacePath } from "../utils/workspace.ts";
 import {
+	type WorkspaceGitGraphSnapshot,
+	unloadedWorkspaceGitGraphSnapshot,
+} from "../workspace-git-graph-types.ts";
+import {
 	type WorkspaceReviewPreferences,
 	type WorkspaceReviewSnapshot,
 	unloadedWorkspaceReviewSnapshot,
@@ -351,6 +355,7 @@ export type AppStateSnapshot = Readonly<{
 	workspaceTreeRevision: number;
 	workspaceReview: WorkspaceReviewSnapshot;
 	workspaceReviewPreferences: WorkspaceReviewPreferences;
+	workspaceGitGraph: WorkspaceGitGraphSnapshot;
 	liveWorkspace: LiveWorkspaceSnapshot;
 	liveWorkspacePreferences: LiveWorkspacePreferences;
 	recentWorkspaces: readonly string[];
@@ -552,6 +557,7 @@ export class AppStore {
 	workspaceTreeRevision = 0;
 	workspaceReview = unloadedWorkspaceReviewSnapshot;
 	workspaceReviewPreferences: WorkspaceReviewPreferences = {};
+	workspaceGitGraph: WorkspaceGitGraphSnapshot = unloadedWorkspaceGitGraphSnapshot;
 	liveWorkspace: LiveWorkspaceSnapshot = emptyLiveWorkspaceSnapshot;
 	liveWorkspacePreferences: LiveWorkspacePreferences = {};
 	recentWorkspaces: string[] = [];
@@ -674,6 +680,7 @@ export class AppStore {
 			workspaceTreeRevision: this.workspaceTreeRevision,
 			workspaceReview: this.workspaceReview,
 			workspaceReviewPreferences: { ...this.workspaceReviewPreferences },
+			workspaceGitGraph: this.workspaceGitGraph,
 			// `LiveWorkspaceController.snapshot()` (the only producer, see `setLiveWorkspace`)
 			// always builds a brand-new object graph, so this reference is never mutated
 			// after the fact either — safe to hand out without `structuredClone`-ing again.
@@ -1262,6 +1269,7 @@ export class AppStore {
 		this.workspaceFilesRevision = 0;
 		this.workspaceTreeRevision = 0;
 		this.workspaceReview = unloadedWorkspaceReviewSnapshot;
+		this.workspaceGitGraph = unloadedWorkspaceGitGraphSnapshot;
 		this.presentation?.pickersChanged();
 		this.presentation?.workspaceReviewChanged();
 		this.commit();
@@ -1281,6 +1289,12 @@ export class AppStore {
 	}
 	setWorkspaceReviewPreferences(value: WorkspaceReviewPreferences): void {
 		this.workspaceReviewPreferences = value;
+		this.presentation?.workspaceReviewChanged();
+		this.commit();
+	}
+	setWorkspaceGitGraph(value: WorkspaceGitGraphSnapshot): void {
+		if (this.workspaceGitGraph.revision === value.revision) return;
+		this.workspaceGitGraph = value;
 		this.presentation?.workspaceReviewChanged();
 		this.commit();
 	}
