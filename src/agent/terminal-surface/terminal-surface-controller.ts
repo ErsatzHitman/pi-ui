@@ -350,9 +350,18 @@ export class TerminalSurfaceController {
 		// wins; otherwise seed from the client's last reported viewport (`viewportHint`) rather
 		// than the fixed default, so a fresh surface's first frame is already close to its
 		// true size instead of visibly resizing once its own resize report lands.
+		// The hint is the whole viewport, which only an overlay can span: an inline, widget,
+		// header or footer surface sits in the prompt column, so on a wide screen the raw hint
+		// would first paint it far wider than its box (252 columns in a 107-column column at
+		// 1920px). Cap those at the default instead: never wider than the old fixed guess, and
+		// still narrower than it on a phone.
 		const hint = this.options.viewportHint?.();
+		const hintColumns =
+			hint && !params.overlay
+				? Math.min(hint.columns, defaultTerminalColumns)
+				: hint?.columns;
 		const size = clampTerminalSize({
-			columns: params.cols ?? hint?.columns ?? defaultTerminalColumns,
+			columns: params.cols ?? hintColumns ?? defaultTerminalColumns,
 			rows: params.rows ?? hint?.rows ?? defaultTerminalRows,
 		});
 		const terminal = new HeadlessTerminal(size);

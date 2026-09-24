@@ -288,3 +288,60 @@ test("overlay options are sanitized before they reach the store", async () => {
 	assertEquals(surface.overlayOptions?.minWidth, undefined);
 	controller.disposeAll();
 });
+
+test("a new overlay starts at the client's reported viewport width", async () => {
+	const controller = new TerminalSurfaceController({
+		onUpdate: () => {},
+		viewportHint: () => ({ columns: 252, rows: 63 }),
+	});
+	void controller.mountCustom<string>({
+		id: "overlay-hint",
+		overlay: true,
+		colorScheme: "dark",
+		factory: () => staticComponent(["wide"]),
+	});
+	await flush();
+	assertEquals(controller.snapshot()[0]?.cols, 252);
+	controller.disposeAll();
+});
+
+test("a new prompt-column surface never starts wider than the default grid", async () => {
+	const wide = new TerminalSurfaceController({
+		onUpdate: () => {},
+		viewportHint: () => ({ columns: 252, rows: 63 }),
+	});
+	void wide.mountCustom<string>({
+		id: "inline-hint",
+		overlay: false,
+		colorScheme: "dark",
+		factory: () => staticComponent(["inline"]),
+	});
+	wide.mountPersistent({
+		id: "widget-hint",
+		kind: "widget",
+		colorScheme: "dark",
+		title: undefined,
+		factory: () => staticComponent(["widget"]),
+	});
+	await flush();
+	assertEquals(
+		wide.snapshot().map((surface) => surface.cols),
+		[100, 100],
+	);
+	wide.disposeAll();
+
+	// A phone's viewport is narrower than the default: that still wins.
+	const narrow = new TerminalSurfaceController({
+		onUpdate: () => {},
+		viewportHint: () => ({ columns: 51, rows: 49 }),
+	});
+	narrow.mountPersistent({
+		id: "footer-hint",
+		kind: "footer",
+		colorScheme: "dark",
+		title: undefined,
+		factory: () => staticComponent(["footer"]),
+	});
+	assertEquals(narrow.snapshot()[0]?.cols, 51);
+	narrow.disposeAll();
+});
