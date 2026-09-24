@@ -1,3 +1,4 @@
+import { closeSessionSidebarAction } from "../commands/actions.ts";
 import {
 	isPiUiSheetElement,
 	type PiUiAction,
@@ -167,9 +168,14 @@ function renderRosterSummary(element: PiUiElement): string {
 	);
 }
 
-/** Opens the Live Workspace pane to the Extensions tab, where the full element renders. */
+/**
+ * Opens the Live Workspace pane to the Extensions tab, where the full element renders. Sessions
+ * and Live Workspace are mutually exclusive (PLAN-ux.md "sidebar-exclusive"), so this closes
+ * Sessions too if it happens to be open.
+ */
 function openLiveWorkspaceExtensionsAction(): string {
 	return `$_liveWorkspaceOpen = true;
+		${closeSessionSidebarAction()}
 		$liveWorkspacePreferences.tab = 'extensions';
 		document.body.dispatchEvent(new CustomEvent(
 			'pi-ui-live-workspace-preferences',

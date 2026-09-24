@@ -1,6 +1,6 @@
 import { toggleMinimalModeAction, toggleToolOutputAction } from "../commands/actions.ts";
 import { activeFontStacks } from "../fonts.ts";
-import { activeKeybind, keybindActions } from "../keybinds.ts";
+import { activeKeybind, keybindActions, keybindAria } from "../keybinds.ts";
 import { liveWorkspaceRatioDefault } from "../live-workspace-types.ts";
 import { getPierreThemes } from "../pierre-theme.ts";
 import { isRemoteMode } from "../remote-mode.ts";
@@ -342,30 +342,47 @@ export function renderPage(
 							<div class="toolbar">
 								{renderToolbar(state, true)}
 								<div class="toolbar-end">
-									{renderLiveWorkspaceToggle(state)}
-									<button
-										id="session-sidebar-toggle"
-										type="button"
-										class="btn session-sidebar-toggle"
-										data-variant="ghost"
-										data-attr:data-variant="$_sessionSidebarOpen ? 'secondary' : 'ghost'"
-										data-size="icon-sm"
-										aria-label="Toggle sessions"
-										commandfor="session-sidebar"
-										command="--toggle"
-										aria-controls="session-sidebar"
-										aria-expanded="false"
-										data-attr:aria-expanded="$_sessionSidebarOpen ? 'true' : 'false'"
-										data-tooltip="Toggle sessions"
-										data-tooltip-delay
-										data-align="end"
+									{/*
+									 * PLAN-ux.md "sidebar-exclusive": Sessions and Live Workspace share the
+									 * right-hand area and are mutually exclusive, so one segmented switch
+									 * (reusing `.segmented-control`) replaces what used to be two separate
+									 * toggle buttons. Each segment keeps its own id, keybind and toggle
+									 * wiring; opening either one closes the other (`closeSessionSidebarAction`
+									 * / `toggleLiveWorkspaceAction` in `commands/actions.ts`).
+									 */}
+									<div
+										class="segmented-control right-pane-switch"
+										role="group"
+										aria-label="Sessions or Live Workspace"
 									>
-										<Icon icon={PanelRight} />
-										<ShortcutTooltip
-											label="Toggle sessions"
-											shortcut={activeKeybind("toggle-sessions")}
-										/>
-									</button>
+										<button
+											id="session-sidebar-toggle"
+											type="button"
+											aria-pressed="false"
+											data-attr:aria-pressed="$_sessionSidebarOpen ? 'true' : 'false'"
+											commandfor="session-sidebar"
+											command="--toggle"
+											aria-controls="session-sidebar"
+											aria-expanded="false"
+											data-attr:aria-expanded="$_sessionSidebarOpen ? 'true' : 'false'"
+											aria-keyshortcuts={keybindAria(
+												"toggle-sessions",
+											)}
+											data-tooltip="Toggle sessions"
+											data-tooltip-delay
+											data-align="end"
+										>
+											<Icon icon={PanelRight} />
+											<span>Sessions</span>
+											<ShortcutTooltip
+												label="Toggle sessions"
+												shortcut={activeKeybind(
+													"toggle-sessions",
+												)}
+											/>
+										</button>
+										{renderLiveWorkspaceToggle(state)}
+									</div>
 								</div>
 							</div>
 							{renderWorkspaceReview(

@@ -31,6 +31,19 @@ test("the toggle button carries the pane's keybind and toggle signal", () => {
 	assertStringIncludes(html, 'id="live-workspace-toggle"');
 	assertStringIncludes(html, "$_liveWorkspaceOpen = !$_liveWorkspaceOpen");
 	assertStringIncludes(html, "alt");
+	// It's one segment of the "Sessions | Live" switch (PLAN-ux.md "sidebar-exclusive"), so it
+	// needs a visible label, not just an icon+tooltip.
+	assertStringIncludes(html, ">Live<");
+});
+
+test("opening Live Workspace closes Sessions too (sidebar-exclusive)", () => {
+	const html = renderLiveWorkspaceToggle(appRenderSnapshot({}));
+	assertStringIncludes(html, "if ($_liveWorkspaceOpen) {");
+	assertStringIncludes(html, "getElementById('session-sidebar')");
+	assertStringIncludes(
+		html,
+		"sessionSidebar.dispatchEvent(new CommandEvent('command', { command: '--toggle' }))",
+	);
 });
 
 test("the pane shell starts hidden and inert until the open signal flips", () => {

@@ -71,6 +71,21 @@ test("sidebar restores responsive preferences before datastar", () => {
 	}
 });
 
+test("Sessions and Live share one segmented switch instead of two separate toggle buttons", () => {
+	// PLAN-ux.md "sidebar-exclusive": a single segmented header replaces the two standalone
+	// toolbar buttons so the mutually-exclusive pair reads as one control, not two.
+	assertStringIncludes(html, 'class="segmented-control right-pane-switch"');
+	assertStringIncludes(html, 'role="group"');
+	assertStringIncludes(html, 'id="session-sidebar-toggle"');
+	assertStringIncludes(html, 'id="live-workspace-toggle"');
+	assertStringIncludes(html, ">Sessions<");
+	assertStringIncludes(html, ">Live<");
+	// Both segments still carry their own pressed state and the toolbar button's toggle wiring.
+	assertStringIncludes(html, "$_sessionSidebarOpen ? 'true' : 'false'");
+	assertStringIncludes(html, "$_liveWorkspaceOpen ? 'true' : 'false'");
+	assertStringIncludes(html, 'commandfor="session-sidebar" command="--toggle"');
+});
+
 test("workspace files expose native preview and source controls", () => {
 	assertStringIncludes(html, 'id="workspace-file-mode"');
 	assertStringIncludes(html, 'id="workspace-file-preview-mode"');

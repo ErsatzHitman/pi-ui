@@ -15,6 +15,7 @@ import { defaultFonts, setActiveFonts, validFonts } from "../fonts.ts";
 import { parseKeybindOverrides, setActiveKeybinds } from "../keybinds.ts";
 import { normalizeLiveWorkspacePreferences } from "../live-workspace-types.ts";
 import { setActiveCodeTheme } from "../pierre-theme.ts";
+import { resolveExclusiveRightPane } from "../right-pane-preferences.ts";
 import {
 	normalizeSessionSidebarPreferences,
 	sessionSidebarWidthDefault,
@@ -57,10 +58,21 @@ export async function createApp() {
 	const workspaceReviewPreferences = normalizeWorkspaceReviewPreferences(
 		appConfig.gitView,
 	);
-	const liveWorkspacePreferences = normalizeLiveWorkspacePreferences(
+	const rawLiveWorkspacePreferences = normalizeLiveWorkspacePreferences(
 		appConfig.liveWorkspace,
 	);
 	const sessionSidebar = normalizeSessionSidebarPreferences(appConfig.sessionSidebar);
+	// Sessions and Live Workspace share the right-hand area and are mutually exclusive; an old
+	// config saved before that rule existed can have both `open: true` (see
+	// `right-pane-preferences.ts`).
+	const { sessionSidebarOpen, liveWorkspaceOpen } = resolveExclusiveRightPane(
+		sessionSidebar.open !== false,
+		rawLiveWorkspacePreferences.open === true,
+	);
+	const liveWorkspacePreferences = {
+		...rawLiveWorkspacePreferences,
+		open: liveWorkspaceOpen,
+	};
 	setActiveCodeTheme(codeTheme);
 	setActiveFonts(fonts);
 	const preloadShellHighlighterPromise = loadPierreLanguage("bash");
@@ -121,7 +133,7 @@ export async function createApp() {
 		appVersion: staticAssets.version,
 		keybindHints: appConfig.keybindHints !== false,
 		minimalMode: appConfig.minimalMode === true,
-		sessionSidebarOpen: sessionSidebar.open !== false,
+		sessionSidebarOpen,
 		sessionSidebarWidth: sessionSidebar.width ?? sessionSidebarWidthDefault,
 		toolOutputHidden: appConfig.toolOutputHidden === true,
 		toolbarHidden: appConfig.toolbarHidden === true,

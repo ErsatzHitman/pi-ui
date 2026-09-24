@@ -388,6 +388,18 @@
 		justify-self: end;
 	}
 
+	/*
+	 * PLAN-ux.md "sidebar-exclusive": Sessions and Live Workspace are mutually exclusive, so their
+	 * toolbar buttons share one `.segmented-control` (icon + visible label per segment) instead of
+	 * sitting apart as two standalone icon buttons.
+	 */
+	.right-pane-switch > button {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		line-height: 1rem;
+	}
+
 	/* 48rem: the bottom sheet becomes a right-side drawer that no longer spans full width. */
 	@media (width > 48rem) {
 		#live-workspace {

@@ -5,6 +5,17 @@ import { assertFalse, assertStringIncludes } from "#testing/assertions";
 import { renderSessionSidebar } from "./session-sidebar.tsx";
 import { appRenderSnapshot } from "./test-fixtures.ts";
 
+test("opening Sessions closes Live Workspace too (sidebar-exclusive)", () => {
+	const html = renderSessionSidebar(
+		appRenderSnapshot({ sessions: [], currentSessionPath: undefined }),
+	);
+	const commandHandler = html.split('data-on:command="')[1]?.split('"')[0];
+	if (!commandHandler) throw new Error("command handler not found");
+	assertStringIncludes(commandHandler, "if ($_liveWorkspaceOpen)");
+	assertStringIncludes(commandHandler, "$_liveWorkspaceOpen = false");
+	assertStringIncludes(commandHandler, "detail: { open: $_liveWorkspaceOpen }");
+});
+
 test("session sidebar shows an empty state with no sessions and nothing loading", () => {
 	const html = renderSessionSidebar(
 		appRenderSnapshot({
