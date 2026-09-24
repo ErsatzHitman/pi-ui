@@ -8,10 +8,12 @@ export type GitGraphRefKind = Static<typeof gitGraphRefKindSchema>;
 export type GitGraphRef = Static<typeof gitGraphRefSchema>;
 export type GitGraphSegment = Static<typeof gitGraphSegmentSchema>;
 export type GitGraphRow = Static<typeof gitGraphRowSchema>;
+export type GitGraphBranch = Static<typeof gitGraphBranchSchema>;
 export type WorkspaceGitGraphSnapshot = Static<typeof workspaceGitGraphSnapshotSchema>;
 
 export const emptyWorkspaceGitGraphSnapshot: WorkspaceGitGraphSnapshot = {
 	branch: null,
+	branches: [],
 	changeCount: 0,
 	hasMore: false,
 	isGitRepository: false,
@@ -63,9 +65,31 @@ const gitGraphRowSchema = Type.ReadonlyObject(
 	}),
 );
 
+/**
+ * A local branch for the Git sidebar's branch list. `ahead`/`behind` are the
+ * commit counts between it and its upstream (from `git for-each-ref`'s own
+ * `%(upstream:track)`, so no extra `rev-list` process is needed); both are 0
+ * when there is no upstream. `hash` is its tip commit, used to scroll/select
+ * that commit in the graph when the branch row is clicked — a no-op if the
+ * tip isn't among the currently loaded graph rows (e.g. an old branch beyond
+ * the loaded page).
+ */
+const gitGraphBranchSchema = Type.ReadonlyObject(
+	Type.Object({
+		ahead: Type.Number(),
+		behind: Type.Number(),
+		current: Type.Boolean(),
+		hash: Type.String(),
+		main: Type.Boolean(),
+		name: Type.String(),
+		upstream: Type.Union([Type.String(), Type.Null()]),
+	}),
+);
+
 const workspaceGitGraphSnapshotSchema = Type.ReadonlyObject(
 	Type.Object({
 		branch: Type.Union([Type.String(), Type.Null()]),
+		branches: Type.ReadonlyObject(Type.Array(gitGraphBranchSchema)),
 		changeCount: Type.Number(),
 		hasMore: Type.Boolean(),
 		isGitRepository: Type.Boolean(),

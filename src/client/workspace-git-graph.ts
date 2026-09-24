@@ -3,6 +3,7 @@ import {
 	formatExpandedDateTime,
 } from "../utils/date-time-format.ts";
 import {
+	type GitGraphBranch,
 	type GitGraphRef,
 	type GitGraphRow,
 	unloadedWorkspaceGitGraphSnapshot,
@@ -59,6 +60,8 @@ function refPriority(ref: GitGraphRef): number {
 
 type WorkspaceGitGraphOptions = Readonly<{
 	api: ReturnType<typeof createWorkspaceGitGraphApi>;
+	/** The Git sidebar's local-branch list (optional: absent outside the desktop layout). */
+	branchesHost?: HTMLElement;
 	detail: HTMLElement;
 	empty: HTMLElement;
 	moreButton: HTMLButtonElement;
@@ -74,7 +77,7 @@ export type WorkspaceGitGraphController = Readonly<{
 export function createWorkspaceGitGraph(
 	options: WorkspaceGitGraphOptions,
 ): WorkspaceGitGraphController {
-	const { api, detail, empty, moreButton, rowsHost } = options;
+	const { api, branchesHost, detail, empty, moreButton, rowsHost } = options;
 	let snapshot: WorkspaceGitGraphSnapshot | undefined;
 	let selectedHash: string | undefined;
 	let detailOpen = false;
@@ -185,6 +188,81 @@ export function createWorkspaceGitGraph(
 				?.focus({ preventScroll: true });
 		}
 		moreButton.hidden = !snapshot.hasMore;
+		renderBranches();
+	}
+
+	/** Sorts the current branch first, then main, then the rest alphabetically. */
+	function branchPriority(branch: GitGraphBranch): number {
+		if (branch.current) return 0;
+		if (branch.main) return 1;
+		return 2;
+	}
+
+	function renderBranches(): void {
+		if (!branchesHost || !snapshot) return;
+		branchesHost.replaceChildren();
+		const sorted = [...snapshot.branches].sort(
+			(a, b) =>
+				branchPriority(a) - branchPriority(b) || a.name.localeCompare(b.name),
+		);
+		for (const branch of sorted) branchesHost.append(renderBranchRow(branch));
+	}
+
+	function renderBranchRow(branch: GitGraphBranch): HTMLElement {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "review-branch-row";
+		button.setAttribute("role", "listitem");
+		button.setAttribute("aria-current", String(branch.current));
+		button.title = branch.upstream
+			? `${branch.name} (tracking ${branch.upstream})`
+			: branch.name;
+		button.addEventListener("click", () => selectBranchTip(branch));
+
+		const name = document.createElement("span");
+		name.className = "review-branch-name";
+		name.textContent = branch.name;
+		button.append(name);
+
+		if (branch.current) {
+			const dot = document.createElement("span");
+			dot.className = "selection-dot";
+			dot.setAttribute("aria-hidden", "true");
+			button.append(dot);
+		}
+		if (branch.main) {
+			const badge = document.createElement("span");
+			badge.className = "badge review-graph-ref";
+			badge.dataset.main = "";
+			badge.textContent = "main";
+			button.append(badge);
+		}
+		if (branch.ahead > 0 || branch.behind > 0) {
+			const track = document.createElement("span");
+			track.className = "review-branch-track";
+			if (branch.ahead > 0) {
+				const ahead = document.createElement("span");
+				ahead.className = "review-branch-ahead";
+				ahead.textContent = String(branch.ahead);
+				track.append(ahead);
+			}
+			if (branch.behind > 0) {
+				const behind = document.createElement("span");
+				behind.className = "review-branch-behind";
+				behind.textContent = String(branch.behind);
+				track.append(behind);
+			}
+			button.append(track);
+		}
+		return button;
+	}
+
+	/** Selects and scrolls to a branch's tip commit, if it's among the loaded graph rows. */
+	function selectBranchTip(branch: GitGraphBranch): void {
+		const row = rowButtons().find((button) => button.dataset.hash === branch.hash);
+		if (!row) return;
+		row.scrollIntoView({ block: "center" });
+		void toggleSelection(branch.hash);
 	}
 
 	/** Fewer ref badges fit before a "+N" overflow badge at a narrower width. */

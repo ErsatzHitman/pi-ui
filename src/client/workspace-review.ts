@@ -38,6 +38,7 @@ const modeButtons = document.querySelectorAll<HTMLButtonElement>("[data-workspac
 const fileTreeHost = requiredElement("workspace-file-tree");
 const fileViewRoot = requiredElement("workspace-file-view");
 const graphHost = requiredElement("review-graph");
+const branchesHost = requiredElement("review-branch-list");
 const graphDetail = requiredElement("review-detail-header");
 const graphEmpty = requiredElement("review-empty");
 const graphMoreButton = requiredButton("review-graph-more");
@@ -68,6 +69,7 @@ let gitGraph: WorkspaceGitGraphSnapshot = isWorkspaceGitGraphSnapshot(
 
 const gitGraphController = createWorkspaceGitGraph({
 	api: graphApi,
+	branchesHost,
 	detail: graphDetail,
 	empty: graphEmpty,
 	moreButton: graphMoreButton,

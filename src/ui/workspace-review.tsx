@@ -171,6 +171,18 @@ export function renderWorkspaceReview(
 							Working tree clean
 						</div>
 					</section>
+					<section class="raised-surface review-sidebar-panel review-branches">
+						<header class="review-sidebar-header">
+							<span>Branches</span>
+						</header>
+						<div
+							id="review-branch-list"
+							class="review-branch-list"
+							role="list"
+							aria-label="Local branches"
+							tabindex="-1"
+						/>
+					</section>
 				</aside>
 
 				<div

@@ -3,6 +3,7 @@ import { isNotFound } from "../utils/fs-errors.ts";
 import { layoutGitGraphLanes, parseGitGraphRefs } from "../workspace-git-graph-layout.ts";
 import {
 	emptyWorkspaceGitGraphSnapshot,
+	type GitGraphBranch,
 	type GitGraphRow,
 	type WorkspaceGitGraphCommitDetail,
 	workspaceGitGraphPageSize,
@@ -14,6 +15,7 @@ import {
 	parsePorcelainStatus,
 } from "./workspace-review.ts";
 export type {
+	GitGraphBranch,
 	GitGraphRef,
 	GitGraphRow,
 	GitGraphSegment,
@@ -26,6 +28,13 @@ const graphLogFormat = "--format=format:%H%x1f%h%x1f%an%x1f%aI%x1f%P%x1f%D%x1f%s
 // The graph's fields plus the message body (%b), for one commit's detail only.
 const commitDetailFormat =
 	"--format=format:%H%x1f%h%x1f%an%x1f%aI%x1f%P%x1f%D%x1f%s%x1f%b%x1e";
+// One local branch per line: tip hash, name, upstream (blank if none), and Git's own
+// ahead/behind summary against that upstream (e.g. "[ahead 2, behind 1]", "[gone]", or
+// blank) — `%(upstream:track)` computes this itself, so the sidebar's ahead/behind needs
+// no separate `rev-list` process per branch. Unlike `git log`'s pretty-format, `for-each-ref`
+// doesn't expand `%x09`/`%x1f` hex-byte escapes — it needs an actual tab character.
+const branchFormat =
+	"%(objectname)\t%(refname:short)\t%(upstream:short)\t%(upstream:track)";
 const decoder = new TextDecoder();
 
 type GitGraphLogEntry = Readonly<{
@@ -57,6 +66,32 @@ export function parseGitGraphLog(output: string): GitGraphLogEntry[] {
 		});
 	}
 	return entries;
+}
+
+/** Parses `branchFormat`'s `for-each-ref refs/heads` output into the sidebar's branch list. */
+export function parseGitBranches(
+	output: string,
+	currentBranch: string | null,
+	mainBranch: string | null,
+): GitGraphBranch[] {
+	const branches: GitGraphBranch[] = [];
+	for (const line of output.split("\n")) {
+		if (!line) continue;
+		const [hash, name, upstream, track] = line.split("\x09");
+		if (!hash || !name) continue;
+		const ahead = /ahead (\d+)/.exec(track ?? "");
+		const behind = /behind (\d+)/.exec(track ?? "");
+		branches.push({
+			ahead: ahead ? Number(ahead[1]) : 0,
+			behind: behind ? Number(behind[1]) : 0,
+			current: name === currentBranch,
+			hash,
+			main: name === mainBranch,
+			name,
+			upstream: upstream || null,
+		});
+	}
+	return branches;
 }
 
 /** Finds the branch `origin/HEAD` (or `main`/`master`) points at, if any. */
@@ -94,29 +129,41 @@ export async function readWorkspaceGitGraph(
 ): Promise<WorkspaceGitGraphSnapshot> {
 	const root = await findGitRoot(workspacePath);
 	if (!root) return emptyWorkspaceGitGraphSnapshot;
-	const [logResult, headResult, branchResult, mainBranch, remotesResult, statusResult] =
-		await Promise.all([
-			git(
-				root,
-				"log",
-				"--all",
-				"--topo-order",
-				`-n`,
-				String(pageSize + 1),
-				graphLogFormat,
-			),
-			git(root, "rev-parse", "--verify", "HEAD"),
-			git(root, "symbolic-ref", "--quiet", "--short", "HEAD"),
-			findWorkspaceGitGraphMainBranch(root),
-			git(root, "remote"),
-			git(root, "status", "--porcelain=v1", "--untracked-files=normal", "-z"),
-		]);
+	const [
+		logResult,
+		headResult,
+		branchResult,
+		mainBranch,
+		remotesResult,
+		statusResult,
+		branchesResult,
+	] = await Promise.all([
+		git(
+			root,
+			"log",
+			"--all",
+			"--topo-order",
+			`-n`,
+			String(pageSize + 1),
+			graphLogFormat,
+		),
+		git(root, "rev-parse", "--verify", "HEAD"),
+		git(root, "symbolic-ref", "--quiet", "--short", "HEAD"),
+		findWorkspaceGitGraphMainBranch(root),
+		git(root, "remote"),
+		git(root, "status", "--porcelain=v1", "--untracked-files=normal", "-z"),
+		git(root, "for-each-ref", `--format=${branchFormat}`, "refs/heads"),
+	]);
 	const branch =
 		branchResult.code === 0
 			? branchResult.stdout.trim()
 			: headResult.code === 0
 				? `detached@${headResult.stdout.trim().slice(0, 7)}`
 				: null;
+	const branches =
+		branchesResult.code === 0
+			? parseGitBranches(branchesResult.stdout, branch, mainBranch)
+			: [];
 	const remotes =
 		remotesResult.code === 0
 			? remotesResult.stdout
@@ -143,6 +190,7 @@ export async function readWorkspaceGitGraph(
 		statusResult.code === 0 ? parsePorcelainStatus(statusResult.stdout).length : 0;
 	return {
 		branch,
+		branches,
 		changeCount,
 		hasMore,
 		isGitRepository: true,
@@ -155,6 +203,7 @@ export async function readWorkspaceGitGraph(
 				branchResult.stdout,
 				mainBranch,
 				statusResult.stdout,
+				branchesResult.stdout,
 				pageSize,
 			]),
 		),

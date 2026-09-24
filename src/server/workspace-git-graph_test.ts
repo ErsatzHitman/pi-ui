@@ -7,6 +7,7 @@ import { makeTempDir } from "#testing/temp";
 import { outputCommand } from "../utils/command.ts";
 import {
 	findWorkspaceGitGraphMainBranch,
+	parseGitBranches,
 	parseGitGraphLog,
 	readWorkspaceGitGraph,
 	readWorkspaceGitGraphCommit,
@@ -41,12 +42,65 @@ test("git graph log parsing reads hash, parents, refs and subject", () => {
 	);
 });
 
+test("branch list parsing reads tip hash, upstream and ahead/behind, and marks current/main", () => {
+	assertEquals(
+		parseGitBranches(
+			"aaaa\x09main\x09origin/main\x09\n" +
+				"bbbb\x09feature\x09origin/feature\x09[ahead 2, behind 1]\n" +
+				"cccc\x09solo\x09\x09\n" +
+				"dddd\x09stale\x09origin/stale\x09[gone]\n",
+			"feature",
+			"main",
+		),
+		[
+			{
+				ahead: 0,
+				behind: 0,
+				current: false,
+				hash: "aaaa",
+				main: true,
+				name: "main",
+				upstream: "origin/main",
+			},
+			{
+				ahead: 2,
+				behind: 1,
+				current: true,
+				hash: "bbbb",
+				main: false,
+				name: "feature",
+				upstream: "origin/feature",
+			},
+			{
+				ahead: 0,
+				behind: 0,
+				current: false,
+				hash: "cccc",
+				main: false,
+				name: "solo",
+				upstream: null,
+			},
+			{
+				ahead: 0,
+				behind: 0,
+				current: false,
+				hash: "dddd",
+				main: false,
+				name: "stale",
+				upstream: "origin/stale",
+			},
+		],
+	);
+	assertEquals(parseGitBranches("", null, null), []);
+});
+
 test("git graph reports non-repositories without throwing", async () => {
 	const workspace = await makeTempDir();
 	try {
 		const snapshot = await readWorkspaceGitGraph(workspace);
 		assertEquals(snapshot.isGitRepository, false);
 		assertEquals(snapshot.rows, []);
+		assertEquals(snapshot.branches, []);
 		assertEquals(snapshot.revision, "non-git");
 		assertEquals(
 			await readWorkspaceGitGraphCommit(workspace, "a".repeat(40)),
@@ -220,6 +274,47 @@ test("main branch detection falls back from origin/HEAD to a local main or maste
 		assertEquals(await findWorkspaceGitGraphMainBranch(repository), "main");
 	} finally {
 		await rm(repository, { recursive: true });
+	}
+});
+
+test("git graph snapshot lists local branches with current/main flags and real upstream ahead/behind", async () => {
+	const origin = await makeTempDir();
+	const repository = await makeGitRepository();
+	try {
+		await git(origin, "init", "--quiet", "--bare", "--initial-branch=main");
+		await Bun.write(`${repository}/file.txt`, "base\n");
+		await git(repository, "add", ".");
+		await git(repository, "commit", "-m", "base");
+		await git(repository, "remote", "add", "origin", origin);
+		await git(repository, "push", "-u", "origin", "main");
+		await git(repository, "checkout", "-b", "feature");
+		await Bun.write(`${repository}/file.txt`, "ahead\n");
+		await git(repository, "commit", "-am", "ahead");
+		await git(repository, "push", "-u", "origin", "feature");
+		// A second local commit on main that main's own upstream never sees puts
+		// main ahead of origin/main by 1, independent of the checked-out branch.
+		await git(repository, "checkout", "main");
+		await Bun.write(`${repository}/other.txt`, "more\n");
+		await git(repository, "add", ".");
+		await git(repository, "commit", "-m", "unpushed");
+		await git(repository, "checkout", "feature");
+
+		const snapshot = await readWorkspaceGitGraph(repository);
+		assertEquals(snapshot.branch, "feature");
+		assertEquals(snapshot.mainBranch, "main");
+		const byName = new Map(snapshot.branches.map((branch) => [branch.name, branch]));
+		assertEquals(byName.get("feature")?.current, true);
+		assertEquals(byName.get("feature")?.main, false);
+		assertEquals(byName.get("feature")?.upstream, "origin/feature");
+		assertEquals(byName.get("feature")?.ahead, 0);
+		assertEquals(byName.get("feature")?.behind, 0);
+		assertEquals(byName.get("main")?.current, false);
+		assertEquals(byName.get("main")?.main, true);
+		assertEquals(byName.get("main")?.ahead, 1);
+		assertEquals(byName.get("main")?.behind, 0);
+	} finally {
+		await rm(repository, { recursive: true });
+		await rm(origin, { recursive: true });
 	}
 });
 
