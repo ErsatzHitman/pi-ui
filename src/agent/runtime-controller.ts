@@ -1546,8 +1546,8 @@ export class RuntimeController {
 		return this.auth.startLogin(providerId, authType);
 	}
 
-	submitAuthInput(value: string): boolean {
-		return this.auth.submitInput(value);
+	submitAuthInput(value: string, clientId?: string): boolean {
+		return this.auth.submitInput(value, clientId);
 	}
 
 	logout(providerId: string): boolean {

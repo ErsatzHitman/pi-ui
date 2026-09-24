@@ -128,7 +128,15 @@ export class AuthController {
 		return true;
 	}
 
-	submitInput(value: string): boolean {
+	/**
+	 * `clientId` is the answering tab's display client id (`page.tsx`'s
+	 * `displayClientId`), passed through from the `/auth/input` route — same
+	 * shape as `ExtensionUiController.respond`'s. Notifying other clients here
+	 * (instead of only relying on `AppStore.authDialog` closing everywhere) is
+	 * what round RM1 multi-client #1 requires for the auth prompt flow, the
+	 * one enumerated dialog kind that previously never got a toast.
+	 */
+	submitInput(value: string, clientId?: string): boolean {
 		const dialog = this.state.authDialog;
 		const run = this.loginRun;
 		if (
@@ -149,6 +157,7 @@ export class AuthController {
 			},
 			{ resetInput: true },
 		);
+		this.state.notifyOtherClients("Answered on another device", clientId);
 		return true;
 	}
 

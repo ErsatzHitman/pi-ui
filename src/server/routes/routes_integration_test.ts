@@ -849,6 +849,44 @@ test("extension UI responses reject a malformed client id without reaching the r
 	assertEquals(called, false);
 });
 
+test("auth prompt input forwards the answering client's id (RM1 multi-client #1)", async () => {
+	let receivedClientId: string | undefined;
+	const clientId = crypto.randomUUID();
+	const host = fakeHost({
+		submitAuthInput: (_value, thisClientId) => {
+			receivedClientId = thisClientId;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest(endpoints.authInput, { authInput: "secret", clientId }),
+	);
+
+	assertEquals(result.status, 204);
+	assertEquals(receivedClientId, clientId);
+});
+
+test("auth prompt input rejects a malformed client id without reaching the runtime", async () => {
+	let called = false;
+	const host = fakeHost({
+		submitAuthInput: () => {
+			called = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest(endpoints.authInput, {
+			authInput: "secret",
+			clientId: "not-a-uuid",
+		}),
+	);
+
+	assertEquals(result.status, 400);
+	assertEquals(called, false);
+});
+
 test("extension UI actions route to the active extension's pi_ui_event handler", async () => {
 	let dispatched: unknown;
 	const host = fakeHost({
