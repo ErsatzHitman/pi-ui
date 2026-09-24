@@ -104,6 +104,56 @@ test("firing the promotion timer promotes the scope to working, and scopeEnd fin
 	]);
 });
 
+test("a before_agent_start hook returning display:false is captured as a hidden output section", () => {
+	// Vision Proxy (and JEV's jev-decompose) return their message with
+	// `display: false` — invisible in terminal pi — so the activity card is
+	// the only place it's ever shown; per DESIGN-ext-activity.md's Vision
+	// Proxy row it must be marked `hidden: true`, not dropped or shown as if
+	// it were a normal, terminal-visible message.
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 100 });
+
+	tracker.scopeStart(hookScope(), 0);
+	timers[0]?.run();
+	tracker.scopeEnd(hookScope(), 200, {
+		ok: true,
+		result: { message: { content: "A red square.", display: false } },
+	});
+
+	const finished = changes[1];
+	assertExists(finished);
+	if (finished.kind !== "finished") throw new Error("expected finished");
+	assertEquals(finished.activity.output, [
+		{
+			kind: "returned-message",
+			title: "Sent to model · hidden in terminal",
+			text: "A red square.",
+			hidden: true,
+		},
+	]);
+});
+
+test("a before_agent_start hook returning no display field (or display:true) stays unhidden", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 100 });
+
+	tracker.scopeStart(hookScope(), 0);
+	timers[0]?.run();
+	tracker.scopeEnd(hookScope(), 200, {
+		ok: true,
+		result: { message: { content: "hi", display: true } },
+	});
+
+	const finished = changes[1];
+	assertExists(finished);
+	if (finished.kind !== "finished") throw new Error("expected finished");
+	assertEquals(finished.activity.output, [
+		{ kind: "returned-message", title: "Sent to model", text: "hi" },
+	]);
+});
+
 test("a scope that ends below threshold with no signal is dropped, not finished", () => {
 	const { scheduler } = fakeScheduler();
 	const { sink, changes } = sinkRecorder();

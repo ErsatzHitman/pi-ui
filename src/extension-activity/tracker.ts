@@ -1,4 +1,8 @@
-import type { ExtensionActivity, ExtensionRef } from "../extension-activity-types.ts";
+import type {
+	ExtensionActivity,
+	ExtensionActivityOutput,
+	ExtensionRef,
+} from "../extension-activity-types.ts";
 import { isRecord, isString } from "../utils/type-guards.ts";
 import type {
 	InstrumentationReporter,
@@ -362,20 +366,18 @@ function mapHookOutcome<Result>(event: string, result: Result): ScopeOutcome {
 
 function mapBeforeAgentStart<Result>(result: Result): ScopeOutcome {
 	if (!isRecord(result)) return { ok: true };
-	const message = isRecord(result.message)
-		? messageContentText(result.message.content)
-		: undefined;
+	const messageRecord = isRecord(result.message) ? result.message : undefined;
+	const message = messageRecord ? messageContentText(messageRecord.content) : undefined;
+	// Vision Proxy (and JEV's `jev-decompose`) return their message with
+	// `display: false` — never shown in terminal pi, so this is the only
+	// place its text becomes visible at all (DESIGN-ext-activity.md's Vision
+	// Proxy row: "Output = returned message text … (hidden:true)").
+	const hidden = messageRecord?.display === false;
 	const systemPrompt = isString(result.systemPrompt) ? result.systemPrompt : undefined;
 	if (message === undefined && systemPrompt === undefined) return { ok: true };
 	const output =
 		message !== undefined
-			? [
-					{
-						kind: "returned-message" as const,
-						title: "Sent to model",
-						text: message,
-					},
-				]
+			? [returnedMessageOutput(message, hidden)]
 			: [
 					{
 						kind: "system-prompt" as const,
@@ -384,6 +386,22 @@ function mapBeforeAgentStart<Result>(result: Result): ScopeOutcome {
 					},
 				];
 	return { ok: true, summary: message ?? "Replaced system prompt", output };
+}
+
+/** The `before_agent_start` "Sent to model" output section — kept as its
+ * own function (rather than a conditional spread) so the `hidden` field is
+ * genuinely absent, not present-and-`false`, on the common unhidden path
+ * (`ScopeOutcome`'s consumers/tests compare output sections by exact shape). */
+function returnedMessageOutput(text: string, hidden: boolean): ExtensionActivityOutput {
+	if (hidden) {
+		return {
+			kind: "returned-message",
+			title: "Sent to model · hidden in terminal",
+			text,
+			hidden,
+		};
+	}
+	return { kind: "returned-message", title: "Sent to model", text };
 }
 
 function mapContextResult<Result>(result: Result): ScopeOutcome {
