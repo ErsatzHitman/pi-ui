@@ -4,6 +4,7 @@ import { assertStringIncludes } from "#testing/assertions";
 
 import type { PiUiElement } from "../extension-surface-types.ts";
 import { assertStringExcludes } from "../testing/assertions.ts";
+import type { JsonValue } from "../utils/json-types.ts";
 import { renderPage } from "./page.tsx";
 import {
 	renderPiUiElement,
@@ -599,8 +600,8 @@ test("text and textarea fields carry a stable id (and a label pointing at it) so
 // the icon button used to wrap onto its own row under the input.
 test("a form section with one single-line field and only icon actions lays out as one inline composer row", () => {
 	const composer = (
-		actions: unknown[],
-		fields: unknown[] = [{ id: "q", kind: "text" }],
+		actions: JsonValue[],
+		fields: JsonValue[] = [{ id: "q", kind: "text" }],
 	) =>
 		renderPiUiSheets({
 			extensionElements: [
