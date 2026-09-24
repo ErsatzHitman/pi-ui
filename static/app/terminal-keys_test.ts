@@ -520,3 +520,70 @@ test("a numeric-width overlay still measures its own box (only a percentage need
 		dom.restore();
 	}
 });
+
+test("a percentage-width overlay stops answering back another tab's smaller size", async () => {
+	// Two tabs share one surface size. This tab measures its own width (768px viewport); a
+	// narrower tab keeps reporting its own smaller size. Re-reporting ours on every change
+	// flipped the overlay between the two sizes forever.
+	const content = new FakeGridElement({ width: 700, height: 130 });
+	const grid = new FakeGridElement({ width: 0, height: 96 });
+	grid.dataset.terminalSurfaceGrid = "s-two-tabs";
+	grid.dataset.terminalSurfaceKind = "overlay";
+	grid.dataset.terminalSurfacePercentWidth = "true";
+	grid.setClosest(content);
+	const body = new FakeGridElement({ width: 0, height: 0 });
+	body.dataset.cols = "100";
+	body.dataset.rows = "24";
+	body.clientWidth = 732;
+	grid.setQueryResult(body);
+	body.setClosest(grid);
+
+	const dom = installFakeDom({
+		probeRect: { width: 140, height: 20 },
+		grids: [],
+		documentElementWidth: 768,
+	});
+	const settle = () => new Promise((resolve) => setTimeout(resolve, 200));
+	const changed = () =>
+		dom.getMutationCallback()?.([
+			{ type: "attributes", target: body, addedNodes: [], removedNodes: [] },
+		]);
+	try {
+		bindTerminalSurfaces();
+		changed();
+		await waitForCondition(() => dom.calls.length > 0, {
+			timeoutMs: 1000,
+			message: "expected the first resize POST",
+		});
+		const first = dom.calls[0]?.body as { cols: number };
+		assertEquals(first.cols > 43, true);
+		// The other tab's smaller size lands: nothing is sent back.
+		body.dataset.cols = "43";
+		body.dataset.rows = "4";
+		changed();
+		await settle();
+		assertEquals(dom.calls.length, 1);
+		// A size larger than this tab can show is corrected, keeping the other tab's smaller
+		// dimension: a wider but shorter tab and a narrower but taller one settle on the
+		// smaller of each instead of trading sizes.
+		body.dataset.cols = "158";
+		body.dataset.rows = "3";
+		changed();
+		await waitForCondition(() => dom.calls.length > 1, {
+			timeoutMs: 1000,
+			message: "expected a resize POST for a too-wide shared size",
+		});
+		assertEquals(dom.calls[1]?.body, {
+			surfaceId: "s-two-tabs",
+			cols: first.cols,
+			rows: 3,
+		});
+		// That settled size is left alone.
+		body.dataset.cols = String(first.cols);
+		changed();
+		await settle();
+		assertEquals(dom.calls.length, 2);
+	} finally {
+		dom.restore();
+	}
+});

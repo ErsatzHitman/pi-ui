@@ -342,7 +342,42 @@ function sendResize(surfaceId, grid) {
 	const previousCols = Number(body?.dataset.cols);
 	const previousRows = Number(body?.dataset.rows);
 	if (cols === previousCols && rows === previousRows) return;
-	postJson(endpoints.terminalSurfaceResize, { surfaceId, cols, rows });
+	const size =
+		grid.dataset.terminalSurfacePercentWidth === "true"
+			? percentOverlayReport(surfaceId, { cols, rows }, previousCols, previousRows)
+			: { cols, rows };
+	if (size) postJson(endpoints.terminalSurfaceResize, { surfaceId, ...size });
+}
+
+/** The size each percentage-width overlay was last reported at by THIS tab. */
+const reportedPercentSizes = new Map();
+
+/**
+ * What, if anything, to report for a percentage-width overlay. A surface has one size shared
+ * by every tab. A percentage overlay's box is sized from that shared size, but each tab
+ * measures it against its own viewport, so two tabs of different sizes each saw the other's
+ * size, re-reported their own, and flipped the overlay between the two about every 150ms for
+ * as long as it stayed open. Report this tab's own size only when that measurement changed
+ * (the overlay opened, or the window resized). Otherwise answer only a shared size larger than
+ * this tab can show, and then with the smaller of the two in each dimension, so the tabs
+ * settle on a size that fits every one of them instead of fighting.
+ */
+function percentOverlayReport(surfaceId, measured, sharedCols, sharedRows) {
+	const key = `${measured.cols}x${measured.rows}`;
+	if (reportedPercentSizes.get(surfaceId) !== key) {
+		reportedPercentSizes.delete(surfaceId);
+		reportedPercentSizes.set(surfaceId, key);
+		// Each overlay mount has a fresh id; keep only the most recent few.
+		if (reportedPercentSizes.size > 32) {
+			reportedPercentSizes.delete(reportedPercentSizes.keys().next().value);
+		}
+		return measured;
+	}
+	if (!(sharedCols > measured.cols) && !(sharedRows > measured.rows)) return undefined;
+	return {
+		cols: Math.min(measured.cols, sharedCols || measured.cols),
+		rows: Math.min(measured.rows, sharedRows || measured.rows),
+	};
 }
 
 let resizeObserver;
