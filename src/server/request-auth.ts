@@ -120,13 +120,26 @@ const loopbackAddresses = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 /**
  * The peer address Bun accepted the connection from, unless that peer is loopback (a
  * reverse proxy on the same host) and it forwarded one via `X-Forwarded-For`, in which
- * case its first hop — the actual client — is used instead. Never trusts
- * `X-Forwarded-For` from a non-loopback peer, since anyone on the network could send it.
+ * case its LAST hop — the one *this* proxy appended, describing whoever it accepted the
+ * connection from — is used instead. Never trusts `X-Forwarded-For` from a non-loopback
+ * peer, since anyone on the network could send it.
+ *
+ * The last hop, not the first: a reverse proxy that *appends* to an existing
+ * `X-Forwarded-For` (e.g. nginx's default `$proxy_add_x_forwarded_for`) leaves any
+ * earlier, client-supplied hops in the header untouched, so trusting the first one would
+ * let a client pick its own rate-limit bucket just by sending its own
+ * `X-Forwarded-For: <anything I like>`. This project's documented recipe (Caddy,
+ * `docs/remote.md`) instead *replaces* the header with a single real hop, so either
+ * choice is safe there — but the last hop is safe under both proxy behaviours, so it's
+ * the one used (RM1 audit open issue 6). Deploying behind a different reverse proxy?
+ * Confirm it doesn't forward an untouched client-supplied `X-Forwarded-For` verbatim as
+ * its only (and therefore last) hop.
  */
 export function clientIp(request: Request, server: RequestIpSource | undefined): string {
 	const peer = server?.requestIP(request)?.address;
 	if (peer && loopbackAddresses.has(peer)) {
-		const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+		const hops = request.headers.get("x-forwarded-for")?.split(",") ?? [];
+		const forwarded = hops[hops.length - 1]?.trim();
 		if (forwarded) return forwarded;
 	}
 	return peer ?? "unknown";

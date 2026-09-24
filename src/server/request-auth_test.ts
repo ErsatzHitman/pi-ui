@@ -3,7 +3,12 @@ import { test } from "bun:test";
 import { assertEquals, assertFalse, assertStringIncludes } from "#testing/assertions";
 
 import { AuthRateLimiter } from "./auth-rate-limit.ts";
-import { checkAuthToken, type RequestIpSource, withAuthToken } from "./request-auth.ts";
+import {
+	checkAuthToken,
+	clientIp,
+	type RequestIpSource,
+	withAuthToken,
+} from "./request-auth.ts";
 
 const token = "secret-token-value";
 
@@ -309,6 +314,30 @@ test("a GET authenticated by cookie is never CSRF-checked", () => {
 		token,
 	);
 	assertEquals(result.ok, true);
+});
+
+test("clientIp trusts the LAST X-Forwarded-For hop from a loopback peer, not the first (RM1 audit open issue 6)", () => {
+	// A proxy that *appends* to X-Forwarded-For (e.g. nginx's $proxy_add_x_forwarded_for)
+	// leaves any earlier, client-supplied hops in place — trusting the first hop would let
+	// a client pick its own rate-limit bucket by sending its own X-Forwarded-For. Caddy
+	// (this project's documented recipe) instead *replaces* the header with a single real
+	// hop, so this is safe either way; see docs/remote.md.
+	const request = new Request("http://localhost/", {
+		headers: { "x-forwarded-for": "attacker-supplied, 10.0.0.1, 203.0.113.9" },
+	});
+	assertEquals(clientIp(request, serverFor("127.0.0.1")), "203.0.113.9");
+});
+
+test("clientIp trusts X-Forwarded-For only from a loopback peer", () => {
+	const request = new Request("http://localhost/", {
+		headers: { "x-forwarded-for": "203.0.113.9" },
+	});
+	assertEquals(clientIp(request, serverFor("198.51.100.1")), "198.51.100.1");
+});
+
+test("clientIp falls back to the peer address with no X-Forwarded-For", () => {
+	const request = new Request("http://localhost/");
+	assertEquals(clientIp(request, serverFor("127.0.0.1")), "127.0.0.1");
 });
 
 test("repeated wrong tokens from one IP are rate-limited, but other IPs are unaffected", () => {

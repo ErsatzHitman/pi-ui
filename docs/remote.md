@@ -196,6 +196,24 @@ What pi-ui does for you:
   IP gets `429` for every credential it sends, the right one included, until the window
   passes (a correct token would otherwise tell a guesser it had won).
 
+**Trusted proxy behaviour for the rate limit.** pi-ui only trusts `X-Forwarded-For` from a
+loopback peer (your reverse proxy, on the same host) — a non-loopback peer's own
+`X-Forwarded-For` is always ignored, since anyone on the network could send one. When it
+does trust the header, it reads the **last** hop, not the first, because a proxy can
+handle the header two different ways:
+
+- **Replaces it** with a single real hop (Caddy's default, and this doc's recipe): first
+  and last hop are the same IP, so either choice works.
+- **Appends** to whatever the client already sent (e.g. nginx's default
+  `$proxy_add_x_forwarded_for`): the client's own, spoofable hops are still in the
+  header. Trusting the *first* hop there would let a client pick its own rate-limit
+  bucket at will by sending its own `X-Forwarded-For`; the *last* hop — the one your
+  proxy itself appended — is the one that actually can't be forged.
+
+If you put a different reverse proxy in front of pi-ui, confirm it either replaces
+`X-Forwarded-For` outright or appends the real peer address as the last hop, and never
+forwards an untouched client-supplied header as the only (and therefore last) one.
+
 What you're responsible for:
 
 - **One pi-ui per user.** Don't share a single server between people — there is one
