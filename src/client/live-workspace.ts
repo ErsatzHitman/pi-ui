@@ -9,7 +9,10 @@
 import { formatRetryCountdown } from "../live-workspace-types.ts";
 import { bindLiveWorkspace } from "./live-workspace-open.ts";
 import { createTurnPhaseWatcher } from "./live-workspace-turn-phase.ts";
-import { requestNotificationPermission } from "./notification-permission.ts";
+import {
+	needsNotificationPermission,
+	requestNotificationPermission,
+} from "./notification-permission.ts";
 
 const tickIntervalMs = 1000;
 
@@ -113,6 +116,7 @@ function watchTurnPhase(): void {
 window.piUi.liveWorkspace = {
 	applyOpen: bindLiveWorkspace().applyOpen,
 	requestNotificationPermission,
+	needsNotificationPermission,
 	notificationsOptedIn,
 };
 

@@ -17,3 +17,10 @@ export function requestNotificationPermission(): Promise<void> {
 	}
 	return Notification.requestPermission().then(() => undefined);
 }
+
+/** True while this browser hasn't answered the notification prompt yet. The bell's
+ * preference is shared by every device (server-side), so a device can find it already
+ * on without ever having been asked: its click then asks instead of switching it off. */
+export function needsNotificationPermission(): boolean {
+	return typeof Notification !== "undefined" && Notification.permission === "default";
+}

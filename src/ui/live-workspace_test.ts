@@ -441,3 +441,22 @@ test("the extensions tab reports no activity when nothing has been observed", ()
 	const html = renderLiveWorkspaceData(snapshot(), { tab: "extensions" }, emptyUsage);
 	assertStringIncludes(html, "No extension UI or channel activity observed yet.");
 });
+
+test("clicking the bell while it is already on (from another device) asks THIS browser for permission instead of turning it off", () => {
+	// The preference is server-side and shared, so a phone opening pi-ui for the first
+	// time finds the bell on without ever having granted permission or subscribed.
+	const html = renderLiveWorkspace(snapshot(), {}, emptyUsage);
+	const button = html
+		.split('id="live-workspace-notifications-toggle"')[1]
+		?.split("</button>")[0];
+	if (!button) throw new Error("notifications toggle button not found");
+	const check = button.indexOf(
+		"$liveWorkspacePreferences.notifications && window.piUi.liveWorkspace.needsNotificationPermission()",
+	);
+	const toggle = button.indexOf(
+		"$liveWorkspacePreferences.notifications = !$liveWorkspacePreferences.notifications",
+	);
+	if (check === -1 || toggle === -1 || check > toggle) {
+		throw new Error("expected the permission check to come before the toggle");
+	}
+});

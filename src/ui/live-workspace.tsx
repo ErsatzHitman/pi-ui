@@ -234,19 +234,28 @@ export function renderLiveWorkspace(
 							data-tooltip="Notify on completion"
 							data-tooltip-delay
 							data-on:click={`
-							$liveWorkspacePreferences.notifications = !$liveWorkspacePreferences.notifications;
-							if ($liveWorkspacePreferences.notifications) {
+							if ($liveWorkspacePreferences.notifications && window.piUi.liveWorkspace.needsNotificationPermission()) {
 								window.piUi.liveWorkspace.requestNotificationPermission().then(() => {
+									document.body.dispatchEvent(new CustomEvent(
+										'pi-ui-live-workspace-preferences',
+										{ detail: { notifications: true } },
+									));
+								});
+							} else {
+								$liveWorkspacePreferences.notifications = !$liveWorkspacePreferences.notifications;
+								if ($liveWorkspacePreferences.notifications) {
+									window.piUi.liveWorkspace.requestNotificationPermission().then(() => {
+										document.body.dispatchEvent(new CustomEvent(
+											'pi-ui-live-workspace-preferences',
+											{ detail: { notifications: $liveWorkspacePreferences.notifications } },
+										));
+									});
+								} else {
 									document.body.dispatchEvent(new CustomEvent(
 										'pi-ui-live-workspace-preferences',
 										{ detail: { notifications: $liveWorkspacePreferences.notifications } },
 									));
-								});
-							} else {
-								document.body.dispatchEvent(new CustomEvent(
-									'pi-ui-live-workspace-preferences',
-									{ detail: { notifications: $liveWorkspacePreferences.notifications } },
-								));
+								}
 							}
 						`}
 						>

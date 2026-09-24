@@ -2,7 +2,10 @@ import { test } from "bun:test";
 
 import { assertEquals } from "#testing/assertions";
 
-import { requestNotificationPermission } from "./notification-permission.ts";
+import {
+	needsNotificationPermission,
+	requestNotificationPermission,
+} from "./notification-permission.ts";
 
 /** Patches a global via `Object.defineProperty` (see live-workspace-open_test.ts). */
 function patchGlobal(name: string, value: unknown): () => void {
@@ -91,6 +94,27 @@ test("awaits the real prompt when permission is still default, then resolves (th
 		resolvePrompt("granted");
 		await result;
 		assertEquals(settled, true);
+	} finally {
+		restore();
+	}
+});
+
+test("needsNotificationPermission is true only while this browser hasn't answered yet", () => {
+	for (const [permission, expected] of [
+		["default", true],
+		["granted", false],
+		["denied", false],
+	] as const) {
+		const restore = patchGlobal("Notification", { permission });
+		try {
+			assertEquals(needsNotificationPermission(), expected);
+		} finally {
+			restore();
+		}
+	}
+	const restore = patchGlobal("Notification", undefined);
+	try {
+		assertEquals(needsNotificationPermission(), false);
 	} finally {
 		restore();
 	}

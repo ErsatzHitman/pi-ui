@@ -88,6 +88,7 @@ interface PiUiNamespace {
 	liveWorkspace: {
 		applyOpen(open: boolean): void;
 		requestNotificationPermission(): Promise<void>;
+		needsNotificationPermission(): boolean;
 		notificationsOptedIn(): boolean;
 	};
 	notifications: {
