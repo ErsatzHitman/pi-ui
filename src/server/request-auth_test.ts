@@ -2,9 +2,22 @@ import { test } from "bun:test";
 
 import { assertEquals, assertStringIncludes } from "#testing/assertions";
 
-import { checkAuthToken, withAuthToken } from "./request-auth.ts";
+import { AuthRateLimiter } from "./auth-rate-limit.ts";
+import { checkAuthToken, type RequestIpSource, withAuthToken } from "./request-auth.ts";
 
 const token = "secret-token-value";
+
+function serverFor(ip: string): RequestIpSource {
+	return { requestIP: () => ({ address: ip }) };
+}
+
+/** A GET request as a real browser navigation would send it (no cookie, no token yet). */
+function navigationRequest(url: string, init: RequestInit = {}): Request {
+	return new Request(url, {
+		...init,
+		headers: { "sec-fetch-mode": "navigate", accept: "text/html", ...init.headers },
+	});
+}
 
 test("a request with no token is rejected with 401", async () => {
 	const result = checkAuthToken(new Request("http://localhost/"), token);
@@ -96,4 +109,222 @@ test("withAuthToken calls the handler without touching set-cookie on a cookie-au
 	);
 	assertEquals(response.status, 200);
 	assertEquals(response.headers.get("set-cookie"), null);
+});
+
+test("pi-ui's own CSS, theme script, and favicon are served with no token at all", () => {
+	for (const path of ["/app.css", "/theme.js", "/favicon.svg", "/static/abc/app.css"]) {
+		const result = checkAuthToken(new Request(`http://localhost${path}`), token);
+		assertEquals(result.ok, true);
+	}
+});
+
+test("an unauthenticated API-style request still gets a plain-text 401, not the login page", async () => {
+	const result = checkAuthToken(
+		new Request("http://localhost/", { headers: { accept: "application/json" } }),
+		token,
+	);
+	assertEquals(result.ok, false);
+	if (!result.ok) {
+		assertEquals(result.response.status, 401);
+		assertEquals(
+			result.response.headers.get("content-type"),
+			"text/plain; charset=utf-8",
+		);
+	}
+});
+
+test("an unauthenticated browser navigation gets the login page instead of a bare 401", async () => {
+	const result = checkAuthToken(
+		navigationRequest("http://localhost/sessions/abc"),
+		token,
+	);
+	assertEquals(result.ok, false);
+	if (!result.ok) {
+		assertEquals(result.response.status, 401);
+		const html = await result.response.text();
+		assertStringIncludes(html, 'action="/session/login"');
+		assertStringIncludes(html, "/sessions/abc");
+	}
+});
+
+test("a correct query token on a browser navigation redirects to strip it from the address bar", async () => {
+	const result = checkAuthToken(
+		navigationRequest(`http://localhost/sessions/abc?token=${token}&x=1`),
+		token,
+	);
+	assertEquals(result.ok, true);
+	if (result.ok) {
+		assertEquals(result.redirect, "/sessions/abc?x=1");
+		assertStringIncludes(
+			result.setCookie ?? "",
+			`pi_ui_token=${encodeURIComponent(token)}`,
+		);
+	}
+});
+
+test("withAuthToken issues that redirect instead of calling the handler", async () => {
+	let called = false;
+	const handler = withAuthToken(async (_request: Request) => {
+		called = true;
+		return new Response("ok");
+	}, token);
+	const response = await handler(navigationRequest(`http://localhost/?token=${token}`));
+	assertEquals(called, false);
+	assertEquals(response.status, 303);
+	assertEquals(response.headers.get("location"), "/");
+	assertStringIncludes(response.headers.get("set-cookie") ?? "", "pi_ui_token=");
+});
+
+test("a correct query token on a non-navigation request (like EventSource) is not redirected", async () => {
+	const request = new Request(`http://localhost/stream?token=${token}`, {
+		headers: { accept: "text/event-stream" },
+	});
+	const result = checkAuthToken(request, token);
+	assertEquals(result.ok, true);
+	if (result.ok) assertEquals(result.redirect, undefined);
+});
+
+test("the cookie is Secure over HTTPS and not over plain HTTP", () => {
+	const http = checkAuthToken(new Request(`http://localhost/?token=${token}`), token);
+	const https = checkAuthToken(new Request(`https://localhost/?token=${token}`), token);
+	if (http.ok) assertEquals(http.setCookie?.includes("Secure"), false);
+	if (https.ok) assertEquals(https.setCookie?.includes("Secure"), true);
+});
+
+test("a forwarded HTTPS proto also makes the cookie Secure", () => {
+	const result = checkAuthToken(
+		new Request(`http://localhost/?token=${token}`, {
+			headers: { "x-forwarded-proto": "https" },
+		}),
+		token,
+	);
+	if (result.ok) assertEquals(result.setCookie?.includes("Secure"), true);
+});
+
+test("a cookie-authenticated POST is rejected when Origin doesn't match Host", () => {
+	const result = checkAuthToken(
+		new Request("http://localhost/prompt", {
+			method: "POST",
+			headers: {
+				cookie: `pi_ui_token=${encodeURIComponent(token)}`,
+				origin: "https://evil.example",
+				host: "localhost",
+			},
+		}),
+		token,
+	);
+	assertEquals(result.ok, false);
+	if (!result.ok) assertEquals(result.response.status, 403);
+});
+
+test("a cookie-authenticated POST with no Origin or Referer is rejected too", () => {
+	const result = checkAuthToken(
+		new Request("http://localhost/prompt", {
+			method: "POST",
+			headers: { cookie: `pi_ui_token=${encodeURIComponent(token)}` },
+		}),
+		token,
+	);
+	assertEquals(result.ok, false);
+});
+
+test("a cookie-authenticated POST is accepted when Origin matches Host", () => {
+	const result = checkAuthToken(
+		new Request("http://localhost/prompt", {
+			method: "POST",
+			headers: {
+				cookie: `pi_ui_token=${encodeURIComponent(token)}`,
+				origin: "http://localhost",
+				host: "localhost",
+			},
+		}),
+		token,
+	);
+	assertEquals(result.ok, true);
+});
+
+test("a Referer is accepted in place of Origin for the CSRF check", () => {
+	const result = checkAuthToken(
+		new Request("http://localhost/prompt", {
+			method: "POST",
+			headers: {
+				cookie: `pi_ui_token=${encodeURIComponent(token)}`,
+				referer: "http://localhost/sessions/abc",
+				host: "localhost",
+			},
+		}),
+		token,
+	);
+	assertEquals(result.ok, true);
+});
+
+test("a bearer-authenticated POST needs no Origin check at all", () => {
+	const result = checkAuthToken(
+		new Request("http://localhost/prompt", {
+			method: "POST",
+			headers: { authorization: `Bearer ${token}` },
+		}),
+		token,
+	);
+	assertEquals(result.ok, true);
+});
+
+test("a GET authenticated by cookie is never CSRF-checked", () => {
+	const result = checkAuthToken(
+		new Request("http://localhost/", {
+			headers: { cookie: `pi_ui_token=${encodeURIComponent(token)}` },
+		}),
+		token,
+	);
+	assertEquals(result.ok, true);
+});
+
+test("repeated wrong tokens from one IP are rate-limited, but other IPs are unaffected", () => {
+	const rateLimiter = new AuthRateLimiter({ maxFailures: 3 });
+	const server = serverFor("9.9.9.9");
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		const result = checkAuthToken(
+			new Request("http://localhost/", {
+				headers: { authorization: "Bearer wrong" },
+			}),
+			token,
+			{ server, rateLimiter },
+		);
+		assertEquals(result.ok, false);
+	}
+	const blocked = checkAuthToken(
+		new Request("http://localhost/", { headers: { authorization: "Bearer wrong" } }),
+		token,
+		{ server, rateLimiter },
+	);
+	assertEquals(blocked.ok, false);
+	if (!blocked.ok) {
+		assertEquals(blocked.response.status, 429);
+		assertEquals(blocked.response.headers.has("retry-after"), true);
+	}
+	const otherIp = checkAuthToken(
+		new Request("http://localhost/", { headers: { authorization: "Bearer wrong" } }),
+		token,
+		{ server: serverFor("1.1.1.1"), rateLimiter },
+	);
+	assertEquals(otherIp.ok, false);
+	if (!otherIp.ok) assertEquals(otherIp.response.status, 401);
+});
+
+test("a correct token succeeds even while that IP is currently blocked from wrong guesses", () => {
+	const rateLimiter = new AuthRateLimiter({ maxFailures: 1 });
+	const server = serverFor("9.9.9.9");
+	checkAuthToken(
+		new Request("http://localhost/", { headers: { authorization: "Bearer wrong" } }),
+		token,
+		{ server, rateLimiter },
+	);
+	const result = checkAuthToken(
+		new Request("http://localhost/", {
+			headers: { authorization: `Bearer ${token}` },
+		}),
+		token,
+		{ server, rateLimiter },
+	);
+	assertEquals(result.ok, true);
 });

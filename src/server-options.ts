@@ -17,6 +17,12 @@ export type ServerOptions = {
 	 * `PI_UI_REMOTE=1`. Present only when enabled.
 	 */
 	remote?: true;
+	/**
+	 * Escape hatch that lets remote mode start without `authToken` (server-main.ts
+	 * otherwise refuses to start), opt-in via `--insecure-no-auth` /
+	 * `PI_UI_INSECURE_NO_AUTH=1`. Present only when enabled.
+	 */
+	insecureNoAuth?: true;
 };
 
 export type ServerEnvironment = {
@@ -24,6 +30,7 @@ export type ServerEnvironment = {
 	port?: string;
 	authToken?: string;
 	remote?: string;
+	insecureNoAuth?: string;
 };
 
 /** A non-loopback hostname reaches every device on the LAN — see request-auth.ts. */
@@ -45,7 +52,8 @@ export function parseServerOptions(
 			: parsePort(environment.port, "PI_UI_PORT");
 	let help = false;
 	let authToken = nonEmpty(environment.authToken);
-	let remote = parseRemoteEnvironment(environment.remote);
+	let remote = parseBooleanEnvironment(environment.remote);
+	let insecureNoAuth = parseBooleanEnvironment(environment.insecureNoAuth);
 
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index];
@@ -73,6 +81,10 @@ export function parseServerOptions(
 			remote = true;
 			continue;
 		}
+		if (argument === "--insecure-no-auth") {
+			insecureNoAuth = true;
+			continue;
+		}
 		if (argument === "--auth-token") {
 			authToken = parseAuthToken(args[++index], argument);
 			continue;
@@ -90,6 +102,7 @@ export function parseServerOptions(
 	const options: ServerOptions = { hostname, port, help };
 	if (authToken) options.authToken = authToken;
 	if (remote) options.remote = true;
+	if (insecureNoAuth) options.insecureNoAuth = true;
 	return options;
 }
 
@@ -107,6 +120,10 @@ options:
       --remote              serve clients on other machines, e.g. behind a TLS reverse
                             proxy on this host (env: PI_UI_REMOTE=1). Implied by any
                             --host other than 127.0.0.1/::1/localhost.
+      --insecure-no-auth    let remote mode start without --auth-token (env:
+                            PI_UI_INSECURE_NO_AUTH=1). Anyone who can reach the server gets
+                            a full shell as you, with no login. Only for a network you
+                            already fully trust.
       --version             show the version
   -h, --help                show this help`;
 
@@ -122,7 +139,7 @@ function parseAuthToken(value: string | undefined, source: string): string {
 	return token;
 }
 
-function parseRemoteEnvironment(value: string | undefined): boolean {
+function parseBooleanEnvironment(value: string | undefined): boolean {
 	const normalized = value?.trim().toLowerCase();
 	return normalized === "1" || normalized === "true";
 }
