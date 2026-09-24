@@ -9,6 +9,11 @@ import {
 import type { ExtensionActivity } from "../extension-activity-types.ts";
 import { extensionActivityEntryType } from "../extension-activity-types.ts";
 import { rebuildActivitiesFromEntries } from "../extension-activity/persistence.ts";
+import {
+	activityMessageState,
+	activityMessageText,
+	formatActivityDuration,
+} from "../extension-activity/view.ts";
 import type {
 	TranscriptMessageInput,
 	TranscriptState,
@@ -123,25 +128,13 @@ function extensionActivityMessageInput(
 	const durationText = formatActivityDuration(activity);
 	return {
 		role: "extension-activity",
-		text: activity.summary ?? activity.progress ?? activity.title,
+		text: activityMessageText(activity),
 		timestamp,
 		extension: activity.extension,
 		toolCallId: activity.anchor?.toolCallId,
 		activities: [durationText ? { ...activity, durationText } : activity],
-		state:
-			activity.state === "error" || activity.state === "cancelled"
-				? "error"
-				: activity.state === "started" || activity.state === "working"
-					? "running"
-					: "success",
+		state: activityMessageState(activity),
 	};
-}
-
-function formatActivityDuration(activity: ExtensionActivity): string | undefined {
-	if (activity.finishedAt === undefined) return undefined;
-	const start = activity.workingAt ?? activity.startedAt;
-	const ms = Math.max(0, activity.finishedAt - start);
-	return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
 /**
