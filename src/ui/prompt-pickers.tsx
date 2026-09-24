@@ -8,6 +8,7 @@ import { activeKeybind, keybindAction, keybindActions } from "../keybinds.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppThinkingLevel } from "../state/app-store.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
+import { formatTokens } from "../utils/format.ts";
 import { workspaceDisplayName } from "../utils/workspace.ts";
 import { Icon } from "./icon.tsx";
 import { Brain, Folder, Star } from "./icons.ts";
@@ -161,6 +162,23 @@ function thinkingDescription(level: AppThinkingLevel): string {
 		case "max":
 			return "Maximum reasoning";
 	}
+}
+
+/**
+ * A provider-derived element id that can't collide with any of this file's own fixed ids
+ * (`model-provider-menu`, `model-provider-heading`, …). A provider name comes from an
+ * extension's own registration and is arbitrary — it could literally be "menu" or
+ * "heading" — and `encodeURIComponent` alone doesn't change either (both are already
+ * URL-safe), so `model-provider-${encodeURIComponent(provider)}` would collide outright
+ * with `model-provider-menu`/`model-provider-heading`. Prefixing the encoded name's own
+ * length (with a separator no fixed suffix in this file uses right after the prefix) makes
+ * every derived id's provider segment start with a digit — no fixed id here does — and
+ * also keeps two distinct provider names from ever colliding with each other (a standard
+ * length-prefixed/prefix-free encoding).
+ */
+function providerElementId(prefix: string, provider: string): string {
+	const encoded = encodeURIComponent(provider);
+	return `${prefix}${encoded.length}-${encoded}`;
 }
 
 export function renderModelPicker(state: AppStateSnapshot): string {
@@ -324,7 +342,10 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 										</div>
 										{providers.map((provider) => (
 											<div
-												id={`model-provider-${encodeURIComponent(provider.provider)}`}
+												id={providerElementId(
+													"model-provider-",
+													provider.provider,
+												)}
 												role="menuitem"
 												class="model-option model-provider-option"
 												data-preserve-attr="class"
@@ -356,6 +377,14 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 															: " • no auth"}
 													</span>
 												</span>
+												<span
+													class="selection-dot model-current-indicator"
+													hidden={
+														current?.provider !==
+														provider.provider
+													}
+													aria-hidden="true"
+												/>
 											</div>
 										))}
 									</div>
@@ -392,7 +421,10 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 										// node happens to sit in a given slot — without it, the
 										// `data-preserve-attr="hidden"` below could end up preserved
 										// on the wrong provider's node after a reorder.
-										id={`model-group-body-${encodeURIComponent(provider.provider)}`}
+										id={providerElementId(
+											"model-group-body-",
+											provider.provider,
+										)}
 										role="group"
 										data-provider-group={provider.provider}
 										// Client-owned narrowing (`applyActiveProvider()` in
@@ -404,14 +436,20 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 										data-preserve-attr="hidden"
 										aria-labelledby={
 											providers.length > 1
-												? `model-group-${encodeURIComponent(provider.provider)}`
+												? providerElementId(
+														"model-group-",
+														provider.provider,
+													)
 												: "model-select-heading"
 										}
 									>
 										{providers.length > 1 && (
 											<div
 												role="heading"
-												id={`model-group-${encodeURIComponent(provider.provider)}`}
+												id={providerElementId(
+													"model-group-",
+													provider.provider,
+												)}
 												class="picker-heading model-group-heading"
 											>
 												<span safe>{provider.provider}</span>
@@ -461,6 +499,35 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 															{configured}
 														</span>
 													</span>
+													{(model.contextWindow ||
+														model.reasoning) && (
+														<span class="model-option-badges">
+															{Boolean(
+																model.contextWindow,
+															) && (
+																<span
+																	class="badge model-meta-badge"
+																	data-variant="secondary"
+																	title={`${formatTokens(model.contextWindow ?? 0)} token context window`}
+																>
+																	{formatTokens(
+																		model.contextWindow ??
+																			0,
+																	)}
+																</span>
+															)}
+															{model.reasoning && (
+																<span
+																	class="badge model-meta-badge model-thinking-badge"
+																	data-variant="secondary"
+																	title="Supports extended thinking"
+																	aria-label="Supports extended thinking"
+																>
+																	<Icon icon={Brain} />
+																</span>
+															)}
+														</span>
+													)}
 													<span
 														class="selection-dot model-current-indicator"
 														hidden={

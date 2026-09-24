@@ -89,6 +89,8 @@ export class ModelController {
 				name: model.name ?? model.id,
 				configured: modelRuntime.hasConfiguredAuth(model.provider),
 				scoped: scoped.has(`${model.provider}/${model.id}`),
+				contextWindow: model.contextWindow,
+				reasoning: model.reasoning,
 			}))
 			.filter(
 				(model) =>
