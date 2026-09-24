@@ -636,6 +636,177 @@ test("RuntimeController ignores callbacks captured before in-place replacement",
 	await controller.dispose();
 });
 
+// Each `session.bindExtensions()` call unconditionally re-emits `session_start`
+// (the SDK's own behavior — see `agent-session.js`'s `bindExtensions()`), so
+// counting `bindExtensions` calls is exactly counting `session_start`
+// deliveries. These regression tests cover every session transition: a
+// transition that binds extensions twice here would deliver `session_start`
+// to every extension twice for real.
+function bindExtensionsCount(fake: RuntimeFake): number {
+	return fake.calls.filter((call) => call === "bindExtensions").length;
+}
+
+test("RuntimeController delivers session_start exactly once for /new from an idle saved session", async () => {
+	const fake = fakeRuntime("/sessions/a.jsonl"); // persisted, idle: the in-place path.
+	const store = new AppStore();
+	const controller = await activate(store, [fake], "/workspace");
+	// Like the SDK's in-place `newSession()`: invalidate, replace the session,
+	// then run the rebind callback — all before `newSession()` resolves.
+	fake.runtime.newSession = async () => {
+		await fake.beforeInvalidate.at(-1)?.();
+		fake.runtime.session.sessionManager.getSessionFile = () => "/sessions/new.jsonl";
+		await fake.rebind.at(-1)?.();
+		return { cancelled: false };
+	};
+	const before = bindExtensionsCount(fake);
+
+	assertEquals((await controller.newSession()).status, "success");
+
+	assertEquals(bindExtensionsCount(fake) - before, 1);
+	// The final bind stays live, not just present.
+	fake.extensionBindings.at(-1)?.uiContext?.setStatus("after-new", "still live");
+	assertEquals(store.extensionStatuses, [{ key: "after-new", text: "still live" }]);
+	await controller.dispose();
+});
+
+test("RuntimeController delivers session_start exactly once for /new that replaces an active runtime", async () => {
+	const foreground = fakeRuntime("/sessions/a.jsonl");
+	const replacement = fakeRuntime("/sessions/b.jsonl");
+	foreground.setStreaming(true);
+	const controller = await activate(
+		new AppStore(),
+		[foreground, replacement],
+		"/workspace",
+	);
+
+	assertEquals((await controller.newSession()).status, "success");
+
+	assertEquals(bindExtensionsCount(replacement), 1);
+	await controller.dispose();
+});
+
+test("RuntimeController delivers session_start exactly once for a new temporary session", async () => {
+	const current = fakeRuntime("/sessions/a.jsonl");
+	const temporary = fakeRuntime(undefined, false);
+	const controller = await activate(new AppStore(), [current, temporary], "/workspace");
+
+	assertEquals((await controller.newTemporarySession()).status, "success");
+
+	assertEquals(bindExtensionsCount(temporary), 1);
+	await controller.dispose();
+});
+
+test("RuntimeController delivers session_start exactly once for an in-place session switch", async () => {
+	const fake = fakeRuntime("/sessions/a.jsonl");
+	const controller = await activate(new AppStore(), [fake], "/workspace");
+	fake.runtime.switchSession = async (sessionPath) => {
+		await fake.beforeInvalidate.at(-1)?.();
+		fake.runtime.session.sessionManager.getSessionFile = () => sessionPath;
+		await fake.rebind.at(-1)?.();
+		return { cancelled: false };
+	};
+	const before = bindExtensionsCount(fake);
+
+	assertEquals(await controller.resumeSession("/sessions/b.jsonl"), {
+		status: "success",
+	});
+
+	assertEquals(bindExtensionsCount(fake) - before, 1);
+	await controller.dispose();
+});
+
+test("RuntimeController delivers session_start exactly once for a resume that replaces an active runtime", async () => {
+	const foreground = fakeRuntime("/sessions/a.jsonl");
+	const replacement = fakeRuntime("/sessions/b.jsonl");
+	foreground.setStreaming(true);
+	const controller = await activate(
+		new AppStore(),
+		[foreground, replacement],
+		"/workspace",
+	);
+
+	assertEquals(await controller.resumeSession("/sessions/b.jsonl"), {
+		status: "success",
+	});
+
+	assertEquals(bindExtensionsCount(replacement), 1);
+	await controller.dispose();
+});
+
+test("RuntimeController delivers session_start exactly once for /fork", async () => {
+	const fake = fakeRuntime("/sessions/a.jsonl");
+	const controller = await activate(new AppStore(), [fake], "/workspace");
+	fake.runtime.fork = async (entryId, options) => {
+		void entryId;
+		void options;
+		await fake.beforeInvalidate.at(-1)?.();
+		fake.runtime.session.sessionManager.getSessionFile = () => "/sessions/fork.jsonl";
+		await fake.rebind.at(-1)?.();
+		return { cancelled: false };
+	};
+	const actions = fake.extensionBindings.at(-1)?.commandContextActions;
+	if (!actions) throw new Error("missing extension command context actions");
+	const before = bindExtensionsCount(fake);
+
+	assertEquals(await actions.fork("entry-1", {}), { cancelled: false });
+
+	assertEquals(bindExtensionsCount(fake) - before, 1);
+	await controller.dispose();
+});
+
+test("RuntimeController delivers session_start exactly once for /clone", async () => {
+	const fake = fakeRuntime("/sessions/a.jsonl");
+	const store = new AppStore();
+	const controller = await activate(store, [fake], "/workspace");
+	fake.runtime.switchSession = async (sessionPath) => {
+		await fake.beforeInvalidate.at(-1)?.();
+		fake.runtime.session.sessionManager.getSessionFile = () => sessionPath;
+		await fake.rebind.at(-1)?.();
+		return { cancelled: false };
+	};
+	const before = bindExtensionsCount(fake);
+
+	assertEquals(await controller.prompt("/clone"), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(bindExtensionsCount(fake) - before, 1);
+	assertEquals(store.messages.at(-1)?.text, "Session cloned.");
+	await controller.dispose();
+});
+
+test("RuntimeController delivers session_start exactly once for /import", async () => {
+	const fake = fakeRuntime("/sessions/a.jsonl");
+	const store = new AppStore();
+	const controller = await activate(store, [fake], "/workspace");
+	fake.runtime.switchSession = async (sessionPath) => {
+		await fake.beforeInvalidate.at(-1)?.();
+		fake.runtime.session.sessionManager.getSessionFile = () => sessionPath;
+		await fake.rebind.at(-1)?.();
+		return { cancelled: false };
+	};
+	const importPath = join(tmpdir(), `pi-ui-import-${crypto.randomUUID()}.jsonl`);
+	await Bun.write(importPath, "");
+	const before = bindExtensionsCount(fake);
+
+	assertEquals(await controller.prompt(`/import ${importPath}`), true);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	assertEquals(bindExtensionsCount(fake) - before, 1);
+	await controller.dispose();
+});
+
+test("RuntimeController does not re-bind extensions for /reload (the SDK's own session_start suffices)", async () => {
+	const fake = fakeRuntime("/sessions/a.jsonl");
+	const controller = await activate(new AppStore(), [fake], "/workspace");
+	const before = bindExtensionsCount(fake);
+
+	assertEquals(await controller.reload(), true);
+
+	assertEquals(bindExtensionsCount(fake) - before, 0);
+	assertEquals(fake.reloadCount, 1);
+	await controller.dispose();
+});
+
 test("RuntimeController disposal awaits and attempts foreground and background runtimes", async () => {
 	const foreground = fakeRuntime();
 	const replacement = fakeRuntime("/sessions/b.jsonl");
