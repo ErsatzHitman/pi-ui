@@ -25,6 +25,24 @@ import { resolveModelScopeFromModels } from "../../node_modules/@earendil-works/
 import { exportSessionToJsonl } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-export.js";
 import { resolvePath as canonicalizeSessionPath } from "../../node_modules/@earendil-works/pi-coding-agent/dist/utils/paths.js";
 import agentPackageJson from "../../node_modules/@earendil-works/pi-coding-agent/package.json" with { type: "json" };
+import type {
+	ExtensionActivity,
+	ExtensionActivityChip,
+} from "../extension-activity-types.ts";
+import { resolveExtensionRef } from "../extension-activity/identity.ts";
+import { instrumentExtensions } from "../extension-activity/instrument.ts";
+import type { LedgerChange } from "../extension-activity/ledger.ts";
+import {
+	encodeActivityEntry,
+	extensionActivityEntryType,
+	isPersistable,
+} from "../extension-activity/persistence.ts";
+import { ExtensionActivityTracker } from "../extension-activity/tracker.ts";
+import {
+	activityMessageState,
+	activityMessageText,
+	toExtensionActivityView,
+} from "../extension-activity/view.ts";
 import {
 	isPiUiSheetElement,
 	type PiUiActionRequest,
@@ -139,6 +157,25 @@ const extensionFactories = [llamaProviderExtension];
  * dropped (background sessions must never bleed into the foreground pane).
  */
 const liveWorkspaceOrigins = new WeakMap<object, LiveWorkspaceHostOrigin>();
+/**
+ * Which session's own `ExtensionActivityTracker` backs which runtime — one
+ * tracker per session, created alongside its Live Workspace host origin (same
+ * `createRuntime` call), keyed the same way (`session.session`) so it can be
+ * found back from `this.runtime.session` regardless of which session is
+ * currently foreground. See `extension-activity/tracker.ts`.
+ */
+const extensionActivityTrackers = new WeakMap<object, ExtensionActivityTracker>();
+
+/** `session_shutdown`/runtime dispose: finalizes every open activity (never
+ * leaves a card permanently stuck "working") and cancels this tracker's
+ * pending promotion timers. A no-op when the runtime never got a tracker
+ * (activity tracking disabled). */
+function finalizeExtensionActivityTracker(runtime: AgentSessionRuntime): void {
+	const tracker = extensionActivityTrackers.get(runtime.session);
+	if (!tracker) return;
+	tracker.cancelAll(Date.now(), "session_shutdown");
+	tracker.dispose();
+}
 const modelCatalogForceIntervalMs = 30 * 60 * 1000;
 // pi-ui's own commands that aren't part of pi's SDK `BUILTIN_SLASH_COMMANDS` catalog
 // (see builtin-commands.ts) — kept separate so the SDK's 24 built-ins stay a faithful,
@@ -271,6 +308,15 @@ export type RuntimeControllerActivationOptions = {
 	extensionsMode?: ExtensionsMode;
 	/** Draw extension `setHeader`/`setFooter` components (`extensions.terminalChrome`). */
 	extensionsTerminalChrome?: boolean;
+	/** Track and render every extension's Called/Working/Output/Completed
+	 * lifecycle as durable cards. On by default; `false` disables all
+	 * instrumentation for every runtime this controller creates (see
+	 * `extensions-config.ts`'s `activityTracking`). */
+	extensionsActivityTracking?: boolean;
+	/** Persist extension activity as `pi-ui.extension-activity` `CustomEntry`
+	 * records. On by default; has no effect when `extensionsActivityTracking`
+	 * is `false`. See `extensions-config.ts`'s `activityPersist`. */
+	extensionsActivityPersist?: boolean;
 };
 
 export class RuntimeController {
@@ -310,6 +356,12 @@ export class RuntimeController {
 	private readonly liveWorkspaceFrames = new StreamingFrameScheduler<true>(() =>
 		this.commitLiveWorkspace(),
 	);
+	// `ExtensionActivity.id` -> transcript message id, so a later "updated"/
+	// "finished" `LedgerChange` patches the same card instead of appending a
+	// new one. Reset whenever the foreground transcript itself is reloaded
+	// (`bindSessionState`), since a reload's own `TranscriptProjector` replay
+	// already rebuilds activity messages from persisted entries with fresh ids.
+	private readonly activityMessageIds = new Map<string, string>();
 
 	private constructor(
 		private runtime: AgentSessionRuntime,
@@ -432,12 +484,29 @@ export class RuntimeController {
 				...extensionFactories,
 				createLiveWorkspaceHostExtension(liveWorkspaceSink, liveWorkspaceOrigin),
 			];
+			// One `ExtensionActivityTracker` per session, gated by config, reusing
+			// `liveWorkspaceOrigin` as its own foreground/background safety token —
+			// it already identifies exactly this `createRuntime` call the same way
+			// `liveWorkspaceOrigins` does, so `applyExtensionActivityChange` can
+			// reuse that same map instead of a second one. `undefined` when the
+			// caller disabled activity tracking, and every use below is a no-op then.
+			const activityTracker: ExtensionActivityTracker | undefined =
+				options.extensionsActivityTracking === false
+					? undefined
+					: new ExtensionActivityTracker({
+							sink: (change) =>
+								owner?.applyExtensionActivityChange(
+									liveWorkspaceOrigin,
+									change,
+								),
+						});
 			// A#27: every `pi.events` channel any loaded extension publishes reaches the Live
 			// Workspace pane, not just a hardcoded subset — see `createTappedEventBus`.
 			const liveWorkspaceEventBus = createTappedEventBus((channel, payload) => {
 				liveWorkspaceSink(liveWorkspaceOrigin, (controller) =>
 					controller.recordChannel(channel, payload),
 				);
+				activityTracker?.observeChannel(channel, payload, Date.now());
 			});
 			const services = await sessionPerformance.measure(
 				"runtimeServicesCreate",
@@ -470,9 +539,17 @@ export class RuntimeController {
 						availableModels,
 					).scopedModels,
 			);
-			const readIsOverridden = services.resourceLoader
-				.getExtensions()
-				.extensions.some((extension) => extension.tools.has("read"));
+			const loadedExtensions = services.resourceLoader.getExtensions().extensions;
+			if (activityTracker) {
+				instrumentExtensions(
+					loadedExtensions,
+					activityTracker,
+					resolveExtensionRef,
+				);
+			}
+			const readIsOverridden = loadedExtensions.some((extension) =>
+				extension.tools.has("read"),
+			);
 			const session = await sessionPerformance.measure("runtimeSessionCreate", () =>
 				createAgentSessionFromServices({
 					services,
@@ -485,6 +562,8 @@ export class RuntimeController {
 				}),
 			);
 			liveWorkspaceOrigins.set(session.session, liveWorkspaceOrigin);
+			if (activityTracker)
+				extensionActivityTrackers.set(session.session, activityTracker);
 			return {
 				...session,
 				services,
@@ -1136,6 +1215,7 @@ export class RuntimeController {
 			);
 			if (backgroundSession) {
 				this.unsubscribeBackgroundSession(backgroundSession);
+				finalizeExtensionActivityTracker(backgroundSession.runtime);
 				await backgroundSession.runtime.dispose();
 				this.backgroundSessions.delete(this.backgroundKey(targetSessionFile));
 			}
@@ -1729,6 +1809,7 @@ export class RuntimeController {
 		}
 		this.backgroundSessions.clear();
 		this.prompts.dispose();
+		for (const runtime of runtimes) finalizeExtensionActivityTracker(runtime);
 
 		const results = await Promise.allSettled(
 			runtimes.map((runtime) => Promise.try(() => runtime.dispose())),
@@ -1854,6 +1935,7 @@ export class RuntimeController {
 			await this.discardTemporaryRuntime();
 		} else {
 			this.unbindSession();
+			finalizeExtensionActivityTracker(this.runtime);
 			await this.runtime.dispose();
 		}
 	}
@@ -1870,6 +1952,7 @@ export class RuntimeController {
 				`Failed to abort temporary session: ${errorMessage(error)}`,
 			);
 		}
+		finalizeExtensionActivityTracker(runtime);
 		await runtime.dispose();
 		this.state.setActivityText(undefined);
 		this.state.setQueuedMessages([], []);
@@ -1972,6 +2055,94 @@ export class RuntimeController {
 		if (liveWorkspaceOrigins.get(this.runtime.session) !== origin) return;
 		update(this.liveWorkspace);
 		this.publishLiveWorkspace({ channels: true });
+	}
+
+	/**
+	 * Applies one `ExtensionActivityTracker` change (card create/patch, chip
+	 * refresh, `CustomEntry` persistence), but only when it came from the
+	 * foreground runtime's own tracker — reuses `liveWorkspaceOrigins`'s
+	 * per-session token/map, since a session's activity tracker and its Live
+	 * Workspace host origin are created together and share the same lifetime
+	 * (see `prepare()`'s `createRuntime`). A background session's activity
+	 * changes are silently dropped here, same as its Live Workspace updates.
+	 */
+	private applyExtensionActivityChange(
+		origin: LiveWorkspaceHostOrigin,
+		change: LedgerChange,
+	): void {
+		if (liveWorkspaceOrigins.get(this.runtime.session) !== origin) return;
+		switch (change.kind) {
+			case "none":
+			case "pending":
+			case "dropped":
+				break;
+			case "created":
+				this.upsertExtensionActivityMessage(change.activity);
+				this.persistExtensionActivityEntry("start", change.activity);
+				break;
+			case "updated":
+				this.upsertExtensionActivityMessage(change.activity);
+				break;
+			case "finished":
+				this.upsertExtensionActivityMessage(change.activity);
+				this.persistExtensionActivityEntry("finish", change.activity);
+				break;
+		}
+		if (change.kind !== "none") this.refreshExtensionActivityChips();
+	}
+
+	/** Appends a new `role: "extension-activity"` transcript message for an
+	 * activity that has never been rendered before, or patches its existing
+	 * one — mirrors `transcript-projector.ts`'s `projectExtensionActivities`
+	 * replay path via the same `view.ts` helpers, so a live card and a
+	 * replayed one read identically. */
+	private upsertExtensionActivityMessage(activity: ExtensionActivity): void {
+		const view = toExtensionActivityView(activity);
+		const patch = {
+			text: activityMessageText(activity),
+			state: activityMessageState(activity),
+			extension: activity.extension,
+			toolCallId: activity.anchor?.toolCallId,
+			activities: [view],
+		};
+		const existingId = this.activityMessageIds.get(activity.id);
+		if (existingId) {
+			this.state.updateMessage(existingId, patch);
+			return;
+		}
+		const id = this.state.appendMessage("extension-activity", patch.text, patch);
+		this.activityMessageIds.set(activity.id, id);
+	}
+
+	/** Writes a `pi-ui.extension-activity` `CustomEntry` so the card survives a
+	 * session switch/restart/`/resume` — gated by `activityPersist` and never
+	 * for a still-`started` (sub-threshold) activity (`isPersistable`). */
+	private persistExtensionActivityEntry(
+		phase: "start" | "finish",
+		activity: ExtensionActivity,
+	): void {
+		if (this.activationOptions.extensionsActivityPersist === false) return;
+		if (!isPersistable(activity)) return;
+		this.runtime.session.sessionManager.appendCustomEntry(
+			extensionActivityEntryType,
+			encodeActivityEntry(phase, activity),
+		);
+	}
+
+	/** Refreshes the prompt-strip chip row from the foreground tracker's
+	 * currently-open activities. */
+	private refreshExtensionActivityChips(): void {
+		const tracker = extensionActivityTrackers.get(this.runtime.session);
+		const chips: ExtensionActivityChip[] = (tracker?.listOpen() ?? []).map(
+			(activity) => ({
+				id: activity.id,
+				extensionLabel: activity.extension.label,
+				progress: activity.progress,
+				state: activity.state === "working" ? "working" : "started",
+				anchorMessageId: this.activityMessageIds.get(activity.id),
+			}),
+		);
+		this.state.setExtensionActivityChips(chips);
 	}
 
 	/**
@@ -2102,6 +2273,11 @@ export class RuntimeController {
 			this.liveWorkspace.resetForegroundSession();
 			this.publishLiveWorkspace({ immediate: true, channels: true });
 			this.unsubscribe = session.subscribe((event) => this.handleEvent(event));
+			// A freshly (re)loaded transcript's own `TranscriptProjector` replay
+			// already rebuilt any activity cards from persisted entries under
+			// fresh message ids — this runtime's old id mapping no longer applies.
+			this.activityMessageIds.clear();
+			this.refreshExtensionActivityChips();
 			this.state.setActivityText(
 				session.isStreaming || this.foregroundObservedRunning
 					? "Working..."
@@ -2219,6 +2395,11 @@ export class RuntimeController {
 	private handleEvent(event: AgentSessionEvent): void {
 		if (event.type === "agent_start") this.foregroundObservedRunning = true;
 		if (event.type === "agent_settled") this.foregroundObservedRunning = false;
+		if (event.type === "agent_start" || event.type === "agent_settled") {
+			extensionActivityTrackers
+				.get(this.runtime.session)
+				?.setRunActive(event.type === "agent_start", Date.now());
+		}
 		this.state.update(
 			() => {
 				const outcome = this.reduceEvent(
