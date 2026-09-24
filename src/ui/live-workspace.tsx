@@ -235,12 +235,18 @@ export function renderLiveWorkspace(
 							data-tooltip-delay
 							data-on:click={`
 							$liveWorkspacePreferences.notifications = !$liveWorkspacePreferences.notifications;
-							document.body.dispatchEvent(new CustomEvent(
-								'pi-ui-live-workspace-preferences',
-								{ detail: { notifications: $liveWorkspacePreferences.notifications } },
-							));
 							if ($liveWorkspacePreferences.notifications) {
-								window.piUi.liveWorkspace.requestNotificationPermission();
+								window.piUi.liveWorkspace.requestNotificationPermission().then(() => {
+									document.body.dispatchEvent(new CustomEvent(
+										'pi-ui-live-workspace-preferences',
+										{ detail: { notifications: $liveWorkspacePreferences.notifications } },
+									));
+								});
+							} else {
+								document.body.dispatchEvent(new CustomEvent(
+									'pi-ui-live-workspace-preferences',
+									{ detail: { notifications: $liveWorkspacePreferences.notifications } },
+								));
 							}
 						`}
 						>

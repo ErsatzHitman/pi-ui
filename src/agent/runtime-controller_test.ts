@@ -1596,6 +1596,31 @@ test("RuntimeController calls sendWebPush for completed background work only", a
 	await controller.dispose();
 });
 
+test("a rejected sendWebPush never becomes an unhandled rejection (a push failure must never affect the session runtime)", async () => {
+	// bun:test fails a test outright on any unhandled rejection surfacing during it, so this
+	// exercises `notifyRuntimeDone`'s `void this.activationOptions.sendWebPush?.(details)` call
+	// directly: a `sendWebPush` that rejects (a real, expected shape — see
+	// `PushService.notifySessionFinished`'s `Promise.all` over per-endpoint sends) must be caught,
+	// never crash the process or fail this test.
+	const background = fakeRuntime("/sessions/background.jsonl");
+	const foreground = fakeRuntime("/sessions/foreground.jsonl");
+	background.setStreaming(true);
+	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
+		dependencies: dependencies([background, foreground]),
+		isApplicationFocused: () => true,
+		notifySessionDone: () => Promise.resolve(),
+		sendWebPush: () => Promise.reject(new Error("simulated push failure")),
+	});
+	controller.activate();
+	assertEquals((await controller.newSession()).status, "success");
+
+	background.emit(agentSessionEventStub({ type: "agent_end" }));
+	background.emit(agentSessionEventStub({ type: "agent_settled" }));
+	// Let the rejected sendWebPush promise's microtask (and any unhandled-rejection tick) run.
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	await controller.dispose();
+});
+
 test("RuntimeController disposes a prepared runtime when extension binding fails", async () => {
 	const fake = fakeRuntime();
 	fake.runtime.session.bindExtensions = () => Promise.reject(new Error("bind failed"));

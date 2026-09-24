@@ -33,7 +33,14 @@ export type SendWebPushResult =
 	/** The push service reports the subscription no longer exists (404/410) —
 	 * the caller should remove it from the subscription store. */
 	| { readonly outcome: "gone" }
-	| { readonly outcome: "failed"; readonly statusCode: number };
+	| { readonly outcome: "failed"; readonly statusCode: number }
+	/** `fetchImpl` itself rejected instead of resolving to an HTTP response — DNS
+	 * failure, connection refused, TLS error, timeout, or any other
+	 * network-level error reaching the push service. This is the routine case
+	 * the feature exists to tolerate (a stale or unreachable push endpoint), so
+	 * it resolves like every other outcome instead of throwing; treated like
+	 * `"failed"` by the caller (transient, the subscription is not removed). */
+	| { readonly outcome: "network-error"; readonly error: unknown };
 
 function endpointOrigin(endpoint: string): string {
 	const url = new URL(endpoint);
@@ -59,16 +66,21 @@ export async function sendWebPush(
 		keys: options.vapidKeys,
 	});
 	const fetchImpl = options.fetchImpl ?? fetch;
-	const response = await fetchImpl(options.subscription.endpoint, {
-		method: "POST",
-		headers: {
-			authorization,
-			"content-encoding": "aes128gcm",
-			"content-type": "application/octet-stream",
-			ttl: String(options.ttlSeconds ?? defaultTtlSeconds),
-		},
-		body: new Uint8Array(body),
-	});
+	let response: Response;
+	try {
+		response = await fetchImpl(options.subscription.endpoint, {
+			method: "POST",
+			headers: {
+				authorization,
+				"content-encoding": "aes128gcm",
+				"content-type": "application/octet-stream",
+				ttl: String(options.ttlSeconds ?? defaultTtlSeconds),
+			},
+			body: new Uint8Array(body),
+		});
+	} catch (error) {
+		return { outcome: "network-error", error };
+	}
 	if (response.status === 404 || response.status === 410) return { outcome: "gone" };
 	if (!response.ok) return { outcome: "failed", statusCode: response.status };
 	return { outcome: "sent" };

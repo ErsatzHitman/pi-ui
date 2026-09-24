@@ -1988,7 +1988,22 @@ export class RuntimeController {
 			// Web Push (round RM2 "pwa"): reaches a device with no tab open at all,
 			// which the SSE broadcast above cannot. `PushService` itself decides
 			// whether one is actually needed (remote mode, no connected client).
-			void this.activationOptions.sendWebPush?.(details);
+			// Called synchronously (not deferred), matching `notifySessionDone`'s
+			// fire-and-forget shape and keeping this observable in the same tick
+			// as the event that triggered it; the try/catch and `.catch()` below
+			// cover both a synchronous throw and a rejected Promise, so a push
+			// failure never affects the session runtime (see this option's doc
+			// comment) or surfaces as an unhandled rejection.
+			try {
+				const pushResult = this.activationOptions.sendWebPush?.(details);
+				if (pushResult) {
+					void pushResult.catch((error) => {
+						console.error("Web Push notification failed", error);
+					});
+				}
+			} catch (error) {
+				console.error("Web Push notification failed", error);
+			}
 		}
 		void this.notifyRuntimeDoneWhenAppropriate(details, background);
 	}

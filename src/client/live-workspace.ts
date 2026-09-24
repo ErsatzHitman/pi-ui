@@ -8,6 +8,7 @@
 
 import { formatRetryCountdown } from "../live-workspace-types.ts";
 import { bindLiveWorkspace } from "./live-workspace-open.ts";
+import { requestNotificationPermission } from "./notification-permission.ts";
 
 const tickIntervalMs = 1000;
 
@@ -42,12 +43,6 @@ function tickElapsed(): void {
 		const text = formatRetryCountdown(at - now);
 		if (element.textContent !== text) element.textContent = text;
 	}
-}
-
-function requestNotificationPermission(): void {
-	if (typeof Notification === "undefined" || Notification.permission !== "default")
-		return;
-	void Notification.requestPermission();
 }
 
 /** Reads the toggle's own `aria-pressed`, which the server keeps in sync with the persisted

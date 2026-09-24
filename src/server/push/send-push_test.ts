@@ -206,3 +206,22 @@ test("reports a failure for any other non-OK status", async () => {
 	});
 	assertEquals(result, { outcome: "failed", statusCode: 500 });
 });
+
+test("a network-level fetch failure (DNS, connection refused, TLS, timeout, …) resolves instead of rejecting", async () => {
+	// The routine case this feature exists to tolerate: a stale or unreachable push endpoint.
+	// `fetchImpl` throwing must never propagate out of `sendWebPush` — see
+	// `push-service.ts`'s uncaught `Promise.all` and `runtime-controller.ts`'s
+	// `void this.activationOptions.sendWebPush?.(details)` with no `.catch()`.
+	const receiver = generateEphemeralKeyPair();
+	const networkError = new TypeError("fetch failed: ECONNREFUSED");
+	const result = await sendWebPush({
+		subscription: subscriptionFor(receiver.publicKey, randomBytes(16)),
+		payload: { title: "hi" },
+		vapidKeys: testVapidKeys(),
+		vapidSubject: "mailto:ops@example.com",
+		fetchImpl: (async () => {
+			throw networkError;
+		}) as unknown as typeof fetch,
+	});
+	assertEquals(result, { outcome: "network-error", error: networkError });
+});

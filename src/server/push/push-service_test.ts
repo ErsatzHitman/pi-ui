@@ -142,3 +142,33 @@ test("a failed send (not gone) does not remove the subscription", async () => {
 	await h.service.notifySessionFinished({ workspace: "~/work" });
 	assertEquals(h.removed, []);
 });
+
+test("a rejected send for one subscription doesn't crash the others or throw (never an unhandled rejection)", async () => {
+	// `sendWebPush()` itself never rejects (network-level fetch failures resolve to
+	// `{ outcome: "network-error" }`, see send-push_test.ts), but this is defence in depth for
+	// `RuntimeControllerActivationOptions.sendWebPush`'s documented invariant: "a push failure
+	// must never affect the session runtime". `notifySessionFinished()` must resolve, not reject,
+	// even when an injected `sendWebPush` throws — and bun:test fails a test outright on any
+	// unhandled rejection surfacing during it, so this also guards the real
+	// `Promise.all`-without-a-catch regression directly.
+	const sent: string[] = [];
+	const service = new PushService({
+		vapidKeys,
+		vapidSubject: "mailto:ops@example.com",
+		hub: { clientCount: 0 },
+		isRemoteMode: () => true,
+		subscriptions: {
+			list: async () => [subscription("https://bad"), subscription("https://good")],
+			remove: async () => {},
+		},
+		sendWebPush: async (sendOptions) => {
+			sent.push(sendOptions.subscription.endpoint);
+			if (sendOptions.subscription.endpoint === "https://bad") {
+				throw new Error("simulated fetch rejection");
+			}
+			return { outcome: "sent" };
+		},
+	});
+	await service.notifySessionFinished({ workspace: "~/work" });
+	assertEquals(sent.sort(), ["https://bad", "https://good"]);
+});

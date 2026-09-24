@@ -45,7 +45,14 @@ export class PushService {
 		if (subscriptions.length === 0) return;
 
 		const send = this.options.sendWebPush ?? sendWebPushDefault;
-		await Promise.all(
+		// `allSettled`, not `all`: `sendWebPush()` itself never rejects (a network-level
+		// `fetchImpl` failure resolves to `{ outcome: "network-error" }`, see send-push.ts), but
+		// this is defence in depth for the documented invariant on the caller
+		// (`RuntimeControllerActivationOptions.sendWebPush`'s doc comment: "a push failure must
+		// never affect the session runtime") — one endpoint's send throwing unexpectedly (an
+		// injected override, a future refactor, `subscriptions.remove()` itself) must never stop
+		// the others from being attempted or reject this method.
+		const results = await Promise.allSettled(
 			subscriptions.map(async (subscription) => {
 				const result = await send({
 					subscription,
@@ -63,5 +70,10 @@ export class PushService {
 				}
 			}),
 		);
+		for (const result of results) {
+			if (result.status === "rejected") {
+				console.error("Web Push send failed", result.reason);
+			}
+		}
 	}
 }
