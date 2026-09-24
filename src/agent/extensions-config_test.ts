@@ -9,8 +9,14 @@ import {
 	parseExtensionsConfig,
 } from "./extensions-config.ts";
 
+const tui = {
+	mode: "tui",
+	terminalChrome: false,
+	activityTracking: true,
+	activityPersist: true,
+};
+
 test('extensions config defaults to "tui" and rejects unknown values', () => {
-	const tui = { mode: "tui", terminalChrome: false };
 	assertEquals(defaultExtensionsConfig, tui);
 	assertEquals(parseExtensionsConfig(undefined), tui);
 	assertEquals(parseExtensionsConfig(null as unknown as undefined), tui);
@@ -18,20 +24,17 @@ test('extensions config defaults to "tui" and rejects unknown values', () => {
 	assertEquals(parseExtensionsConfig({ mode: "not-a-mode" }), tui);
 	assertEquals(parseExtensionsConfig({ mode: 5 as unknown as string }), tui);
 	assertEquals(parseExtensionsConfig({ mode: "tui" }), tui);
-	assertEquals(parseExtensionsConfig({ mode: "rpc" }), {
-		mode: "rpc",
-		terminalChrome: false,
-	});
+	assertEquals(parseExtensionsConfig({ mode: "rpc" }), { ...tui, mode: "rpc" });
 });
 
 test('the host marker is set only for "tui" mode, and only once needed', () => {
 	const original = process.env[extensionsHostMarkerEnvVar];
 	try {
 		delete process.env[extensionsHostMarkerEnvVar];
-		applyExtensionsHostMarker({ mode: "rpc", terminalChrome: false });
+		applyExtensionsHostMarker({ ...tui, mode: "rpc" });
 		assertEquals(process.env[extensionsHostMarkerEnvVar], undefined);
 
-		applyExtensionsHostMarker({ mode: "tui", terminalChrome: false });
+		applyExtensionsHostMarker({ ...tui, mode: "tui" });
 		assertEquals(process.env[extensionsHostMarkerEnvVar], "1");
 	} finally {
 		if (original === undefined) delete process.env[extensionsHostMarkerEnvVar];
@@ -45,7 +48,21 @@ test("extension terminal chrome (setHeader/setFooter) is hidden unless enabled",
 	assertEquals(parseExtensionsConfig({ terminalChrome: "yes" }).terminalChrome, false);
 	assertEquals(parseExtensionsConfig({ terminalChrome: true }).terminalChrome, true);
 	assertEquals(parseExtensionsConfig({ mode: "rpc", terminalChrome: true }), {
+		...tui,
 		mode: "rpc",
 		terminalChrome: true,
 	});
+});
+
+test("extension activity tracking/persistence default on and are opt-out only", () => {
+	assertEquals(parseExtensionsConfig(undefined).activityTracking, true);
+	assertEquals(parseExtensionsConfig(undefined).activityPersist, true);
+	assertEquals(parseExtensionsConfig({}).activityTracking, true);
+	assertEquals(parseExtensionsConfig({ activityTracking: "no" }).activityTracking, true);
+	assertEquals(parseExtensionsConfig({ activityTracking: false }).activityTracking, false);
+	assertEquals(parseExtensionsConfig({ activityPersist: false }).activityPersist, false);
+	assertEquals(
+		parseExtensionsConfig({ activityTracking: false, activityPersist: false }),
+		{ ...tui, activityTracking: false, activityPersist: false },
+	);
 });

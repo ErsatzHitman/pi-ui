@@ -118,6 +118,24 @@ const schema = Type.Object(
 								"statuses, model, thinking level and usage.",
 						}),
 					),
+					activityTracking: Type.Optional(
+						Type.Boolean({
+							default: defaultExtensionsConfig.activityTracking,
+							description:
+								"Track and render every extension's Called/Working/Output/" +
+								"Completed lifecycle as durable cards, the way subagent activity " +
+								"is shown. On by default.",
+						}),
+					),
+					activityPersist: Type.Optional(
+						Type.Boolean({
+							default: defaultExtensionsConfig.activityPersist,
+							description:
+								"Persist extension activity cards so they survive a session " +
+								"switch, restart or /resume. On by default; has no effect when " +
+								"activityTracking is false.",
+						}),
+					),
 				},
 				{
 					description: "How pi-ui binds pi SDK extensions.",
