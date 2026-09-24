@@ -140,10 +140,21 @@ test("an unauthenticated browser navigation gets the login page instead of a bar
 	);
 	assertEquals(result.ok, false);
 	if (!result.ok) {
-		assertEquals(result.response.status, 401);
 		const html = await result.response.text();
 		assertStringIncludes(html, 'action="/session/login"');
 		assertStringIncludes(html, "/sessions/abc");
+	}
+});
+
+test("the login page navigation gets a plain 200, not 401, so the browser console stays empty (RM1 audit open issue 2)", async () => {
+	const result = checkAuthToken(
+		navigationRequest("http://localhost/sessions/abc"),
+		token,
+	);
+	assertEquals(result.ok, false);
+	if (!result.ok) {
+		assertEquals(result.response.status, 200);
+		assertEquals(result.response.headers.get("cache-control"), "no-store");
 	}
 });
 
@@ -353,7 +364,7 @@ test("requests that present no credential at all never count as failed guesses",
 			rateLimiter,
 		});
 		assertEquals(result.ok, false);
-		if (!result.ok) assertEquals(result.response.status, 401);
+		if (!result.ok) assertEquals(result.response.status, 200);
 	}
 	const correct = checkAuthToken(
 		new Request("http://localhost/", {
@@ -374,7 +385,7 @@ test("a rejected stale cookie is cleared so the browser stops re-sending it", ()
 	);
 	assertEquals(result.ok, false);
 	if (!result.ok) {
-		assertEquals(result.response.status, 401);
+		assertEquals(result.response.status, 200);
 		assertStringIncludes(
 			result.response.headers.get("set-cookie") ?? "",
 			"pi_ui_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure",

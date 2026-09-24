@@ -249,13 +249,17 @@ export function checkAuthToken(
 	return { ok: true, setCookie, redirect: `${stripped.pathname}${stripped.search}` };
 }
 
-/** Renders the login page as a 401: a machine client sees a failure status, while a
- * browser just sees the normal-looking sign-in form the body carries. */
+/** Renders the login page. Always a plain 200: every call site is a browser navigation the
+ * page itself IS the response to (an unauthenticated visit, or a login form re-rendered
+ * with an error after a wrong submission) — a non-2xx status on it would only produce a
+ * "Failed to load resource" console line for the document itself, with no machine client
+ * ever reading it (those get `unauthorizedResponse`'s plain-text 401 instead; see
+ * `isBrowserNavigation`). RM1 audit open issue 2. */
 export function loginPageResponse(next: string, error?: string): Response {
 	return new Response(
 		renderLoginPage({ next, loginPath: endpoints.sessionLogin, error }),
 		{
-			status: 401,
+			status: 200,
 			headers: {
 				"content-type": "text/html; charset=utf-8",
 				"cache-control": "no-store",

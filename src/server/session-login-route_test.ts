@@ -54,7 +54,10 @@ test("a wrong token re-renders the login page with an error, not a redirect", as
 		loginRequest({ token: "wrong", next: "/sessions/abc" }),
 		serverFor("1.1.1.1"),
 	);
-	assertEquals(response.status, 401);
+	// A plain 200, not 401 (RM1 audit open issue 2): this response IS the page the browser
+	// navigates to (the login form re-rendered with an error), so a failure status here is
+	// just a "Failed to load resource" console line with nothing actionable behind it.
+	assertEquals(response.status, 200);
 	const html = await response.text();
 	assertStringIncludes(html, 'action="/session/login"');
 	assertStringIncludes(html, "/sessions/abc");
