@@ -1,9 +1,9 @@
 // Canvas drawing for the voice-input waveform. All the math (bar heights, envelope, noise floor)
 // lives in voice-core.js; this module only turns numbers into pixels.
 
-const BAR_WIDTH = 3;
-const BAR_GAP = 2;
-const PITCH = BAR_WIDTH + BAR_GAP;
+export const BAR_WIDTH = 3;
+export const BAR_GAP = 2;
+export const PITCH = BAR_WIDTH + BAR_GAP;
 const MIN_BAR_HEIGHT = 2;
 const EDGE_INSET = 4;
 const ARM_SWEEP_PERIOD_MS = 1200;
@@ -13,6 +13,17 @@ const ARM_FLOOR = 0.05;
 
 function clamp01(value) {
 	return Math.min(1, Math.max(0, value));
+}
+
+/**
+ * Left x (CSS px) of a waveform bar. `index` -1 is the live (still-filling) bar; 0 is the newest
+ * completed bar, and so on back in time. The whole strip — live bar included — glides left by one
+ * pitch per bucket, so when a bucket completes the live bar lands exactly where completed bar 0
+ * starts: nothing jumps, and the gap between neighbours never changes. With `bucketProgress` 0
+ * (reduced motion) the live bar is flush with the right edge.
+ */
+export function barX(index, cssWidth, bucketProgress) {
+	return cssWidth - BAR_WIDTH - PITCH * (index + 1) - PITCH * clamp01(bucketProgress);
 }
 
 /** Creates a renderer bound to one `<canvas>`. Call `resize()` whenever its box changes. */
@@ -71,13 +82,13 @@ export function createWaveformRenderer(canvas) {
 	 */
 	function draw(bars, liveValue, bucketProgress) {
 		beginFrame();
-		const offset = PITCH * clamp01(bucketProgress);
-		drawBar(cssWidth - BAR_WIDTH, liveValue, 0.9);
-		for (let i = 0; i < bars.length; i += 1) {
-			const value = bars[bars.length - 1 - i];
-			const x = cssWidth - PITCH * (i + 2) - offset;
+		drawBar(barX(-1, cssWidth, bucketProgress), liveValue, 0.9);
+		// Slots older than the recording so far draw as floor dots, so the strip spans the whole
+		// canvas from the first frame (silence reads as a dotted baseline, never as empty space).
+		for (let i = 0; ; i += 1) {
+			const x = barX(i, cssWidth, bucketProgress);
 			if (x + BAR_WIDTH < 0) break;
-			drawBar(x, value, 0.9);
+			drawBar(x, i < bars.length ? bars[bars.length - 1 - i] : 0, 0.9);
 		}
 		ctx.restore();
 	}

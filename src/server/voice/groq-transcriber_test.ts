@@ -406,3 +406,64 @@ test("error bodies are truncated to 300 chars in server logs, never shown to the
 		console.error = originalError;
 	}
 });
+
+test("a 200 without a string `text` never logs the response body (it may carry the transcript)", async () => {
+	server = startFakeGroqServer();
+	server.respond(() => ({
+		json: { results: [{ transcript: "private dictated words" }] },
+	}));
+	const errors: unknown[][] = [];
+	const originalError = console.error;
+	console.error = (...args: unknown[]) => {
+		errors.push(args);
+	};
+	try {
+		const transcriber = createGroqTranscriber();
+		const result = await transcriber.transcribe({
+			audio: audioFile(),
+			apiKey: "k",
+			model: "m",
+			baseUrl: server.url,
+			signal: new AbortController().signal,
+		});
+		assertEquals(result.ok, false);
+		assertEquals(errors.length > 0, true);
+		const logged = errors
+			.flat()
+			.map((entry) => Bun.inspect(entry))
+			.join("\n");
+		expect(logged).not.toContain("private dictated words");
+	} finally {
+		console.error = originalError;
+	}
+});
+
+test("a non-JSON 200 never logs the response body either", async () => {
+	server = startFakeGroqServer();
+	server.respond(() => ({ body: "private dictated words" }));
+	const errors: unknown[][] = [];
+	const originalError = console.error;
+	console.error = (...args: unknown[]) => {
+		errors.push(args);
+	};
+	try {
+		const transcriber = createGroqTranscriber();
+		const result = await transcriber.transcribe({
+			audio: audioFile(),
+			apiKey: "k",
+			model: "m",
+			baseUrl: server.url,
+			signal: new AbortController().signal,
+		});
+		assertEquals(result.ok, false);
+		assertEquals(errors.length > 0, true);
+		const logged = errors
+			.flat()
+			.map((entry) => Bun.inspect(entry))
+			.join("\n");
+		expect(logged).not.toContain("private");
+		expect(logged).not.toContain("dictated");
+	} finally {
+		console.error = originalError;
+	}
+});

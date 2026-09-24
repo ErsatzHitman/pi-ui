@@ -43,16 +43,15 @@ install it can be more reachable than the server's own environment or pi's crede
 store. The key never reaches the browser — the client only ever sees
 `data-voice-status="ready" | "no-key" | "disabled"` on `<body>`.
 
-To set the key:
+To set the key, either export it for the server process:
 
 ```sh
-# either export it for the server process
 export GROQ_API_KEY=gsk_...
 pi-ui
-
-# or let it inherit pi's own Groq login/credential
-pi auth login groq   # or hand-edit ~/.pi/agent/auth.json
 ```
+
+or store it in pi itself: run `/login groq` inside pi and choose the API-key method,
+which saves it to `~/.pi/agent/auth.json`. pi-ui then picks it up on the next page load.
 
 If neither is present, the mic button is blocked with "Voice input needs a Groq API key.
 Set `GROQ_API_KEY` for the pi-ui server (or add a Groq key to pi), then reload." and the
@@ -64,12 +63,12 @@ The microphone check is deterministic and client-side:
 `window.isSecureContext && navigator.mediaDevices?.getUserMedia && window.MediaRecorder`.
 Concretely:
 
-| Where you open pi-ui | Works? |
-| --- | --- |
-| `http://localhost:31415` or `http://127.0.0.1:31415` | Yes — localhost is a secure context by spec, even over plain HTTP |
-| `http://192.168.x.x:31415` (LAN IP, plain HTTP) | **No.** Every standards-compliant browser refuses `getUserMedia` on an insecure, non-local origin |
-| `https://<host>.<tailnet>.ts.net` (Tailscale Serve) | Yes, on desktop and phones |
-| Behind Cloudflare Tunnel+Access or Caddy+TLS | Yes |
+| Where you open pi-ui                                 | Works?                                                                                            |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `http://localhost:31415` or `http://127.0.0.1:31415` | Yes — localhost is a secure context by spec, even over plain HTTP                                 |
+| `http://192.168.x.x:31415` (LAN IP, plain HTTP)      | **No.** Every standards-compliant browser refuses `getUserMedia` on an insecure, non-local origin |
+| `https://<host>.<tailnet>.ts.net` (Tailscale Serve)  | Yes, on desktop and phones                                                                        |
+| Behind Cloudflare Tunnel+Access or Caddy+TLS         | Yes                                                                                               |
 
 If you're reaching pi-ui over your LAN by plain HTTP today, put it behind HTTPS the same
 way [`docs/remote.md`](remote.md#network-exposure--pick-one) already recommends for
@@ -96,14 +95,15 @@ prompt to dismiss.
 
 ## Using it
 
-- Click the mic (or <kbd>alt</kbd> <kbd>v</kbd>) to start. The button briefly shows
+- Click the mic (or <kbd>alt</kbd> <kbd>v</kbd>) to start. The prompt bar briefly shows
   "Starting microphone…" (and "Allow microphone access…" if the browser's permission
   prompt is up), then a red dot, a running timer and a live waveform replace the prompt
   textarea.
-- <kbd>alt</kbd> <kbd>v</kbd> or the pause button pauses; press it again (or the play
-  icon) to resume. Recording auto-pauses if you switch tabs or lock the screen, and
-  resumes only when you ask it to.
-- Press Done (✓) or <kbd>enter</kbd> to finish. The recording stops immediately, the
+- The pause button pauses; press it again (it shows a play icon while paused) to
+  resume. Recording auto-pauses if you switch tabs or lock the screen, and resumes only
+  when you ask it to.
+- Press Done (✓), <kbd>enter</kbd> or <kbd>alt</kbd> <kbd>v</kbd> again to finish. The
+  recording stops immediately, the
   microphone is released (so your browser's recording indicator goes away) before the
   upload starts, and the panel shows "Transcribing…".
 - Press <kbd>esc</kbd> or ✕ at any point to cancel — nothing is uploaded and your draft
@@ -136,17 +136,18 @@ on Windows) and are optional — defaults shown:
 }
 ```
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `enabled` | `true` | `false` hides the mic button entirely (`data-voice-status="disabled"`); `POST /voice/transcribe` answers `404`. |
-| `model` | `"whisper-large-v3-turbo"` | Any Groq speech-to-text model id. `turbo` is the cheapest and fastest; the accuracy difference versus larger Whisper models is immaterial for everyday dictation. |
-| `language` | `""` (auto-detect) | An ISO-639-1 code (e.g. `"en"`) pins the language and is slightly faster/more accurate for consistently single-language dictation. Leave empty to auto-detect, which handles mixed-language speech. |
-| `prompt` | `""` | A short vocabulary/spelling hint (product names, jargon) sent with every transcription, up to 896 characters. |
-| `maxSeconds` | `300` | 10–1800. Recording finishes automatically at this length. |
-| `baseUrl` | `https://api.groq.com/openai/v1` | An OpenAI-compatible transcription endpoint. Overriding this only makes sense for testing against a local fixture server — Groq is the only provider pi-ui's error handling is tuned for. |
+| Field        | Default                          | Notes                                                                                                                                                                                               |
+| ------------ | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`    | `true`                           | `false` hides the mic button entirely (`data-voice-status="disabled"`); `POST /voice/transcribe` answers `404`.                                                                                     |
+| `model`      | `"whisper-large-v3-turbo"`       | Any Groq speech-to-text model id. `turbo` is the cheapest and fastest; the accuracy difference versus larger Whisper models is immaterial for everyday dictation.                                   |
+| `language`   | `""` (auto-detect)               | An ISO-639-1 code (e.g. `"en"`) pins the language and is slightly faster/more accurate for consistently single-language dictation. Leave empty to auto-detect, which handles mixed-language speech. |
+| `prompt`     | `""`                             | A short vocabulary/spelling hint (product names, jargon) sent with every transcription, up to 896 characters.                                                                                       |
+| `maxSeconds` | `300`                            | 10–1800. Recording finishes automatically at this length.                                                                                                                                           |
+| `baseUrl`    | `https://api.groq.com/openai/v1` | An OpenAI-compatible transcription endpoint. Overriding this only makes sense for testing against a local fixture server — Groq is the only provider pi-ui's error handling is tuned for.           |
 
-Changing `voice.*` takes effect on the next page load; no server restart is needed (only
-the `GROQ_API_KEY` environment variable itself needs one).
+pi-ui reads `voice.*` once, when the server starts, so restart the server after changing
+it (then reload the page). A Groq key added to pi's `auth.json` is the exception: it is
+picked up on the next page load without a restart.
 
 ## Per-browser notes
 
@@ -163,21 +164,21 @@ the `GROQ_API_KEY` environment variable itself needs one).
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Fix |
-| --- | --- | --- |
-| Mic button is missing | `voice.enabled: false` | Remove the setting, or set it to `true`, in `config.json`. |
-| Mic button is dimmed, clicking shows an HTTPS message | Insecure origin | See [HTTPS and remote access](#https-and-remote-access). |
-| Mic button is dimmed, clicking shows "needs a Groq API key" | No key resolved on the server | See [Where the key lives](#where-the-key-lives). Reload after adding a key. |
-| "Microphone access is blocked…" | The browser or OS denied mic permission | Allow the microphone for this site in your browser's site settings (and check the OS-level app permission on macOS/Windows), then retry. |
-| "No microphone found." | No audio input device | Check the OS sees a microphone; plug one in or unmute it. |
-| "The microphone is busy or unavailable…" | Another app has an exclusive hold on the mic | Close the other app (or its call/meeting) and retry. |
-| "Groq rejected the API key…" | `GROQ_API_KEY` (or pi's Groq key) is invalid, revoked, or missing scope | Check the key on [console.groq.com](https://console.groq.com), update it, restart the server if it came from the environment. |
-| "Recording is too large for Groq (25 MB)…" | A very long or high-bitrate recording | Record a shorter take, or lower `voice.maxSeconds`. |
-| "Groq rate limit reached…" | Too many transcriptions in a short window | Wait the number of seconds shown, then retry (a Retry button appears). |
-| "Groq is having trouble right now…" / "Couldn't reach Groq…" | A transient Groq outage or the server's own network | Retry in a moment — pi-ui already retries once internally before surfacing this. |
-| "Another transcription is still running…" | Two transcriptions were in flight at once (pi-ui caps this at 2) | Wait for the other one to finish, then retry. |
-| "Didn't catch any speech…" | The recording was silent, too short, or too quiet | Move closer to the microphone and make sure it isn't muted. |
-| Waveform never appears / "No audio from the microphone…" | The selected input device is producing digital silence | Check the OS's input device and level, then retry. |
+| Symptom                                                      | Likely cause                                                            | Fix                                                                                                                                      |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Mic button is missing                                        | `voice.enabled: false`                                                  | Remove the setting, or set it to `true`, in `config.json`, then restart the server.                                                      |
+| Mic button is dimmed, clicking shows an HTTPS message        | Insecure origin                                                         | See [HTTPS and remote access](#https-and-remote-access).                                                                                 |
+| Mic button is dimmed, clicking shows "needs a Groq API key"  | No key resolved on the server                                           | See [Where the key lives](#where-the-key-lives). Reload after adding a key.                                                              |
+| "Microphone access is blocked…"                              | The browser or OS denied mic permission                                 | Allow the microphone for this site in your browser's site settings (and check the OS-level app permission on macOS/Windows), then retry. |
+| "No microphone found."                                       | No audio input device                                                   | Check the OS sees a microphone; plug one in or unmute it.                                                                                |
+| "The microphone is busy or unavailable…"                     | Another app has an exclusive hold on the mic                            | Close the other app (or its call/meeting) and retry.                                                                                     |
+| "Groq rejected the API key…"                                 | `GROQ_API_KEY` (or pi's Groq key) is invalid, revoked, or missing scope | Check the key on [console.groq.com](https://console.groq.com), update it, restart the server if it came from the environment.            |
+| "Recording is too large for Groq (25 MB)…"                   | A very long or high-bitrate recording                                   | Record a shorter take, or lower `voice.maxSeconds`.                                                                                      |
+| "Groq rate limit reached…"                                   | Too many transcriptions in a short window                               | Wait the number of seconds shown, then retry (a Retry button appears).                                                                   |
+| "Groq is having trouble right now…" / "Couldn't reach Groq…" | A transient Groq outage or the server's own network                     | Retry in a moment — pi-ui already retries once internally before surfacing this.                                                         |
+| "Another transcription is still running…"                    | Two transcriptions were in flight at once (pi-ui caps this at 2)        | Wait for the other one to finish, then retry.                                                                                            |
+| "Didn't catch any speech…"                                   | The recording was silent, too short, or too quiet                       | Move closer to the microphone and make sure it isn't muted.                                                                              |
+| Waveform never appears / "No audio from the microphone…"     | The selected input device is producing digital silence                  | Check the OS's input device and level, then retry.                                                                                       |
 
 ## Privacy
 

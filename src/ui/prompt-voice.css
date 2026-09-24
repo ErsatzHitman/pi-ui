@@ -66,15 +66,30 @@
 	}
 
 	.prompt-voice-dot {
+		position: relative;
 		flex-shrink: 0;
 		width: 0.5rem;
 		height: 0.5rem;
 		border-radius: 50%;
 		background: var(--status-error);
-		box-shadow: 0 0 0 0 var(--status-error);
 	}
-	.prompt-surface[data-voice-state="recording"] .prompt-voice-dot {
+
+	/* The dot stays solid; a copy of it pings outward as a soft halo (the
+	 * `ping` keyframes end at scale 2 / opacity 0, so they must not run on the
+	 * dot itself or the recording indicator would blink out every cycle). */
+	.prompt-surface[data-voice-state="recording"] .prompt-voice-dot::after {
+		position: absolute;
+		inset: 0;
+		border-radius: inherit;
+		background: var(--status-error);
+		content: "";
 		animation: ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+	}
+
+	/* The microphone is already released once recording stops. */
+	.prompt-surface:is([data-voice-state="stopping"], [data-voice-state="transcribing"])
+		.prompt-voice-dot {
+		background: var(--text-muted);
 	}
 	.prompt-surface[data-voice-state="arming"] .prompt-voice-dot {
 		background: transparent;
@@ -179,8 +194,9 @@
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.prompt-surface[data-voice-state="recording"] .prompt-voice-dot {
+		.prompt-surface[data-voice-state="recording"] .prompt-voice-dot::after {
 			animation: none;
+			opacity: 0;
 		}
 		.prompt-surface[data-voice-state="arming"] .prompt-voice-dot {
 			animation: none;

@@ -17,6 +17,9 @@ export interface RecordedGroqRequest {
 		temperature: string | null;
 	};
 	file: { name: string; type: string; size: number } | null;
+	/** Whether the caller (pi-ui's Groq client) abandoned this request before the
+	 * fake answered it, e.g. because the browser cancelled mid-transcription. */
+	aborted: boolean;
 }
 
 export interface FakeGroqRespondOptions {
@@ -53,13 +56,15 @@ const defaultSuccessBody = {
 	future_field: 1,
 };
 
-export function startFakeGroqServer(options: { hostname?: string } = {}): FakeGroqServer {
+export function startFakeGroqServer(
+	options: { hostname?: string; port?: number } = {},
+): FakeGroqServer {
 	const requests: RecordedGroqRequest[] = [];
 	let responder: FakeGroqResponder | undefined;
 
 	const server = Bun.serve({
 		hostname: options.hostname ?? "127.0.0.1",
-		port: 0,
+		port: options.port ?? 0,
 		fetch: async (request) => {
 			const url = new URL(request.url);
 			const formData = await request.formData();
@@ -78,7 +83,11 @@ export function startFakeGroqServer(options: { hostname?: string } = {}): FakeGr
 					file instanceof File
 						? { name: file.name, type: file.type, size: file.size }
 						: null,
+				aborted: request.signal.aborted,
 			};
+			request.signal.addEventListener("abort", () => {
+				recorded.aborted = true;
+			});
 			requests.push(recorded);
 
 			const scripted = responder ? await responder(recorded) : undefined;

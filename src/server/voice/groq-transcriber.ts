@@ -180,11 +180,22 @@ async function attempt(
 		try {
 			body = await response.json();
 		} catch (error) {
-			logProviderFailure("non-JSON 200 response", error);
+			// The parse error's message can quote the (transcript) body; log its name only.
+			logProviderFailure(
+				"non-JSON 200 response",
+				error instanceof Error ? error.name : "unparseable body",
+			);
 			return providerErrorOutcome();
 		}
 		if (isRecord(body) && isString(body.text)) return { kind: "ok", text: body.text };
-		logProviderFailure("200 response missing a string `text` field", body);
+		// Field names only: the body of a 200 may hold the transcript under some other key,
+		// and transcripts are never logged.
+		logProviderFailure(
+			"200 response missing a string `text` field",
+			isRecord(body)
+				? `keys: ${Object.keys(body).join(", ")}`
+				: "not a JSON object",
+		);
 		return providerErrorOutcome();
 	}
 

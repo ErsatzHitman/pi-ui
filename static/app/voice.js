@@ -190,7 +190,9 @@ function showError(message, { retryable = false } = {}) {
 		el.id = "prompt-voice-error";
 		el.className = "file-transfer-error prompt-voice-error";
 		el.setAttribute("role", "alert");
-		input.before(el);
+		// Above the whole editor row (a flex row: panel, textarea, actions), so the notice spans
+		// the prompt surface instead of becoming a flex column that squeezes the textarea.
+		(input.closest(".prompt-editor-row") ?? input).before(el);
 	}
 	el.replaceChildren();
 	const text = document.createElement("span");
@@ -270,6 +272,10 @@ function removeActiveListeners() {
 	document.removeEventListener("visibilitychange", onVisibilityChange);
 }
 
+function closeAudioContext(ctx) {
+	if (ctx && ctx.state !== "closed") ctx.close().catch(() => {});
+}
+
 function teardown() {
 	stopLoop();
 	clearTimeout(armingHintTimer);
@@ -298,9 +304,7 @@ function teardown() {
 	analyser?.disconnect();
 	analyser = undefined;
 
-	if (audioCtx && audioCtx.state !== "closed") {
-		audioCtx.close().catch(() => {});
-	}
+	closeAudioContext(audioCtx);
 	audioCtx = undefined;
 
 	resizeObserver?.disconnect();
@@ -380,6 +384,9 @@ async function start() {
 	const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
 	const ctx = AudioContextCtor ? new AudioContextCtor() : undefined;
 	void ctx?.resume();
+	// Owned by the session from creation, so cancel()'s teardown() closes it even while the
+	// permission prompt is still pending (and state() reports it during arming).
+	audioCtx = ctx;
 
 	cameFromMicButton = document.activeElement === micButtonEl();
 	savedSelection = captureCaret();
@@ -396,25 +403,25 @@ async function start() {
 	try {
 		stream = await requestMicrophone();
 	} catch (error) {
-		clearTimeout(armingHintTimer);
+		// A cancelled/restarted session already tore down (and closed this context); close it
+		// again defensively, never touching a newer session's module state.
+		closeAudioContext(ctx);
 		if (mySession !== generation) return;
-		void ctx?.close();
-		stopLoop();
+		teardown();
 		showError(MEDIA_ERROR_MESSAGES[classifyMediaError(error?.name)], {
 			retryable: false,
 		});
 		setState("idle");
 		return;
 	}
-	clearTimeout(armingHintTimer);
 	if (mySession !== generation) {
 		for (const track of stream.getTracks()) track.stop();
-		void ctx?.close();
+		closeAudioContext(ctx);
 		return;
 	}
+	clearTimeout(armingHintTimer);
 	if (state === "arming") updateLabel("Starting microphone…");
 
-	audioCtx = ctx;
 	micStream = stream;
 
 	if (audioCtx) {
@@ -623,6 +630,8 @@ function handleUploadFailure(result) {
 	}
 	if (result.kind === "aborted") return;
 	const retryable = isRetryableUploadFailure(result);
+	// Nothing can re-send a recording that isn't retryable; don't hold up to 24 MB for it.
+	if (!retryable) retainedBlob = undefined;
 	if (result.message) {
 		showError(result.message, { retryable });
 	} else {
@@ -869,6 +878,18 @@ function hasOpenDismissible() {
 	);
 }
 
+/** An editable control other than the (hidden while dictating) prompt input: Enter there belongs
+ * to that field (a search box, a dialog input), not to "finish dictating". */
+function isOtherEditable(target) {
+	if (!(target instanceof HTMLElement) || target === promptInput()) return false;
+	return (
+		target.isContentEditable ||
+		target instanceof HTMLInputElement ||
+		target instanceof HTMLTextAreaElement ||
+		target instanceof HTMLSelectElement
+	);
+}
+
 function onWindowKeydown(event) {
 	if (state === "idle") return;
 	if (
@@ -892,6 +913,8 @@ function onWindowKeydown(event) {
 		!event.altKey &&
 		!event.isComposing &&
 		!(event.target instanceof HTMLButtonElement) &&
+		!isOtherEditable(event.target) &&
+		!hasOpenDismissible() &&
 		(state === "recording" || state === "paused")
 	) {
 		event.preventDefault();

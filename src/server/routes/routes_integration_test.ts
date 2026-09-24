@@ -29,6 +29,7 @@ import {
 import type { RouteContext, RuntimeResource } from "./context.ts";
 import { endpoints, filesPreviewBase, filePreviewUrl } from "./endpoints.ts";
 import { fileRoutes } from "./files.ts";
+import { voiceRoutes } from "./voice.ts";
 
 test("page opts into keyboard resizing without disabling zoom", async () => {
 	const context = fakeContext();
@@ -1915,6 +1916,65 @@ test("a browser-shaped recording flows through the real voice service and Groq c
 		groq.stop();
 	}
 });
+
+test("a browser that cancels mid-transcription aborts the upstream Groq request", async () => {
+	// Esc during "transcribing" aborts the browser's fetch (voice.js cancel());
+	// that must reach Groq through the real socket, Bun's request.signal, the
+	// voice service and the Groq client, not merely stop the UI waiting.
+	const groq = startFakeGroqServer();
+	groq.respond(() => ({ delayMs: 5_000 }));
+	const voice = createVoiceService({
+		config: { ...defaultVoiceConfig, baseUrl: groq.url },
+		resolveKey: () => "test-key",
+		transcriber: createGroqTranscriber({ appVersion: "test-version" }),
+	});
+	const context = fakeContext({ voice });
+	const server = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		routes: {
+			[endpoints.voiceTranscribe]: {
+				POST: (request) =>
+					executeRoute(
+						request,
+						context,
+						voiceRoutes[endpoints.voiceTranscribe].POST,
+					),
+			},
+		},
+	});
+	try {
+		const controller = new AbortController();
+		const formData = new FormData();
+		formData.set(
+			"audio",
+			new Blob([new Uint8Array(2048).fill(7)], { type: "audio/webm;codecs=opus" }),
+			"voice.webm",
+		);
+		const upload = fetch(new URL(endpoints.voiceTranscribe, server.url), {
+			method: "POST",
+			body: formData,
+			signal: controller.signal,
+		}).catch((error: unknown) => error);
+		await waitUntil(() => groq.requests.length === 1);
+		controller.abort();
+		await upload;
+		await waitUntil(() => groq.requests[0]?.aborted === true);
+		assertEquals(groq.requests.length, 1);
+		assertEquals(groq.requests[0]?.aborted, true);
+	} finally {
+		await server.stop(true);
+		groq.stop();
+	}
+});
+
+async function waitUntil(condition: () => boolean, timeoutMs = 3_000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (!condition()) {
+		if (Date.now() > deadline) throw new Error("timed out waiting for condition");
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	}
+}
 
 function voiceUploadRequest(
 	options: {
