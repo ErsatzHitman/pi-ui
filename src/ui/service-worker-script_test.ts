@@ -184,3 +184,42 @@ test("a push arriving while a pi-ui window is focused and visible shows nothing 
 	});
 	assertEquals(background.shown.length, 1);
 });
+
+test("a navigation the proxy answers with 502/503/504 (pi-ui itself down) gets the offline page too", async () => {
+	for (const status of [502, 503, 504]) {
+		const worker = loadWorker(() =>
+			Promise.resolve(new Response("bad gateway", { status })),
+		);
+		const response = (await worker.dispatch("fetch", {
+			request: { mode: "navigate" },
+		})) as Response;
+		assertEquals(await response.text(), "offline page");
+	}
+	const ok = loadWorker(() => Promise.resolve(new Response("app", { status: 200 })));
+	assertEquals(
+		await (
+			(await ok.dispatch("fetch", { request: { mode: "navigate" } })) as Response
+		).text(),
+		"app",
+	);
+	const unauthorized = loadWorker(() =>
+		Promise.resolve(new Response("login", { status: 401 })),
+	);
+	assertEquals(
+		await (
+			(await unauthorized.dispatch("fetch", {
+				request: { mode: "navigate" },
+			})) as Response
+		).text(),
+		"login",
+	);
+	const unreachable = loadWorker();
+	assertEquals(
+		await (
+			(await unreachable.dispatch("fetch", {
+				request: { mode: "navigate" },
+			})) as Response
+		).text(),
+		"offline page",
+	);
+});

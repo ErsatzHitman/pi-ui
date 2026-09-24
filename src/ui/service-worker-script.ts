@@ -56,8 +56,16 @@ self.addEventListener("activate", (event) => {
 // request — so nothing here can ever serve stale or private data.
 self.addEventListener("fetch", (event) => {
 	if (event.request.mode !== "navigate") return;
+	// Behind a reverse proxy (Caddy, tailscale serve) a pi-ui that is down or restarting
+	// answers 502/503/504 from the proxy rather than failing outright: same fallback.
 	event.respondWith(
-		fetch(event.request).catch(() => caches.match(OFFLINE_URL)),
+		fetch(event.request).then(
+			(response) =>
+				response.status >= 502 && response.status <= 504
+					? caches.match(OFFLINE_URL).then((offline) => offline || response)
+					: response,
+			() => caches.match(OFFLINE_URL),
+		),
 	);
 });
 
