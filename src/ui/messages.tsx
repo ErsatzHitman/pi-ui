@@ -850,7 +850,11 @@ function renderToolMessage(message: AppMessage): string {
 					{renderToolTitle(message.title ?? "Tool", message.titleParts)}
 				</span>
 			</p>
-			{renderExtensionActivitySteps(message.activities)}
+			{message.activities && message.activities.length > 0 && (
+				<div data-show="!$_minimalMode">
+					{renderExtensionActivitySteps(message.activities)}
+				</div>
+			)}
 			<div data-show="!$_minimalMode && !$_toolOutputHidden">
 				{renderToolOutput(message)}
 			</div>

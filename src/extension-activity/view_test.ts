@@ -29,36 +29,43 @@ test("formatActivityDuration is undefined until finishedAt is set", () => {
 	assertEquals(formatActivityDuration(activity()), undefined);
 });
 
-test("formatActivityDuration renders sub-second durations in ms", () => {
+test("formatActivityDuration renders sub-second durations like tool cards", () => {
 	assertEquals(
-		formatActivityDuration(activity({ workingAt: 0, finishedAt: 340 })),
-		"340ms",
+		formatActivityDuration(activity({ startedAt: 0, finishedAt: 340 })),
+		"0.3s",
 	);
 });
 
 test("formatActivityDuration renders second-plus durations with one decimal", () => {
 	assertEquals(
-		formatActivityDuration(activity({ workingAt: 0, finishedAt: 1500 })),
+		formatActivityDuration(activity({ startedAt: 0, finishedAt: 1500 })),
 		"1.5s",
 	);
 });
 
-test("formatActivityDuration measures from workingAt, not startedAt, when both are set", () => {
+test("formatActivityDuration switches to minutes past one minute, like tool cards", () => {
+	assertEquals(
+		formatActivityDuration(activity({ startedAt: 0, finishedAt: 75_000 })),
+		"1m 15s",
+	);
+});
+
+test("formatActivityDuration measures from startedAt (Called), not the later workingAt", () => {
 	assertEquals(
 		formatActivityDuration(
-			activity({ startedAt: 0, workingAt: 100, finishedAt: 600 }),
+			activity({ startedAt: 0, workingAt: 750, finishedAt: 1200 }),
 		),
-		"500ms",
+		"1.2s",
 	);
 });
 
 test("toExtensionActivityView adds durationText only once finished", () => {
 	const unfinished = activity();
 	assertEquals(toExtensionActivityView(unfinished), unfinished);
-	const finished = activity({ workingAt: 0, finishedAt: 250 });
+	const finished = activity({ startedAt: 0, finishedAt: 250 });
 	assertEquals(toExtensionActivityView(finished), {
 		...finished,
-		durationText: "250ms",
+		durationText: "0.3s",
 	});
 });
 

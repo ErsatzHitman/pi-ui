@@ -1,3 +1,4 @@
+import { formatDuration } from "../agent/tool-presentation.ts";
 import type {
 	ExtensionActivity,
 	ExtensionActivityView,
@@ -16,12 +17,12 @@ export function toExtensionActivityView(
 	return durationText ? { ...activity, durationText } : activity;
 }
 
-/** `undefined` while the activity hasn't finished yet — no duration to show. */
+/** `undefined` while the activity hasn't finished yet — no duration to show.
+ * Measured from "Called" (`startedAt`), not the later promotion time, and
+ * formatted exactly like a tool card's duration (§4.2). */
 export function formatActivityDuration(activity: ExtensionActivity): string | undefined {
 	if (activity.finishedAt === undefined) return undefined;
-	const start = activity.workingAt ?? activity.startedAt;
-	const ms = Math.max(0, activity.finishedAt - start);
-	return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+	return formatDuration(Math.max(0, activity.finishedAt - activity.startedAt));
 }
 
 /** The message's one-line text: the result summary once there is one, else

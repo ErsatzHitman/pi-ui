@@ -599,6 +599,24 @@ export function identifyMessageOwner(
 	return undefined;
 }
 
+/**
+ * Resolves which loaded (non-hidden) extension registered `toolName`, so its
+ * tool card can carry the extension's label and pink running dot
+ * (DESIGN-ext-activity.md §3 "Extension tools generally"). Built-in and SDK
+ * tools, and pi-ui's own hidden inline extensions, resolve to `undefined`.
+ */
+export function identifyToolOwner(
+	extensions: readonly Extension[],
+	toolName: string,
+	resolveRef: (source: IdentitySource) => ExtensionRef,
+): ExtensionRef | undefined {
+	for (const extension of extensions) {
+		if (extension.hidden || !extension.tools.has(toolName)) continue;
+		return refFor(extension, resolveRef);
+	}
+	return undefined;
+}
+
 function refFor(
 	extension: Extension,
 	resolveRef: (source: IdentitySource) => ExtensionRef,

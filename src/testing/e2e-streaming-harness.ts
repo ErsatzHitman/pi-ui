@@ -45,13 +45,23 @@ export interface StreamingHarness {
 
 const agentDirEnvVar = "PI_CODING_AGENT_DIR";
 
-export async function createStreamingHarness(): Promise<StreamingHarness> {
+export type StreamingHarnessOptions = Readonly<{
+	/** Runs after the fake provider file is written and before the runtime is
+	 * created — e.g. to drop extra fixture extensions into
+	 * `${agentDir}/extensions/` so the real SDK loader discovers them. */
+	beforeCreate?: (agentDir: string) => Promise<void>;
+}>;
+
+export async function createStreamingHarness(
+	options: StreamingHarnessOptions = {},
+): Promise<StreamingHarness> {
 	const root = await makeTempDir({ prefix: "pi-ui-e2e-streaming-" });
 	const agentDir = `${root}/agent`;
 	const cwd = `${root}/workspace`;
 	await mkdir(agentDir, { recursive: true });
 	await mkdir(cwd, { recursive: true });
 	await writeFakeStreamProviderExtensionFile(agentDir);
+	await options.beforeCreate?.(agentDir);
 
 	const previousAgentDir = process.env[agentDirEnvVar];
 	process.env[agentDirEnvVar] = agentDir;

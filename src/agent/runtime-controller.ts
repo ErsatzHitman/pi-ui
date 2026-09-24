@@ -25,13 +25,15 @@ import { resolveModelScopeFromModels } from "../../node_modules/@earendil-works/
 import { exportSessionToJsonl } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-export.js";
 import { resolvePath as canonicalizeSessionPath } from "../../node_modules/@earendil-works/pi-coding-agent/dist/utils/paths.js";
 import agentPackageJson from "../../node_modules/@earendil-works/pi-coding-agent/package.json" with { type: "json" };
-import type {
-	ExtensionActivity,
-	ExtensionActivityChip,
+import {
+	type ExtensionActivity,
+	type ExtensionActivityChip,
+	isTerminalExtensionActivityState,
 } from "../extension-activity-types.ts";
 import { resolveExtensionRef } from "../extension-activity/identity.ts";
 import {
 	identifyMessageOwner,
+	identifyToolOwner,
 	instrumentExtensions,
 } from "../extension-activity/instrument.ts";
 import type { LedgerChange } from "../extension-activity/ledger.ts";
@@ -40,7 +42,10 @@ import {
 	extensionActivityEntryType,
 	isPersistable,
 } from "../extension-activity/persistence.ts";
-import { ExtensionActivityTracker } from "../extension-activity/tracker.ts";
+import {
+	type ExtensionActivitySignalBinding,
+	ExtensionActivityTracker,
+} from "../extension-activity/tracker.ts";
 import {
 	activityMessageState,
 	activityMessageText,
@@ -64,7 +69,11 @@ import {
 	minimumDisplayHz,
 	StreamingFrameScheduler,
 } from "../state/streaming-frame-scheduler.ts";
-import { TranscriptState } from "../state/transcript-state.ts";
+import {
+	type TranscriptMessage,
+	type TranscriptMessageOptions,
+	TranscriptState,
+} from "../state/transcript-state.ts";
 import {
 	notifySessionDone,
 	type SessionDoneNotification,
@@ -188,6 +197,61 @@ function finalizeExtensionActivityTracker(runtime: AgentSessionRuntime): void {
 	tracker.cancelAll(Date.now(), "session_shutdown");
 	tracker.dispose();
 }
+/**
+ * Instruments a runtime's currently loaded extensions against its own
+ * activity tracker. `session.reload()` re-loads extensions in place (unlike
+ * `/new` or `/resume`, it never goes through `createRuntime` again), so the
+ * reloaded `Extension` objects need their own pass; a no-op for objects
+ * already instrumented, and when activity tracking is off (no tracker).
+ */
+function instrumentRuntimeExtensions(runtime: AgentSessionRuntime): void {
+	const tracker = extensionActivityTrackers.get(runtime.session);
+	if (!tracker) return;
+	instrumentExtensions(
+		runtime.services.resourceLoader.getExtensions().extensions,
+		tracker,
+		resolveExtensionRef,
+	);
+}
+
+/** Read side of the transcript an activity card lives in: the foreground
+ * `AppStore.transcript` or a backgrounded session's own `TranscriptState`. */
+type ExtensionActivityTranscriptReader = Pick<
+	TranscriptState,
+	"allMessages" | "getMessage"
+>;
+
+/** Where one runtime's activity cards are written (DESIGN-ext-activity.md F16:
+ * the foreground `AppStore` or `BackgroundSession.state`). */
+type ExtensionActivityTranscriptSink = Readonly<{
+	appendMessage: (
+		role: TranscriptMessage["role"],
+		text: string,
+		options: TranscriptMessageOptions,
+	) => string;
+	updateMessage: (id: string, patch: Partial<Omit<TranscriptMessage, "id">>) => void;
+	transcript: ExtensionActivityTranscriptReader;
+}>;
+
+/** Reverse-scans for the `role: "tool"` message carrying this `toolCallId` —
+ * see `transcript-state.ts`'s `toolCallId` doc comment.
+ * `tools.messageIds` (`session-event-reducer.ts`) can't be used instead: it's
+ * deleted at `tool_execution_end`, before a `tool_result` hook's anchored
+ * activity (e.g. Vision Proxy's `read` rewrite) is even seen. */
+function findToolMessageId(
+	transcript: ExtensionActivityTranscriptReader,
+	toolCallId: string,
+): string | undefined {
+	const messages = transcript.allMessages;
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index];
+		if (message?.role === "tool" && message.toolCallId === toolCallId) {
+			return message.id;
+		}
+	}
+	return undefined;
+}
+
 const modelCatalogForceIntervalMs = 30 * 60 * 1000;
 // pi-ui's own commands that aren't part of pi's SDK `BUILTIN_SLASH_COMMANDS` catalog
 // (see builtin-commands.ts) — kept separate so the SDK's 24 built-ins stay a faithful,
@@ -385,6 +449,14 @@ export class RuntimeController {
 	// transcript itself is reloaded (`bindSessionState`), since a reload's
 	// own `TranscriptProjector` replay already rebuilds activity messages
 	// from persisted entries with fresh ids.
+	/** Foreground status keys / working message last bound to each open
+	 * activity — see `syncExtensionActivityAttribution`. Reset with the
+	 * extension UI on every (re)bind. */
+	private readonly activitySignalBindings = new Map<
+		string,
+		ExtensionActivitySignalBinding
+	>();
+	private boundWorkingActivityId: string | undefined;
 	private readonly activityMessageIds = new Map<
 		string,
 		Readonly<{ messageId: string; anchoredToTool: boolean }>
@@ -1598,6 +1670,10 @@ export class RuntimeController {
 			// unbindSession() does) would wipe everything the reloaded extensions just set.
 			await session.reload({
 				beforeSessionStart: () => {
+					// The SDK has rebuilt the extensions by now but not yet emitted
+					// `session_start` (DESIGN-ext-activity.md F12), so a ctx an
+					// extension captures there is already attributed.
+					instrumentRuntimeExtensions(runtime);
 					if (runtime === this.runtime) this.extensionUi.cancelAll();
 				},
 			});
@@ -1605,18 +1681,9 @@ export class RuntimeController {
 			this.unbindSession({ cancelExtensionUi: false });
 			this.bindSessionState();
 			this.loadCurrentSessionMessages();
-			// `session.reload()` re-discovers/reloads extensions in place (unlike a
-			// `/new` or `/resume`, it never goes through `createRuntime` again), so
-			// the reloaded `Extension` objects need their own instrumentation pass —
-			// idempotent per-object, so this is a no-op for anything unchanged.
-			const tracker = extensionActivityTrackers.get(this.runtime.session);
-			if (tracker) {
-				instrumentExtensions(
-					this.runtime.services.resourceLoader.getExtensions().extensions,
-					tracker,
-					resolveExtensionRef,
-				);
-			}
+			// Idempotent per `Extension` object; covers a reload that had no UI
+			// bindings and so never called `beforeSessionStart`.
+			instrumentRuntimeExtensions(this.runtime);
 			this.state.appendMessage(
 				"system",
 				"Reloaded extensions, skills, prompts, and context files.",
@@ -2047,6 +2114,7 @@ export class RuntimeController {
 	): void {
 		if (event.type === "agent_start") backgroundSession.observedRunning = true;
 		if (event.type === "agent_settled") backgroundSession.observedRunning = false;
+		this.observeExtensionActivityEvent(backgroundSession.runtime, event);
 		const sessionPath =
 			backgroundSession.runtime.session.sessionManager.getSessionFile();
 		if (this.liveWorkspace.recordEvent(event, { background: true, sessionPath })) {
@@ -2098,81 +2166,144 @@ export class RuntimeController {
 
 	/**
 	 * Applies one `ExtensionActivityTracker` change (card create/patch, chip
-	 * refresh, `CustomEntry` persistence), but only when it came from the
-	 * foreground runtime's own tracker — reuses `liveWorkspaceOrigins`'s
-	 * per-session token/map, since a session's activity tracker and its Live
-	 * Workspace host origin are created together and share the same lifetime
-	 * (see `prepare()`'s `createRuntime`). A background session's activity
-	 * changes are silently dropped here, same as its Live Workspace updates.
+	 * refresh, `CustomEntry` persistence) to the runtime that produced it. A
+	 * session's activity tracker and its Live Workspace host origin are created
+	 * together (see `prepare()`'s `createRuntime`), so `liveWorkspaceOrigins`
+	 * identifies the owning runtime. Unlike Live Workspace updates, a
+	 * backgrounded session's changes are not dropped: they land in its own
+	 * `BackgroundSession.state` and session file (DESIGN-ext-activity.md F16,
+	 * §2.4), so the cards are there when it is re-foregrounded or resumed. The
+	 * prompt-strip chips and status/working attribution stay foreground-only.
 	 */
 	private applyExtensionActivityChange(
 		origin: LiveWorkspaceHostOrigin,
 		change: LedgerChange,
 	): void {
-		if (liveWorkspaceOrigins.get(this.runtime.session) !== origin) return;
-		switch (change.kind) {
-			case "none":
-			case "pending":
-			case "dropped":
-				break;
-			case "created":
-				this.upsertExtensionActivityMessage(change.activity);
-				this.persistExtensionActivityEntry("start", change.activity);
-				this.syncExtensionActivityAttribution(change.activity, false);
-				break;
-			case "updated":
-				this.upsertExtensionActivityMessage(change.activity);
-				this.syncExtensionActivityAttribution(change.activity, false);
-				break;
-			case "finished":
-				this.upsertExtensionActivityMessage(change.activity);
-				this.persistExtensionActivityEntry("finish", change.activity);
-				this.syncExtensionActivityAttribution(change.activity, true);
-				break;
+		if (
+			change.kind !== "created" &&
+			change.kind !== "updated" &&
+			change.kind !== "finished"
+		) {
+			// `pending`/`dropped` only concern sub-threshold activities, which are
+			// never rendered, persisted or shown as chips.
+			return;
 		}
-		if (change.kind !== "none") this.refreshExtensionActivityChips();
+		const target = this.resolveExtensionActivityTarget(origin);
+		if (!target) return;
+		const { activity } = change;
+		this.upsertExtensionActivityMessage(target.sink, activity);
+		if (change.kind !== "updated") {
+			this.persistExtensionActivityEntry(
+				target.runtime,
+				change.kind === "created" ? "start" : "finish",
+				activity,
+			);
+		}
+		if (!target.foreground) return;
+		this.syncExtensionActivityAttribution(activity);
+		this.refreshExtensionActivityChips();
+	}
+
+	/** The runtime (foreground or backgrounded) whose tracker owns `origin`,
+	 * with the transcript sink its activity cards belong in. */
+	private resolveExtensionActivityTarget(origin: LiveWorkspaceHostOrigin):
+		| Readonly<{
+				runtime: AgentSessionRuntime;
+				sink: ExtensionActivityTranscriptSink;
+				foreground: boolean;
+		  }>
+		| undefined {
+		if (liveWorkspaceOrigins.get(this.runtime.session) === origin) {
+			return {
+				runtime: this.runtime,
+				sink: {
+					appendMessage: (role, text, options) =>
+						this.state.appendMessage(role, text, options),
+					updateMessage: (id, patch) => this.state.updateMessage(id, patch),
+					transcript: this.state.transcript,
+				},
+				foreground: true,
+			};
+		}
+		for (const background of this.backgroundSessions.values()) {
+			if (liveWorkspaceOrigins.get(background.runtime.session) !== origin) continue;
+			return {
+				runtime: background.runtime,
+				sink: {
+					appendMessage: (role, text, options) =>
+						background.state.appendMessage(role, text, options),
+					updateMessage: (id, patch) => {
+						background.state.updateMessage(id, patch);
+					},
+					transcript: background.state,
+				},
+				foreground: false,
+			};
+		}
+		return undefined;
 	}
 
 	/**
-	 * Attaches (`clear:false`) or clears (`clear:true`) this activity's id on
-	 * the `AppExtensionStatus`/working-indicator line it's attributed to, so
-	 * the footer shows one chip — the activity's — instead of a duplicate
-	 * plain status/working chip for the same signal (`AppExtensionStatus
-	 * .activityId`, `AppStateSnapshot.extensionWorkingActivityId`). Only a
-	 * `{trigger:"ui", signal:"status"|"working"}` carrier activity has a
-	 * status/working line to attach to; a hook/tool/widget-only activity's
-	 * card stands on its own (no plain chip exists for it to link from).
+	 * Binds the foreground status lines and working message this activity
+	 * currently holds to it (`AppExtensionStatus.activityId`,
+	 * `AppStateSnapshot.extensionWorkingActivityId`), so the prompt strip shows
+	 * one chip — the activity's pink one — instead of a duplicate plain
+	 * status/working chip for the same signal (DESIGN-ext-activity.md §2.4).
+	 * Covers a status set inside a timed hook or tool scope (LSP, Prompt
+	 * Arbitrage) as well as a run-scoped `{trigger:"ui"}` one. Everything is
+	 * unbound once the activity finishes, so a status the extension leaves up
+	 * afterwards renders exactly as it does today.
 	 */
-	private syncExtensionActivityAttribution(
+	private syncExtensionActivityAttribution(activity: ExtensionActivity): void {
+		const tracker = extensionActivityTrackers.get(this.runtime.session);
+		const previous = this.activitySignalBindings.get(activity.id);
+		const next =
+			tracker && !isTerminalExtensionActivityState(activity.state)
+				? tracker.boundSignals(activity.id)
+				: undefined;
+		for (const key of previous?.statusKeys ?? []) {
+			if (!next?.statusKeys.includes(key)) {
+				this.extensionUi.setStatusActivityId(key, undefined);
+			}
+		}
+		for (const key of next?.statusKeys ?? []) {
+			this.extensionUi.setStatusActivityId(key, activity.id);
+		}
+		if (next?.working) {
+			this.boundWorkingActivityId = activity.id;
+			this.extensionUi.setWorkingActivityId(activity.id);
+		} else if (this.boundWorkingActivityId === activity.id) {
+			this.boundWorkingActivityId = undefined;
+			this.extensionUi.setWorkingActivityId(undefined);
+		}
+		if (next && (next.statusKeys.length > 0 || next.working)) {
+			this.activitySignalBindings.set(activity.id, next);
+		} else {
+			this.activitySignalBindings.delete(activity.id);
+		}
+	}
+
+	/**
+	 * Renders one `ExtensionActivity` change into `sink` (the owning runtime's
+	 * transcript). An anchored activity (`anchor.toolCallId` set — a
+	 * `tool_call`/`tool_result` hook scope, or the tool's own `execute()`
+	 * scope) folds into the owning tool's own `role: "tool"` message as a
+	 * step, via the same `mergeActivitySteps` `transcript-projector.ts`'s
+	 * replay path uses, instead of a separate `role: "extension-activity"`
+	 * card (DESIGN-ext-activity.md §2.4 "Anchored"). Everything else appends a
+	 * new standalone `role: "extension-activity"` message the first time it's
+	 * rendered, or patches its existing one — mirroring
+	 * `transcript-projector.ts`'s `projectExtensionActivities` replay path via
+	 * the same `view.ts` helpers, so a live card and a replayed one read
+	 * identically.
+	 */
+	private upsertExtensionActivityMessage(
+		sink: ExtensionActivityTranscriptSink,
 		activity: ExtensionActivity,
-		clear: boolean,
 	): void {
-		if (activity.trigger.kind !== "ui") return;
-		const activityId = clear ? undefined : activity.id;
-		if (activity.trigger.signal === "status") {
-			this.extensionUi.setStatusActivityId(activity.trigger.key, activityId);
-		} else if (activity.trigger.signal === "working") {
-			this.extensionUi.setWorkingActivityId(activityId);
-		}
-	}
-
-	/**
-	 * Renders one `ExtensionActivity` change. An anchored activity
-	 * (`anchor.toolCallId` set — a `tool_call`/`tool_result` hook scope, or
-	 * the tool's own `execute()` scope) folds into the owning tool's own
-	 * `role: "tool"` message as a step, via the same `mergeActivitySteps`
-	 * `transcript-projector.ts`'s replay path uses, instead of a separate
-	 * `role: "extension-activity"` card (DESIGN-ext-activity.md §2.4
-	 * "Anchored"). Everything else appends a new standalone
-	 * `role: "extension-activity"` message the first time it's rendered, or
-	 * patches its existing one — mirroring `transcript-projector.ts`'s
-	 * `projectExtensionActivities` replay path via the same `view.ts`
-	 * helpers, so a live card and a replayed one read identically.
-	 */
-	private upsertExtensionActivityMessage(activity: ExtensionActivity): void {
 		const view = toExtensionActivityView(activity);
 		const toolCallId = activity.anchor?.toolCallId;
-		const cached = this.activityMessageIds.get(activity.id);
+		const cached = this.locateActivityMessage(sink.transcript, activity.id);
 		if (toolCallId) {
 			// Once this activity is genuinely folded into a tool message
 			// (`anchoredToTool: true`), keep using that id without re-scanning —
@@ -2180,10 +2311,10 @@ export class RuntimeController {
 			// from a past fallback below) as if it were the tool message.
 			const toolMessageId = cached?.anchoredToTool
 				? cached.messageId
-				: this.findToolMessageId(toolCallId);
+				: findToolMessageId(sink.transcript, toolCallId);
 			if (toolMessageId) {
-				const existing = this.state.transcript.getMessage(toolMessageId);
-				this.state.updateMessage(toolMessageId, {
+				const existing = sink.transcript.getMessage(toolMessageId);
+				sink.updateMessage(toolMessageId, {
 					activities: mergeActivitySteps(existing?.activities, view),
 					extension: activity.extension,
 				});
@@ -2213,60 +2344,78 @@ export class RuntimeController {
 		const existingId =
 			cached && !cached.anchoredToTool ? cached.messageId : undefined;
 		if (existingId) {
-			this.state.updateMessage(existingId, patch);
+			sink.updateMessage(existingId, patch);
 			return;
 		}
-		const id = this.state.appendMessage("extension-activity", patch.text, patch);
+		const id = sink.appendMessage("extension-activity", patch.text, patch);
 		this.activityMessageIds.set(activity.id, {
 			messageId: id,
 			anchoredToTool: false,
 		});
 	}
 
-	/** Reverse-scans for the `role: "tool"` message carrying this
-	 * `toolCallId` — see `transcript-state.ts`'s `toolCallId` doc comment.
-	 * `tools.messageIds` (`session-event-reducer.ts`) can't be used instead:
-	 * it's deleted at `tool_execution_end`, before a `tool_result` hook's
-	 * anchored activity (e.g. Vision Proxy's `read` rewrite) is even seen. */
-	private findToolMessageId(toolCallId: string): string | undefined {
-		const messages = this.state.transcript.allMessages;
+	/**
+	 * Where this activity's card currently lives in `transcript`: the cached
+	 * id when it still points at a message there, else a reverse scan for a
+	 * message already carrying this activity (a replayed card after
+	 * `bindSessionState` cleared the cache, or a backgrounded session's card
+	 * after `restoreChat`). Rebinding here keeps a still-open activity patching
+	 * its existing card instead of appending a duplicate (§2.4 "rebinds").
+	 */
+	private locateActivityMessage(
+		transcript: ExtensionActivityTranscriptReader,
+		activityId: string,
+	): Readonly<{ messageId: string; anchoredToTool: boolean }> | undefined {
+		const cached = this.activityMessageIds.get(activityId);
+		if (cached && transcript.getMessage(cached.messageId)) return cached;
+		const messages = transcript.allMessages;
 		for (let index = messages.length - 1; index >= 0; index -= 1) {
 			const message = messages[index];
-			if (message?.role === "tool" && message.toolCallId === toolCallId) {
-				return message.id;
-			}
+			if (!message?.activities?.some((step) => step.id === activityId)) continue;
+			const located = {
+				messageId: message.id,
+				anchoredToTool: message.role === "tool",
+			};
+			this.activityMessageIds.set(activityId, located);
+			return located;
 		}
 		return undefined;
 	}
 
-	/** Writes a `pi-ui.extension-activity` `CustomEntry` so the card survives a
-	 * session switch/restart/`/resume` — gated by `activityPersist` and never
-	 * for a still-`started` (sub-threshold) activity (`isPersistable`). */
+	/** Writes a `pi-ui.extension-activity` `CustomEntry` into `runtime`'s own
+	 * session so the card survives a session switch/restart/`/resume` — gated
+	 * by `activityPersist` and never for a still-`started` (sub-threshold)
+	 * activity (`isPersistable`). */
 	private persistExtensionActivityEntry(
+		runtime: AgentSessionRuntime,
 		phase: "start" | "finish",
 		activity: ExtensionActivity,
 	): void {
 		if (this.activationOptions.extensionsActivityPersist === false) return;
 		if (!isPersistable(activity)) return;
-		this.runtime.session.sessionManager.appendCustomEntry(
+		runtime.session.sessionManager.appendCustomEntry(
 			extensionActivityEntryType,
 			encodeActivityEntry(phase, activity),
 		);
 	}
 
 	/** Refreshes the prompt-strip chip row from the foreground tracker's
-	 * currently-open activities. */
+	 * promoted (`working`) activities. Sub-threshold `started` ones have no
+	 * card yet and are never shown (§2.1), so fast hooks never flash a chip. */
 	private refreshExtensionActivityChips(): void {
 		const tracker = extensionActivityTrackers.get(this.runtime.session);
-		const chips: ExtensionActivityChip[] = (tracker?.listOpen() ?? []).map(
-			(activity) => ({
+		const chips: ExtensionActivityChip[] = (tracker?.listOpen() ?? [])
+			.filter((activity) => activity.state === "working")
+			.map((activity) => ({
 				id: activity.id,
 				extensionLabel: activity.extension.label,
 				progress: activity.progress,
-				state: activity.state === "working" ? "working" : "started",
-				anchorMessageId: this.activityMessageIds.get(activity.id)?.messageId,
-			}),
-		);
+				state: "working",
+				anchorMessageId: this.locateActivityMessage(
+					this.state.transcript,
+					activity.id,
+				)?.messageId,
+			}));
 		this.state.setExtensionActivityChips(chips);
 	}
 
@@ -2276,13 +2425,16 @@ export class RuntimeController {
 	 * one does, attaches its text to that extension's open-or-recent activity
 	 * — including a `display:false` one, which otherwise leaves no visible
 	 * trace anywhere else in the transcript. A message no extension owns is
-	 * left alone (renders exactly as it does today, unattached).
+	 * left alone (renders exactly as it does today, unattached). Works for a
+	 * backgrounded runtime too, since its own tracker is looked up by session.
 	 */
-	private observeCustomMessageActivity(message: CustomAgentMessage): void {
-		const tracker = extensionActivityTrackers.get(this.runtime.session);
+	private observeCustomMessageActivity(
+		runtime: AgentSessionRuntime,
+		message: CustomAgentMessage,
+	): void {
+		const tracker = extensionActivityTrackers.get(runtime.session);
 		if (!tracker) return;
-		const extensions =
-			this.runtime.services.resourceLoader.getExtensions().extensions;
+		const extensions = runtime.services.resourceLoader.getExtensions().extensions;
 		const owner = identifyMessageOwner(
 			extensions,
 			message.customType,
@@ -2295,6 +2447,23 @@ export class RuntimeController {
 			message.display === false,
 			Date.now(),
 		);
+	}
+
+	/** Feeds a runtime's own agent-run lifecycle and custom messages to its
+	 * activity tracker — called for the foreground and every backgrounded
+	 * runtime alike, so a backgrounded turn keeps producing activities. */
+	private observeExtensionActivityEvent(
+		runtime: AgentSessionRuntime,
+		event: AgentSessionEvent,
+	): void {
+		if (event.type === "agent_start" || event.type === "agent_settled") {
+			extensionActivityTrackers
+				.get(runtime.session)
+				?.setRunActive(event.type === "agent_start", Date.now());
+		}
+		if (event.type === "message_start" && event.message.role === "custom") {
+			this.observeCustomMessageActivity(runtime, event.message);
+		}
 	}
 
 	/**
@@ -2390,6 +2559,9 @@ export class RuntimeController {
 		if (sessionFile) this.liveWorkspace.removeBackgroundSession(sessionFile);
 		this.bindSessionState({ resetToolState: false, syncSessions: false });
 		this.state.restoreChat(backgroundSession.state.snapshot());
+		// `bindSessionState` refreshed the chips against the transcript it
+		// replaced; re-point them at the restored cards.
+		this.refreshExtensionActivityChips();
 		this.catalog.mergeCurrentStatuses();
 	}
 
@@ -2429,6 +2601,8 @@ export class RuntimeController {
 			// already rebuilt any activity cards from persisted entries under
 			// fresh message ids — this runtime's old id mapping no longer applies.
 			this.activityMessageIds.clear();
+			this.activitySignalBindings.clear();
+			this.boundWorkingActivityId = undefined;
 			this.refreshExtensionActivityChips();
 			this.state.setActivityText(
 				session.isStreaming || this.foregroundObservedRunning
@@ -2547,14 +2721,7 @@ export class RuntimeController {
 	private handleEvent(event: AgentSessionEvent): void {
 		if (event.type === "agent_start") this.foregroundObservedRunning = true;
 		if (event.type === "agent_settled") this.foregroundObservedRunning = false;
-		if (event.type === "agent_start" || event.type === "agent_settled") {
-			extensionActivityTrackers
-				.get(this.runtime.session)
-				?.setRunActive(event.type === "agent_start", Date.now());
-		}
-		if (event.type === "message_start" && event.message.role === "custom") {
-			this.observeCustomMessageActivity(event.message);
-		}
+		this.observeExtensionActivityEvent(this.runtime, event);
 		this.state.update(
 			() => {
 				const outcome = this.reduceEvent(
@@ -2714,9 +2881,17 @@ export class RuntimeController {
 			convertEntry: (entry, timestamp) =>
 				this.transcript.customEntry(entry, timestamp, customRenderers),
 			formatToolStart: (toolEvent) =>
-				this.formatRunningTool(toolEvent.toolName, toolEvent.args),
+				this.withToolOwner(
+					runtime,
+					toolEvent.toolName,
+					this.formatRunningTool(toolEvent.toolName, toolEvent.args),
+				),
 			formatToolPreview: (toolName, args) =>
-				this.formatRunningTool(toolName, args, false),
+				this.withToolOwner(
+					runtime,
+					toolName,
+					this.formatRunningTool(toolName, args, false),
+				),
 			formatToolUpdate: (toolEvent) => {
 				const view = formatToolResult(
 					toolEvent.toolName,
@@ -2762,6 +2937,25 @@ export class RuntimeController {
 			},
 			syncUsage,
 		});
+	}
+
+	/** Stamps the owning extension on an extension-registered tool's card, so
+	 * it renders with that extension's label and the shared pink "working"
+	 * dot while it runs (DESIGN-ext-activity.md §3, §4.3). Off with activity
+	 * tracking, so the kill switch leaves tool cards exactly as before. */
+	private withToolOwner<View extends { options: TranscriptMessageOptions }>(
+		runtime: AgentSessionRuntime,
+		toolName: string,
+		view: View,
+	): View {
+		// No tracker means activity tracking is off for this runtime.
+		if (!extensionActivityTrackers.has(runtime.session)) return view;
+		const extension = identifyToolOwner(
+			runtime.services.resourceLoader.getExtensions().extensions,
+			toolName,
+			resolveExtensionRef,
+		);
+		return extension ? { ...view, options: { ...view.options, extension } } : view;
 	}
 
 	private formatRunningTool(toolName: string, args: ToolArguments, showBody = true) {

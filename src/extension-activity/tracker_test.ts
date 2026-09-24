@@ -579,3 +579,131 @@ test("a non-timed carrier scope is never promoted or finished via scopeStart/sco
 	assertEquals(timers.length, 0);
 	assertEquals(changes.length, 0);
 });
+
+test("the run stays active for runGraceMs after it settles, then carrier signals become standing", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 0 });
+
+	tracker.setRunActive(true, 0);
+	tracker.setRunActive(false, 0);
+	const grace = timers.find((timer) => timer.delayMs === 10_000);
+	assertExists(grace);
+
+	// Within the grace window a carrier signal still opens a run-scoped activity.
+	tracker.uiSignal(carrierScope(), { kind: "status", key: "wrap", text: "saving" }, 0);
+	assertEquals(changes.at(-1)?.kind, "pending");
+
+	grace.run();
+	const before = changes.length;
+	tracker.uiSignal(carrierScope(), { kind: "status", key: "later", text: "idle" }, 0);
+	assertEquals(changes.length, before);
+});
+
+test("settling the run schedules self-heal so a never-cleared run-scoped activity finishes", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	let clock = 0;
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => clock });
+
+	tracker.setRunActive(true, 0);
+	tracker.uiSignal(
+		carrierScope(),
+		{ kind: "status", key: "panel", text: "loading" },
+		0,
+	);
+	timers.find((timer) => timer.delayMs === 250)?.run();
+	assertEquals(changes.at(-1)?.kind, "created");
+
+	tracker.setRunActive(false, 1_000);
+	const selfHeal = timers.find((timer) => timer.delayMs === 60_000);
+	assertExists(selfHeal);
+	clock = 61_000;
+	selfHeal.run();
+	assertEquals(changes.at(-1)?.kind, "finished");
+});
+
+test("a new run cancels the previous run's pending grace and self-heal timers", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 0 });
+
+	tracker.setRunActive(false, 0);
+	tracker.setRunActive(true, 5);
+	assertEquals(
+		timers.every((timer) => timer.cancelled),
+		true,
+	);
+});
+
+test("boundSignals tracks the status keys and working message a timed scope's activity holds", () => {
+	const { scheduler } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 0 });
+
+	tracker.scopeStart(hookScope(), 0);
+	tracker.uiSignal(
+		hookScope(),
+		{ kind: "status", key: "lsp", text: "pyright checking" },
+		0,
+	);
+	tracker.uiSignal(hookScope(), { kind: "workingMessage", text: "checking" }, 0);
+	const pending = changes.at(-1);
+	assertExists(pending);
+	assertEquals(pending.kind, "pending");
+	const id = pending.kind === "pending" ? pending.activity.id : "";
+	assertEquals(tracker.boundSignals(id), { statusKeys: ["lsp"], working: true });
+
+	tracker.uiSignal(hookScope(), { kind: "status", key: "lsp", text: undefined }, 0);
+	tracker.uiSignal(hookScope(), { kind: "workingMessage", text: undefined }, 0);
+	assertEquals(tracker.boundSignals(id), { statusKeys: [], working: false });
+});
+
+test("boundSignals forgets an activity once it finishes", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 0 });
+
+	tracker.scopeStart(hookScope(), 0);
+	tracker.uiSignal(hookScope(), { kind: "status", key: "lsp", text: "checking" }, 0);
+	timers[0]?.run();
+	const created = changes.at(-1);
+	assertExists(created);
+	const id = created.kind === "created" ? created.activity.id : "";
+	assertEquals(tracker.boundSignals(id).statusKeys, ["lsp"]);
+
+	tracker.scopeEnd(hookScope(), 900, { ok: true, result: undefined });
+	assertEquals(changes.at(-1)?.kind, "finished");
+	assertEquals(tracker.boundSignals(id), { statusKeys: [], working: false });
+});
+
+test("a tool_result hook that echoes its input content back unchanged is a no-op, while a rewrite is reported", () => {
+	const content = [{ type: "text", text: "raw image bytes" }];
+	const scope = hookScope({
+		trigger: { kind: "hook", event: "tool_result" },
+		title: "tool_result",
+		hookEvent: { type: "tool_result", content },
+	});
+	const run = (result: { content: { type: string; text: string }[] }) => {
+		const { scheduler, timers } = fakeScheduler();
+		const { sink, changes } = sinkRecorder();
+		const tracker = new ExtensionActivityTracker({
+			sink,
+			scheduler,
+			clock: () => 100,
+		});
+		tracker.scopeStart(scope, 0);
+		timers[0]?.run();
+		tracker.scopeEnd(scope, 900, { ok: true, result });
+		const finished = changes.at(-1);
+		if (finished?.kind !== "finished") throw new Error("expected finished");
+		return finished.activity;
+	};
+
+	const echoed = run({ content: [{ type: "text", text: "raw image bytes" }] });
+	assertEquals(echoed.summary, undefined);
+	assertEquals(echoed.output, []);
+
+	const rewritten = run({ content: [{ type: "text", text: "A red square." }] });
+	assertEquals(rewritten.summary, "Modified tool result");
+});

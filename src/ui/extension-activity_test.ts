@@ -219,3 +219,22 @@ test("prompt chips are buttons with an aria-label naming the extension and progr
 test("no chips renders nothing", () => {
 	assertEquals(renderExtensionActivityChips([]), "");
 });
+
+test("the chip row adds a +N overflow chip past two working activities", () => {
+	const html = renderExtensionActivityChips([
+		chip({ id: "xa-1" }),
+		chip({ id: "xa-2" }),
+		chip({ id: "xa-3" }),
+		chip({ id: "xa-4" }),
+	]);
+	assertStringIncludes(html, "ext-activity-chip-more");
+	assertStringIncludes(html, "+2");
+	assertStringIncludes(html, 'aria-label="2 more working"');
+	assertEquals(
+		renderExtensionActivityChips([
+			chip({ id: "xa-1" }),
+			chip({ id: "xa-2" }),
+		]).includes("ext-activity-chip-more"),
+		false,
+	);
+});

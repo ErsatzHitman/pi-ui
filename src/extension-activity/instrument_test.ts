@@ -16,6 +16,7 @@ import { makeTempDir } from "#testing/temp";
 import { resolveExtensionRef } from "./identity.ts";
 import {
 	identifyMessageOwner,
+	identifyToolOwner,
 	instrumentExtensions,
 	type InstrumentationReporter,
 	type InstrumentedScope,
@@ -354,6 +355,20 @@ test("identifyMessageOwner matches a custom message type to its extension's slug
 	assertEquals(owner?.id, "probe");
 	assertEquals(
 		identifyMessageOwner([extension], "unrelated-thing", resolveExtensionRef),
+		undefined,
+	);
+});
+
+test("identifyToolOwner resolves an extension-registered tool and ignores built-ins and hidden extensions", async () => {
+	const { extension } = await loadFixture();
+	assertEquals(
+		identifyToolOwner([extension], "probe_tool", resolveExtensionRef)?.id,
+		"probe",
+	);
+	assertEquals(identifyToolOwner([extension], "read", resolveExtensionRef), undefined);
+	const hidden = { ...extension, hidden: true };
+	assertEquals(
+		identifyToolOwner([hidden], "probe_tool", resolveExtensionRef),
 		undefined,
 	);
 });

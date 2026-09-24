@@ -142,6 +142,11 @@
 		opacity: 0.85;
 	}
 
+	/* Only shown at phone width, where the row caps at two chips (§4.4). */
+	.ext-activity-chip-more {
+		display: none;
+	}
+
 	@media (width < 40rem) {
 		.ext-activity-chip-progress {
 			max-inline-size: 14ch;
@@ -149,6 +154,14 @@
 
 		.ext-activity-chip-row {
 			max-inline-size: 100%;
+		}
+
+		.ext-activity-chip:nth-of-type(n + 3) {
+			display: none;
+		}
+
+		.ext-activity-chip-more {
+			display: inline-flex;
 		}
 	}
 }
@@ -158,5 +171,34 @@
 	   than hiding it like earlier tool rows (§4.4, Q4's default). */
 	[data-minimal-mode] .message-ext-activity {
 		padding-left: 0;
+	}
+
+	/* messages.css hides every earlier .message-tool row in minimal mode; an
+	   activity card carries that class for the timeline rail but stays. */
+	[data-minimal-mode]
+		#message-list
+		> .message-ext-activity.message-tool:has(~ .message) {
+		display: block;
+	}
+
+	/* messages.css forces the latest tool row's dot to its live pulse in minimal
+	   mode; a finished activity card keeps its result dot instead. */
+	[data-minimal-mode]
+		#message-list
+		> .message-ext-activity.message-tool:not([data-activity-state="working"])
+		.tool-status-active,
+	[data-minimal-mode]
+		#message-list
+		> .message-ext-activity.message-tool:not([data-activity-state="working"])
+		.tool-status-pulse {
+		opacity: 0;
+		animation: none;
+	}
+
+	[data-minimal-mode]
+		#message-list
+		> .message-ext-activity.message-tool:not([data-activity-state="working"])
+		.tool-status-result {
+		opacity: 1;
 	}
 }

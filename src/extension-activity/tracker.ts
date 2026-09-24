@@ -35,6 +35,13 @@ export const realScheduler: Scheduler = {
 	},
 };
 
+/** The status lines and working message an open activity currently holds —
+ * see `ExtensionActivityTracker.boundSignals`. */
+export type ExtensionActivitySignalBinding = Readonly<{
+	statusKeys: readonly string[];
+	working: boolean;
+}>;
+
 export type ExtensionActivityTrackerOptions = Readonly<{
 	/** Called for every `LedgerChange` other than `{kind:"none"}` — the owner
 	 * (`runtime-controller.ts`) renders/persists it. */
@@ -59,6 +66,13 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 	readonly #scheduler: Scheduler;
 	readonly #sink: (change: LedgerChange) => void;
 	readonly #cancelers = new Map<string, () => void>();
+	/** Activity id → the status keys / working message it currently holds, so
+	 * the owner can show that activity's chip instead of a duplicate plain
+	 * status or working line (DESIGN-ext-activity.md §2.4 "Prompt strip"). */
+	readonly #boundSignals = new Map<
+		string,
+		{ statusKeys: Set<string>; working: boolean }
+	>();
 	#runActive = false;
 
 	constructor(options: ExtensionActivityTrackerOptions) {
@@ -91,7 +105,9 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 
 	uiSignal(scope: InstrumentedScope, signal: UiSignal, now: number): void {
 		if (scope.timed) {
-			this.#emit(this.#ledger.observeUiInScope(scope.scopeId, signal, now));
+			const change = this.#ledger.observeUiInScope(scope.scopeId, signal, now);
+			this.#recordBinding(change, signal);
+			this.#emit(change);
 			return;
 		}
 		const key = carrierKeyFor(signal);
@@ -105,7 +121,41 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 		if (change.kind === "pending") {
 			this.#scheduleCarrierPromotion(scope.extension.id, key);
 		}
+		this.#recordBinding(change, signal);
 		this.#emit(change);
+	}
+
+	/** The status keys and working message `activityId` currently holds —
+	 * see `#boundSignals`. */
+	boundSignals(activityId: string): ExtensionActivitySignalBinding {
+		const binding = this.#boundSignals.get(activityId);
+		return {
+			statusKeys: binding ? [...binding.statusKeys] : [],
+			working: binding?.working ?? false,
+		};
+	}
+
+	#recordBinding(change: LedgerChange, signal: UiSignal): void {
+		if (
+			change.kind !== "pending" &&
+			change.kind !== "created" &&
+			change.kind !== "updated"
+		) {
+			return;
+		}
+		if (signal.kind !== "status" && signal.kind !== "workingMessage") return;
+		const id = change.activity.id;
+		const binding = this.#boundSignals.get(id) ?? {
+			statusKeys: new Set<string>(),
+			working: false,
+		};
+		if (signal.kind === "status") {
+			if (signal.text === undefined) binding.statusKeys.delete(signal.key);
+			else binding.statusKeys.add(signal.key);
+		} else {
+			binding.working = signal.text !== undefined;
+		}
+		this.#boundSignals.set(id, binding);
 	}
 
 	/**
@@ -146,15 +196,38 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 		this.#emit(this.#ledger.observeCustomMessage({ extension, text, hidden, now }));
 	}
 
-	/** Drives the ledger's run-active window (§2.3's policy: a carrier signal
-	 * only starts a new standalone activity `runGraceMs` past `agent_settled`
-	 * for a not-yet-settled run) and, on becoming inactive, checks self-heal.
-	 * The caller drives this from whatever it already uses to track
-	 * streaming — an `agent_start`/`agent_settled` pair, `session.isStreaming`,
-	 * or equivalent. */
+	/** Drives the ledger's run-active window (§2.3's policy: the run counts as
+	 * active from dispatch until `runGraceMs` past `agent_settled`, so a
+	 * carrier signal an extension raises while wrapping up still gets a card)
+	 * and schedules self-heal `standingAfterSettleMs` after the run settles,
+	 * so a run-scoped `{trigger:"ui"}` activity whose signal is never cleared
+	 * cannot stay "working" forever. The caller drives this from whatever it
+	 * already uses to track streaming — an `agent_start`/`agent_settled`
+	 * pair, `session.isStreaming`, or equivalent. */
 	setRunActive(active: boolean, now: number): void {
-		this.#runActive = active;
-		if (!active) this.selfHeal(now, now);
+		this.#cancel(runGraceTimerKey);
+		this.#cancel(selfHealTimerKey);
+		if (active) {
+			this.#runActive = true;
+			return;
+		}
+		this.#cancelers.set(
+			runGraceTimerKey,
+			this.#scheduler.schedule(extensionActivityThresholds.runGraceMs, () => {
+				this.#cancelers.delete(runGraceTimerKey);
+				this.#runActive = false;
+			}),
+		);
+		this.#cancelers.set(
+			selfHealTimerKey,
+			this.#scheduler.schedule(
+				extensionActivityThresholds.standingAfterSettleMs,
+				() => {
+					this.#cancelers.delete(selfHealTimerKey);
+					this.selfHeal(this.#clock(), now);
+				},
+			),
+		);
 	}
 
 	/** Finalizes any `{trigger:"ui"}` carrier activity that has outlived
@@ -234,10 +307,14 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 	#emit(change: LedgerChange): void {
 		if (change.kind === "none") return;
 		this.#sink(change);
+		if (change.kind === "dropped") this.#boundSignals.delete(change.activityId);
+		if (change.kind === "finished") this.#boundSignals.delete(change.activity.id);
 	}
 }
 
 const channelCarrierKey = "!channel";
+const runGraceTimerKey = "run:grace";
+const selfHealTimerKey = "run:self-heal";
 
 const channelActivityRefs = {
 	"subagents:fleet": {
@@ -360,7 +437,7 @@ function mapHookOutcome<Result, HookEvent>(
 		case "tool_call":
 			return mapToolCallResult(result);
 		case "tool_result":
-			return mapToolResultResult(result);
+			return mapToolResultResult(result, hookEvent);
 		case "input":
 			return mapInputResult(result);
 		default:
@@ -505,8 +582,21 @@ function mapToolCallResult<Result>(result: Result): ScopeOutcome {
 	};
 }
 
-function mapToolResultResult<Result>(result: Result): ScopeOutcome {
+function mapToolResultResult<Result, HookEvent>(
+	result: Result,
+	hookEvent: HookEvent,
+): ScopeOutcome {
 	if (!isRecord(result)) return { ok: true };
+	// §2.3: "tool_result → changed content text" — content echoed back
+	// unchanged is a no-op, the same rule `mapContextResult` applies.
+	if (
+		isRecord(hookEvent) &&
+		Array.isArray(hookEvent.content) &&
+		Array.isArray(result.content) &&
+		messagesUnchanged(hookEvent.content, result.content)
+	) {
+		return { ok: true };
+	}
 	const text = extractTextContent(result.content);
 	if (text === undefined) return { ok: true };
 	return {

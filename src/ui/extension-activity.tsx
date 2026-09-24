@@ -90,6 +90,8 @@ function renderActivityDetails(activity: ExtensionActivityView): string {
 	const dotState = activityDotState(activity.state);
 	const lineText = activityLineText(activity);
 	const openByDefault = activity.state === "error";
+	// A hook activity's title is usually the hook name itself; don't repeat it.
+	const meta = triggerMeta(activity.trigger);
 	return syncHtml(
 		<details
 			class="context-details ext-activity-details"
@@ -108,9 +110,11 @@ function renderActivityDetails(activity: ExtensionActivityView): string {
 				</span>
 				<span class="context-title">
 					<span safe>{activity.title}</span>
-					<span class="context-meta" safe>
-						{triggerMeta(activity.trigger)}
-					</span>
+					{meta !== activity.title && (
+						<span class="context-meta" safe>
+							{meta}
+						</span>
+					)}
 				</span>
 				<span class="ext-activity-state" data-activity-state-text safe>
 					{activityStateLabel(activity.state)}
@@ -229,7 +233,9 @@ export function renderExtensionActivityChips(
 					}`}
 					data-on:click={
 						chip.anchorMessageId
-							? `document.querySelector('[data-message-id="${chip.anchorMessageId}"]')?.scrollIntoView({behavior:"smooth",block:"center"})`
+							? `document.querySelector(${JSON.stringify(
+									`[data-message-id="${chip.anchorMessageId}"]`,
+								)})?.scrollIntoView({behavior:"smooth",block:"center"})`
 							: undefined
 					}
 				>
@@ -249,6 +255,15 @@ export function renderExtensionActivityChips(
 					)}
 				</button>
 			))}
+			{chips.length > 2 && (
+				<span
+					class="badge ext-activity-chip-more"
+					data-variant="activity"
+					aria-label={`${chips.length - 2} more working`}
+				>
+					+{chips.length - 2}
+				</span>
+			)}
 		</span>,
 	);
 }
