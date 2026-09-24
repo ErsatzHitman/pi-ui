@@ -108,6 +108,8 @@ export async function createApp() {
 		autoTitle,
 		extensionsMode: extensions.mode,
 		extensionsTerminalChrome: extensions.terminalChrome,
+		extensionsActivityTracking: extensions.activityTracking,
+		extensionsActivityPersist: extensions.activityPersist,
 		transitionController: transitions,
 		sendWebPush: (details, background) =>
 			pushService.notifySessionFinished(details, background),
@@ -181,6 +183,8 @@ async function openWorkspace(
 					autoTitle,
 					extensionsMode: extensions.mode,
 					extensionsTerminalChrome: extensions.terminalChrome,
+					extensionsActivityTracking: extensions.activityTracking,
+					extensionsActivityPersist: extensions.activityPersist,
 					refreshWorkspaces: false,
 					transitionController: transitions,
 				});

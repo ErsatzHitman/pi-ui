@@ -8,8 +8,14 @@ import type {
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 
-import { assertEquals, assertRejects, waitForCondition } from "#testing/assertions";
+import {
+	assertEquals,
+	assertExists,
+	assertRejects,
+	waitForCondition,
+} from "#testing/assertions";
 
+import type { ExtensionActivity, ExtensionRef } from "../extension-activity-types.ts";
 import {
 	AppStore,
 	type AppStorePresentation,
@@ -808,6 +814,74 @@ test("RuntimeController does not re-bind extensions for /reload (the SDK's own s
 
 	assertEquals(bindExtensionsCount(fake) - before, 0);
 	assertEquals(fake.reloadCount, 1);
+	await controller.dispose();
+});
+
+const activityRef: ExtensionRef = {
+	id: "probe",
+	label: "Probe",
+	path: "/probe.ts",
+	source: "local",
+};
+
+function anchoredActivity(overrides: Partial<ExtensionActivity> = {}): ExtensionActivity {
+	return {
+		v: 1,
+		id: "xa-1",
+		extension: activityRef,
+		trigger: { kind: "hook", event: "tool_call" },
+		title: "tool_call",
+		state: "working",
+		startedAt: 0,
+		output: [],
+		anchor: { toolCallId: "call-1" },
+		...overrides,
+	};
+}
+
+test("an anchored activity whose owning tool message never shows up keeps patching its standalone fallback card's text/state on every update", async () => {
+	// Regression test: `upsertExtensionActivityMessage` used to cache an
+	// anchored activity's *standalone fallback* card id (created when
+	// `findToolMessageId` found nothing) the same way it caches a genuine
+	// tool-message id. Every later update then took the "found the tool
+	// message" branch — patching only `{activities, extension}` — so the
+	// fallback card's own `text`/`state` froze at whatever they were on
+	// creation instead of continuing to reflect the activity's progress.
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+	const upsert = (
+		controller as unknown as {
+			upsertExtensionActivityMessage(activity: ExtensionActivity): void;
+		}
+	).upsertExtensionActivityMessage.bind(controller);
+
+	// No `role: "tool"` message carrying `toolCallId: "call-1"` exists yet —
+	// `findToolMessageId` finds nothing, so this must fall back to a
+	// standalone card.
+	upsert(anchoredActivity({ state: "working", progress: "starting" }));
+
+	assertEquals(state.messages.length, 1);
+	const created = state.messages.at(-1);
+	assertExists(created);
+	assertEquals(created.role, "extension-activity");
+	assertEquals(created.text, "starting");
+	assertEquals(created.state, "running");
+
+	// The activity finishes — still no tool message ever appears for
+	// "call-1" — so this must keep patching the SAME standalone card, and
+	// must refresh its text/state, not just its `activities` list.
+	upsert(
+		anchoredActivity({ state: "done", progress: undefined, summary: "finished ok" }),
+	);
+
+	assertEquals(state.messages.length, 1);
+	const updated = state.messages.at(-1);
+	assertExists(updated);
+	assertEquals(updated.id, created.id);
+	assertEquals(updated.text, "finished ok");
+	assertEquals(updated.state, "success");
+
 	await controller.dispose();
 });
 

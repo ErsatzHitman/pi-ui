@@ -364,6 +364,64 @@ test("extension UI projects status, widgets, working state, and editor text", ()
 	assertEquals(store.extensionWorkingMessage, undefined);
 });
 
+test("setStatusActivityId attaches an ExtensionActivity id to a status line, and clearing it drops the field", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	ui.setStatus("fake-vision", "describing 1 image…");
+	assertEquals(store.extensionStatuses, [
+		{ key: "fake-vision", text: "describing 1 image…" },
+	]);
+
+	controller.setStatusActivityId("fake-vision", "xa-1");
+	assertEquals(store.extensionStatuses, [
+		{ key: "fake-vision", text: "describing 1 image…", activityId: "xa-1" },
+	]);
+
+	controller.setStatusActivityId("fake-vision", undefined);
+	assertEquals(store.extensionStatuses, [
+		{ key: "fake-vision", text: "describing 1 image…" },
+	]);
+});
+
+test("setStatusActivityId for a key with no current status is a no-op (nothing to republish)", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	controller.setStatusActivityId("not-set", "xa-1");
+	assertEquals(store.extensionStatuses, []);
+});
+
+test("clearing a status also drops its activityId, so a later re-set starts unattributed", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	ui.setStatus("fake-vision", "describing 1 image…");
+	controller.setStatusActivityId("fake-vision", "xa-1");
+	ui.setStatus("fake-vision", undefined);
+	ui.setStatus("fake-vision", "describing 1 image…");
+	assertEquals(store.extensionStatuses, [
+		{ key: "fake-vision", text: "describing 1 image…" },
+	]);
+});
+
+test("setWorkingActivityId attaches an ExtensionActivity id to the working indicator, and cancelAll clears it", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	ui.setWorkingMessage("Indexing...");
+	assertEquals(store.extensionWorkingActivityId, undefined);
+
+	controller.setWorkingActivityId("xa-2");
+	assertEquals(store.extensionWorkingActivityId, "xa-2");
+	assertEquals(store.extensionWorkingMessage, "Indexing...");
+
+	controller.cancelAll();
+	assertEquals(store.extensionWorkingActivityId, undefined);
+});
+
 test("extension UI intercepts PIUI bridge payloads instead of showing them as notices", () => {
 	const store = new AppStore();
 	const controller = new ExtensionUiController(store);
