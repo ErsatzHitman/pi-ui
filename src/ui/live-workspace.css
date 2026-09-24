@@ -399,6 +399,30 @@
 		gap: 0.375rem;
 		line-height: 1rem;
 	}
+	.right-pane-switch > button > svg {
+		flex-shrink: 0;
+		width: 0.875rem;
+		height: 0.875rem;
+	}
+
+	/*
+	 * A narrow toolbar (phones, or the chat column beside an open pane) has no room for the
+	 * labels: the switch would overlap the centered toolbar actions. Keep the icons and move
+	 * each label off-screen, where it still names its button for assistive tech.
+	 */
+	@container prompt (width < 30rem) {
+		.right-pane-switch > button {
+			padding-inline: 0.5rem;
+		}
+		.right-pane-switch > button > span:not(.shortcut-tooltip) {
+			position: absolute;
+			overflow: hidden;
+			clip-path: inset(50%);
+			width: 1px;
+			height: 1px;
+			white-space: nowrap;
+		}
+	}
 
 	/* 48rem: the bottom sheet becomes a right-side drawer that no longer spans full width. */
 	@media (width > 48rem) {
