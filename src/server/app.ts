@@ -57,7 +57,9 @@ export async function createApp() {
 	setActiveFonts(fonts);
 	const preloadShellHighlighterPromise = loadPierreLanguage("bash");
 	const store = new AppStore();
-	if (appConfig.updateCheck !== false && process.env.PI_UI_NO_UPDATE_CHECK !== "1") {
+	// Opt-in: this fork doesn't publish releases, and the upstream notice would offer
+	// an installer that replaces this build with @hyperpuncher/pi-ui.
+	if (appConfig.updateCheck === true && process.env.PI_UI_NO_UPDATE_CHECK !== "1") {
 		void checkForUpdate().then((update) => {
 			if (update) store.setUpdateAvailable(update);
 		});

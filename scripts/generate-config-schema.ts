@@ -266,8 +266,9 @@ const schema = Type.Object(
 		),
 		updateCheck: Type.Optional(
 			Type.Boolean({
-				default: true,
-				description: "Check for a newer pi-ui release and show an update notice.",
+				default: false,
+				description:
+					"Check npm for a newer upstream @hyperpuncher/pi-ui release and show an update notice. Off by default: upgrading from that notice replaces this build with upstream's.",
 			}),
 		),
 	},
