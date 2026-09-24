@@ -192,7 +192,9 @@ What pi-ui does for you:
 - Strips `?token=` from the address bar once the cookie is set, so it never sits in
   browser history or gets shared in a copy-pasted link.
 - Checks `Origin` against `Host` on cookie-authenticated writes (CSRF).
-- Rate-limits failed auth attempts per client IP.
+- Rate-limits failed auth attempts per client IP: after 10 wrong tokens in 5 minutes that
+  IP gets `429` for every credential it sends, the right one included, until the window
+  passes (a correct token would otherwise tell a guesser it had won).
 
 What you're responsible for:
 
