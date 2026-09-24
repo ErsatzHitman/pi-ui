@@ -100,3 +100,11 @@ test("isLoopbackHostname recognizes loopback addresses only", () => {
 	assertEquals(isLoopbackHostname("0.0.0.0"), false);
 	assertEquals(isLoopbackHostname("192.168.1.5"), false);
 });
+
+test("server options enable remote mode from the flag or the environment", () => {
+	assertEquals(parseServerOptions(["--remote"]).remote, true);
+	assertEquals(parseServerOptions([], { remote: "1" }).remote, true);
+	assertEquals(parseServerOptions([], { remote: "true" }).remote, true);
+	assertEquals(parseServerOptions([], { remote: "0" }).remote, undefined);
+	assertEquals(parseServerOptions([]).remote, undefined);
+});

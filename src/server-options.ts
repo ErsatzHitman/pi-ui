@@ -12,12 +12,18 @@ export type ServerOptions = {
 	 * keeps working exactly as before.
 	 */
 	authToken?: string;
+	/**
+	 * Serve clients on other machines (see remote-mode.ts), opt-in via `--remote` /
+	 * `PI_UI_REMOTE=1`. Present only when enabled.
+	 */
+	remote?: true;
 };
 
 export type ServerEnvironment = {
 	host?: string;
 	port?: string;
 	authToken?: string;
+	remote?: string;
 };
 
 /** A non-loopback hostname reaches every device on the LAN — see request-auth.ts. */
@@ -39,6 +45,7 @@ export function parseServerOptions(
 			: parsePort(environment.port, "PI_UI_PORT");
 	let help = false;
 	let authToken = nonEmpty(environment.authToken);
+	let remote = parseRemoteEnvironment(environment.remote);
 
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index];
@@ -62,6 +69,10 @@ export function parseServerOptions(
 			port = parsePort(argument.slice("--port=".length), "--port");
 			continue;
 		}
+		if (argument === "--remote") {
+			remote = true;
+			continue;
+		}
 		if (argument === "--auth-token") {
 			authToken = parseAuthToken(args[++index], argument);
 			continue;
@@ -78,6 +89,7 @@ export function parseServerOptions(
 
 	const options: ServerOptions = { hostname, port, help };
 	if (authToken) options.authToken = authToken;
+	if (remote) options.remote = true;
 	return options;
 }
 
@@ -92,6 +104,9 @@ options:
                             127.0.0.1/::1/localhost, since that exposes pi-ui to your whole
                             LAN. Open http://<host>:<port>/?token=<token> once per browser;
                             pi-ui remembers it in a cookie after that.
+      --remote              serve clients on other machines, e.g. behind a TLS reverse
+                            proxy on this host (env: PI_UI_REMOTE=1). Implied by any
+                            --host other than 127.0.0.1/::1/localhost.
       --version             show the version
   -h, --help                show this help`;
 
@@ -105,6 +120,11 @@ function parseAuthToken(value: string | undefined, source: string): string {
 	const token = value?.trim();
 	if (!token) throw new Error(`${source} requires a non-empty token`);
 	return token;
+}
+
+function parseRemoteEnvironment(value: string | undefined): boolean {
+	const normalized = value?.trim().toLowerCase();
+	return normalized === "1" || normalized === "true";
 }
 
 function nonEmpty(value: string | undefined): string | undefined {

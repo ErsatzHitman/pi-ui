@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { importLoginShellEnvironment } from "./login-shell-environment.ts";
+import { resolveRemoteMode, setRemoteMode } from "./remote-mode.ts";
 import { disableServerAutostart, enableServerAutostart } from "./server-autostart.ts";
 import { isLoopbackHostname, parseServerOptions, serverUsage } from "./server-options.ts";
 import { withAuthToken } from "./server/request-auth.ts";
@@ -86,10 +87,12 @@ async function main(): Promise<void> {
 			host: process.env.PI_UI_HOST,
 			port: process.env.PI_UI_PORT,
 			authToken: process.env.PI_UI_AUTH_TOKEN,
+			remote: process.env.PI_UI_REMOTE,
 		});
 		if (options.help) {
 			console.log(serverUsage);
 		} else {
+			setRemoteMode(resolveRemoteMode(options));
 			const { disposeApp, fallback, routes } = await import("./server/lazy-app.ts");
 			if (!options.authToken && !isLoopbackHostname(options.hostname)) {
 				console.warn(
