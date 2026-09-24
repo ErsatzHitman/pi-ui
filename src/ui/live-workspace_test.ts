@@ -128,7 +128,11 @@ test("the now section carries the current session path so the client can tell a 
 });
 
 test("the now section renders no session attribute when there is no current session", () => {
-	const html = renderLiveWorkspaceData(snapshot({ turn: { phase: "running" } }), {}, emptyUsage);
+	const html = renderLiveWorkspaceData(
+		snapshot({ turn: { phase: "running" } }),
+		{},
+		emptyUsage,
+	);
 	const nowIndex = html.indexOf('id="live-workspace-now"');
 	assertFalse(
 		html.slice(nowIndex, nowIndex + 300).includes("data-live-workspace-session"),

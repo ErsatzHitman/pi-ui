@@ -102,7 +102,8 @@ function watchTurnPhase(): void {
 	if (!now) return;
 	const watcher = createTurnPhaseWatcher({
 		readPhase: () =>
-			now.querySelector<HTMLElement>(".live-workspace-turn-banner")?.dataset.turnPhase,
+			now.querySelector<HTMLElement>(".live-workspace-turn-banner")?.dataset
+				.turnPhase,
 		readSessionPath: () => now.dataset.liveWorkspaceSession,
 		notify: notifyTurnEvent,
 	});

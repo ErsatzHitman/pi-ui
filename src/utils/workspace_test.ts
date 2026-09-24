@@ -1,6 +1,5 @@
-import os from "node:os";
-
 import { afterEach, test } from "bun:test";
+import os from "node:os";
 
 import { assertEquals } from "#testing/assertions";
 

@@ -140,12 +140,12 @@ Two ways to narrow that:
 - **Or pass `--workspace <path>`** (env `PI_UI_WORKSPACE`) to point it at a specific
   directory without creating a separate user:
 
-  ```sh
-  pi-ui service install --remote --auth-token "$(openssl rand -hex 32)" \
-    --workspace ~/projects
-  ```
+    ```sh
+    pi-ui service install --remote --auth-token "$(openssl rand -hex 32)" \
+      --workspace ~/projects
+    ```
 
-  `pi-ui service install` persists it to the same 0600 env file as the other options.
+    `pi-ui service install` persists it to the same 0600 env file as the other options.
 
 ### Docker
 
@@ -229,8 +229,8 @@ handle the header two different ways:
   and last hop are the same IP, so either choice works.
 - **Appends** to whatever the client already sent (e.g. nginx's default
   `$proxy_add_x_forwarded_for`): the client's own, spoofable hops are still in the
-  header. Trusting the *first* hop there would let a client pick its own rate-limit
-  bucket at will by sending its own `X-Forwarded-For`; the *last* hop — the one your
+  header. Trusting the _first_ hop there would let a client pick its own rate-limit
+  bucket at will by sending its own `X-Forwarded-For`; the _last_ hop — the one your
   proxy itself appended — is the one that actually can't be forged.
 
 If you put a different reverse proxy in front of pi-ui, confirm it either replaces
