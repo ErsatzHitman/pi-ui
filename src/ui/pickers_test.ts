@@ -60,6 +60,26 @@ test("slash picker completes user-defined commands instead of running them", () 
 	assertStringIncludes(html, "payload: { prompt: &#34;/reload&#34; }");
 });
 
+test("choosing the slash picker's /model row opens the model picker, not a bare completion", () => {
+	// Regression: typing "/model" + Enter accepted the slash row, which completed the
+	// prompt to "/model " and opened argument completions instead of the model picker —
+	// the user was left in a list they could not pick from with the keyboard.
+	const html = renderSlashPicker(
+		appRenderSnapshot({
+			slashCommands: [
+				{
+					name: "model",
+					description: "Select model (opens selector UI)",
+					source: "system",
+					argumentHint: "<provider/model>",
+				},
+			],
+		}),
+	);
+	assertStringIncludes(html, "payload: { prompt: &#34;/model&#34; }");
+	assertFalse(html.includes("window.piUi.pickers.complete(&#34;model&#34;)"));
+});
+
 test("file suggestions have stable option ids without nested focus targets", () => {
 	const html = renderFilePickerResults([
 		{ value: '@"src/my file.ts"', label: "my file.ts" },
