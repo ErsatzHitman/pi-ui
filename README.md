@@ -119,22 +119,39 @@ bun run dev
 ## server options
 
 pi-ui listens on `127.0.0.1:31415` by default. `pi-ui --help` prints every option; the ones
-relevant to reaching pi-ui from another device (a phone, another computer on the same LAN):
+relevant to reaching pi-ui from another device (a phone, another computer on the same LAN,
+or a remote host over the internet):
 
 ```sh
-pi-ui --host 0.0.0.0 --auth-token <a long random token>
+pi-ui --remote --auth-token <a long random token>
 ```
 
 - `--host <hostname>` / `PI_UI_HOST` — binds a specific interface. Anything other than
   `127.0.0.1`, `::1`, or `localhost` makes pi-ui reachable from other devices on that
-  network — full access to your sessions, workspace files, and provider credentials.
-- `--auth-token <token>` / `PI_UI_AUTH_TOKEN` — opt-in bearer token pi-ui then requires on
-  every request. Without it, `--host` on anything but loopback is unauthenticated: pi-ui
-  starts anyway (a warning is printed) but does **not** require one — pass a token whenever
-  you bind beyond loopback. Open `http://<host>:<port>/?token=<token>` once per browser; a
-  cookie remembers it after that, so links, the SSE stream, and later visits don't need it
-  in the URL again.
+  network — full access to your sessions, workspace files, and provider credentials — and
+  implies `--remote`.
+- `--remote` / `PI_UI_REMOTE=1` — serve clients on other machines, e.g. behind a TLS
+  reverse proxy on this host. Implied by any non-loopback `--host`.
+- `--auth-token <token>` / `PI_UI_AUTH_TOKEN` — bearer token pi-ui then requires on every
+  request. **Remote mode refuses to start without one** (or `--insecure-no-auth`, below) —
+  anyone who can reach an unauthenticated pi-ui gets a full shell as you. A browser that
+  hits pi-ui with no token gets a native-looking sign-in page instead of a bare error; a
+  correct token there sets a cookie and the browser never needs the token in a URL or
+  header again. `POST /session/logout` (reachable once signed in) clears that cookie.
+  Non-browser clients (the SSE stream, API calls) can also send `Authorization: Bearer
+<token>` or a one-time `?token=<token>` — pi-ui redirects a plain browser navigation to
+  strip that query token from the address bar right after setting the cookie. Requests
+  authenticated only by the cookie are also checked against `Origin`/`Referer` (CSRF), and
+  repeated wrong tokens from one IP are rate-limited (429 after 10 failures in 5 minutes).
+- `--insecure-no-auth` / `PI_UI_INSECURE_NO_AUTH=1` — escape hatch that lets `--remote`
+  start with no token at all. Only for a network you already fully trust; pi-ui prints a
+  loud warning the whole time it's running like this.
 - `--port <port>` / `PI_UI_PORT` — listen port.
+
+Loopback (the default, with no `--remote`) behaves exactly as before: no token required,
+no login page. See `docs/remote.md` for a full walkthrough of exposing pi-ui to a phone or
+the internet — Tailscale, Cloudflare Tunnel, or a public reverse proxy, and running it
+headless on a VPS.
 
 ## configuration
 

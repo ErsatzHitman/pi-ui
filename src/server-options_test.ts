@@ -108,3 +108,19 @@ test("server options enable remote mode from the flag or the environment", () =>
 	assertEquals(parseServerOptions([], { remote: "0" }).remote, undefined);
 	assertEquals(parseServerOptions([]).remote, undefined);
 });
+
+test("server options accept the insecure-no-auth escape hatch from a flag or the environment", () => {
+	assertEquals(parseServerOptions(["--insecure-no-auth"]).insecureNoAuth, true);
+	assertEquals(parseServerOptions([], { insecureNoAuth: "1" }).insecureNoAuth, true);
+	assertEquals(parseServerOptions([], { insecureNoAuth: "true" }).insecureNoAuth, true);
+	assertEquals(
+		parseServerOptions([], { insecureNoAuth: "0" }).insecureNoAuth,
+		undefined,
+	);
+	assertEquals(parseServerOptions([]).insecureNoAuth, undefined);
+});
+
+test("serverUsage documents the insecure-no-auth escape hatch", () => {
+	assertStringIncludes(serverUsage, "--insecure-no-auth");
+	assertStringIncludes(serverUsage, "PI_UI_INSECURE_NO_AUTH");
+});

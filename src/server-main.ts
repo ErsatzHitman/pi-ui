@@ -2,10 +2,13 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { importLoginShellEnvironment } from "./login-shell-environment.ts";
-import { resolveRemoteMode, setRemoteMode } from "./remote-mode.ts";
+import { isRemoteMode, resolveRemoteMode, setRemoteMode } from "./remote-mode.ts";
 import { disableServerAutostart, enableServerAutostart } from "./server-autostart.ts";
-import { isLoopbackHostname, parseServerOptions, serverUsage } from "./server-options.ts";
-import { withAuthToken } from "./server/request-auth.ts";
+import { parseServerOptions, serverUsage } from "./server-options.ts";
+import { AuthRateLimiter } from "./server/auth-rate-limit.ts";
+import { withAuthToken, type AuthCheckDeps } from "./server/request-auth.ts";
+import { endpoints } from "./server/routes/endpoints.ts";
+import { createSessionLoginRoute } from "./server/session-login-route.ts";
 import { isVersionRequest, version } from "./version.ts";
 
 // Bun decides "jsx"/"jsxImportSource" from a tsconfig.json in process.cwd() once, at
@@ -43,7 +46,11 @@ if (basename(import.meta.dir) === "src") {
 
 type LazyAppRoutes = (typeof import("./server/lazy-app.ts"))["routes"];
 
-function gateRoutes(routes: LazyAppRoutes, token: string): LazyAppRoutes {
+function gateRoutes(
+	routes: LazyAppRoutes,
+	token: string,
+	deps: AuthCheckDeps,
+): LazyAppRoutes {
 	// SAFETY: Object.fromEntries widens back to a plain string-keyed record; this rebuilds
 	// `routes` with the exact same pathname/method keys and one handler wrapped per entry,
 	// so the shape is still LazyAppRoutes.
@@ -53,11 +60,29 @@ function gateRoutes(routes: LazyAppRoutes, token: string): LazyAppRoutes {
 			Object.fromEntries(
 				Object.entries(methods).map(([method, handler]) => [
 					method,
-					withAuthToken(handler, token),
+					withAuthToken(handler, token, deps),
 				]),
 			),
 		]),
 	) as LazyAppRoutes;
+}
+
+const insecureNoAuthWarning =
+	"\n" +
+	"!".repeat(72) +
+	"\n! INSECURE: pi-ui is running in remote mode with --insecure-no-auth. Anyone who\n" +
+	"! can reach this server can run arbitrary commands as you — no login at all.\n" +
+	"! This is almost certainly wrong outside a network you fully trust already.\n" +
+	"! Remove --insecure-no-auth and pass --auth-token as soon as you can.\n" +
+	"!".repeat(72);
+
+function remoteAuthRefusalMessage(): string {
+	return (
+		"pi-ui refuses to start in remote mode without an auth token: that would expose " +
+		"a full shell as you to the network. Pass --auth-token <token> (or set " +
+		"PI_UI_AUTH_TOKEN), or explicitly accept the risk with --insecure-no-auth (or " +
+		"PI_UI_INSECURE_NO_AUTH=1)."
+	);
 }
 
 async function main(): Promise<void> {
@@ -88,29 +113,38 @@ async function main(): Promise<void> {
 			port: process.env.PI_UI_PORT,
 			authToken: process.env.PI_UI_AUTH_TOKEN,
 			remote: process.env.PI_UI_REMOTE,
+			insecureNoAuth: process.env.PI_UI_INSECURE_NO_AUTH,
 		});
 		if (options.help) {
 			console.log(serverUsage);
 		} else {
 			setRemoteMode(resolveRemoteMode(options));
-			const { disposeApp, fallback, routes } = await import("./server/lazy-app.ts");
-			if (!options.authToken && !isLoopbackHostname(options.hostname)) {
-				console.warn(
-					`pi-ui is listening on ${options.hostname}, which is reachable from ` +
-						"other devices on this network, without an auth token. Anyone who " +
-						"can reach it can use it as you. Pass --auth-token <token> (or set " +
-						"PI_UI_AUTH_TOKEN) to require one.",
-				);
+			if (isRemoteMode() && !options.authToken) {
+				if (options.insecureNoAuth) {
+					console.warn(insecureNoAuthWarning);
+				} else {
+					console.error(remoteAuthRefusalMessage());
+					process.exitCode = 1;
+					return;
+				}
 			}
+			const { disposeApp, fallback, routes } = await import("./server/lazy-app.ts");
+			const rateLimiter = new AuthRateLimiter();
 			const server = Bun.serve({
 				hostname: options.hostname,
 				port: options.port,
 				idleTimeout: 0,
 				routes: options.authToken
-					? gateRoutes(routes, options.authToken)
+					? {
+							...gateRoutes(routes, options.authToken, { rateLimiter }),
+							[endpoints.sessionLogin]: createSessionLoginRoute(
+								options.authToken,
+								rateLimiter,
+							),
+						}
 					: routes,
 				fetch: options.authToken
-					? withAuthToken(fallback, options.authToken)
+					? withAuthToken(fallback, options.authToken, { rateLimiter })
 					: fallback,
 			});
 			let stopping = false;

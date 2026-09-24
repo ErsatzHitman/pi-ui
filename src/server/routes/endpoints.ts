@@ -72,6 +72,10 @@ export const endpoints = {
 	authInput: "/auth/input",
 	authLogout: "/auth/logout",
 	authClose: "/auth/close",
+	// The pi-ui session cookie (request-auth.ts), not to be confused with the
+	// LLM-provider auth above (authLogin*/authLogout): logging in/out of *this server*.
+	sessionLogin: "/session/login",
+	sessionLogout: "/session/logout",
 	llamaOpen: "/llama/open",
 	llamaToggle: "/llama/toggle",
 	llamaClose: "/llama/close",
