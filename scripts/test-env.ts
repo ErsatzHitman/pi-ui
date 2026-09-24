@@ -1,3 +1,4 @@
+import { afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,11 +20,14 @@ import { join } from "node:path";
  * Skipped when already set (a caller running a narrower/targeted `bun test`
  * invocation with its own `PI_UI_CACHE_DIR` keeps it), and best-effort on
  * cleanup: a leftover temp directory from an interrupted run is harmless.
+ * Cleanup is a global `afterAll` (a preload's hooks run once, after every test
+ * file) because `bun test` fires neither `exit` nor `beforeExit` for a
+ * preload's listeners, which left one temp directory behind per run.
  */
 if (!process.env.PI_UI_CACHE_DIR) {
 	const dir = mkdtempSync(join(tmpdir(), "pi-ui-test-cache-"));
 	process.env.PI_UI_CACHE_DIR = dir;
-	process.on("exit", () => {
+	afterAll(() => {
 		try {
 			rmSync(dir, { recursive: true, force: true });
 		} catch {
