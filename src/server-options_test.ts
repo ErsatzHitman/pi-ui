@@ -5,6 +5,7 @@ import { assertEquals, assertStringIncludes, assertThrows } from "#testing/asser
 import {
 	defaultServerHostname,
 	defaultServerPort,
+	explicitServerOptions,
 	isLoopbackHostname,
 	parseServerOptions,
 	serverUsage,
@@ -92,6 +93,44 @@ test("server options omit authToken entirely when not set, unlike an empty strin
 	assertEquals("authToken" in options, false);
 });
 
+test("explicitServerOptions reports false for both when nothing was passed", () => {
+	assertEquals(explicitServerOptions([]), { hostname: false, port: false });
+	assertEquals(explicitServerOptions([], {}), { hostname: false, port: false });
+});
+
+test("explicitServerOptions is true for a flag, an environment variable, or both", () => {
+	assertEquals(explicitServerOptions(["--host", "0.0.0.0"]), {
+		hostname: true,
+		port: false,
+	});
+	assertEquals(explicitServerOptions(["--port=9000"]), {
+		hostname: false,
+		port: true,
+	});
+	assertEquals(explicitServerOptions([], { host: "0.0.0.0" }), {
+		hostname: true,
+		port: false,
+	});
+	assertEquals(explicitServerOptions([], { port: "8080" }), {
+		hostname: false,
+		port: true,
+	});
+	assertEquals(
+		explicitServerOptions(["--host", "0.0.0.0", "--port", "9000"], {
+			host: "1.2.3.4",
+			port: "1234",
+		}),
+		{ hostname: true, port: true },
+	);
+});
+
+test("explicitServerOptions is unaffected by --remote/--auth-token", () => {
+	assertEquals(explicitServerOptions(["--remote", "--auth-token", "tok"]), {
+		hostname: false,
+		port: false,
+	});
+});
+
 test("isLoopbackHostname recognizes loopback addresses only", () => {
 	assertEquals(isLoopbackHostname("127.0.0.1"), true);
 	assertEquals(isLoopbackHostname("::1"), true);
@@ -107,4 +146,20 @@ test("server options enable remote mode from the flag or the environment", () =>
 	assertEquals(parseServerOptions([], { remote: "true" }).remote, true);
 	assertEquals(parseServerOptions([], { remote: "0" }).remote, undefined);
 	assertEquals(parseServerOptions([]).remote, undefined);
+});
+
+test("server options accept the insecure-no-auth escape hatch from a flag or the environment", () => {
+	assertEquals(parseServerOptions(["--insecure-no-auth"]).insecureNoAuth, true);
+	assertEquals(parseServerOptions([], { insecureNoAuth: "1" }).insecureNoAuth, true);
+	assertEquals(parseServerOptions([], { insecureNoAuth: "true" }).insecureNoAuth, true);
+	assertEquals(
+		parseServerOptions([], { insecureNoAuth: "0" }).insecureNoAuth,
+		undefined,
+	);
+	assertEquals(parseServerOptions([]).insecureNoAuth, undefined);
+});
+
+test("serverUsage documents the insecure-no-auth escape hatch", () => {
+	assertStringIncludes(serverUsage, "--insecure-no-auth");
+	assertStringIncludes(serverUsage, "PI_UI_INSECURE_NO_AUTH");
 });

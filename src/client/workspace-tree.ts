@@ -44,3 +44,18 @@ export function syncWorkspaceTreePaths(
 	}
 	if (operations.length > 0) tree.batch(operations);
 }
+
+/**
+ * Resolves `path` to the canonical form `FileTree.scrollToPath` expects
+ * (`getItem` accepts a bare directory path like "notes", but `scrollToPath`
+ * needs the canonical one, "notes/") and expands it so it can be scrolled
+ * into view. Returns undefined when `path` isn't part of `tree` at all — for
+ * example because it's outside the workspace — so the caller can tell the
+ * difference from a path that's merely collapsed.
+ */
+export function revealTreePath(tree: FileTree, path: string): string | undefined {
+	const item = tree.getItem(path);
+	if (!item) return undefined;
+	if ("expand" in item) item.expand();
+	return item.getPath();
+}

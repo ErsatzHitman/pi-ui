@@ -1,11 +1,12 @@
 import { test } from "bun:test";
-import { readdir, rm, stat } from "node:fs/promises";
-import { sep } from "node:path";
+import { mkdir, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { join, sep } from "node:path";
 
 import { assert, assertEquals, assertRejects } from "#testing/assertions";
 import { makeTempDir } from "#testing/temp";
 
 import {
+	cleanupStaleTransferDirs,
 	MAX_TRANSFER_FILES,
 	MAX_TRANSFER_FILE_BYTES,
 	MAX_TRANSFER_REQUEST_BYTES,
@@ -179,6 +180,104 @@ test("store disposal is idempotent and scoped to its owned root", async () => {
 	});
 });
 
+test("stale transfer dirs from a crashed process are removed, fresh and unrelated entries are kept", async () => {
+	await withTempRoot(async (tempRoot) => {
+		const stalePath = join(tempRoot, "pi-ui-transfers-stale");
+		const freshPath = join(tempRoot, "pi-ui-transfers-fresh");
+		const unrelatedDir = join(tempRoot, "some-other-dir");
+		const nonDirEntry = join(tempRoot, "pi-ui-transfers-not-a-dir");
+		await mkdir(stalePath);
+		await Bun.write(join(stalePath, "leftover.txt"), "leftover");
+		await mkdir(freshPath);
+		await mkdir(unrelatedDir);
+		await writeFile(nonDirEntry, "not a directory");
+
+		// Back-date the stale directory well before this process started.
+		const longAgo = new Date(Date.now() - 1_000_000_000);
+		await utimes(stalePath, longAgo, longAgo);
+
+		await cleanupStaleTransferDirs(tempRoot);
+
+		const remaining = new Set(await readdir(tempRoot));
+		assert(!remaining.has("pi-ui-transfers-stale"), "Expected the stale dir removed");
+		assert(remaining.has("pi-ui-transfers-fresh"), "Expected the fresh dir kept");
+		assert(remaining.has("some-other-dir"), "Expected the unrelated dir kept");
+		assert(
+			remaining.has("pi-ui-transfers-not-a-dir"),
+			"Expected the non-directory kept",
+		);
+	});
+});
+
+test("cleanup tolerates a missing temp root", async () => {
+	await withTempRoot(async (tempRoot) => {
+		await rm(tempRoot, { recursive: true, force: true });
+		await cleanupStaleTransferDirs(tempRoot);
+	});
+});
+
+test("a directory whose owning process is still running is never removed, even if its mtime looks stale", async () => {
+	await withTempRoot(async (tempRoot) => {
+		const owner = await spawnLiveOwner(tempRoot);
+		try {
+			// An ordinary gap between pasted files, not a sign the owner crashed — this is
+			// exactly what made the previous mtime-only heuristic unsafe.
+			const longAgo = new Date(Date.now() - 1_000_000_000);
+			await utimes(owner.rootPath, longAgo, longAgo);
+
+			await cleanupStaleTransferDirs(tempRoot);
+
+			await stat(owner.rootPath); // still there: does not throw
+		} finally {
+			await owner.kill();
+		}
+	});
+});
+
+test("a directory whose owning process has exited is removed even though its mtime is fresh", async () => {
+	await withTempRoot(async (tempRoot) => {
+		const owner = await spawnLiveOwner(tempRoot);
+		const rootPath = owner.rootPath;
+		await owner.kill();
+
+		await cleanupStaleTransferDirs(tempRoot);
+
+		await assertRejects(() => stat(rootPath));
+	});
+});
+
+test("a fresh store's directory name embeds this process's own pid", async () => {
+	await withTempRoot(async (tempRoot) => {
+		const store = await TransferredFileStore.create({ tempRoot });
+		try {
+			const name = store.rootPath.split(sep).at(-1) ?? "";
+			assertEquals(name.startsWith(`pi-ui-transfers-${process.pid}-`), true);
+		} finally {
+			await store.dispose();
+		}
+	});
+});
+
+test("creating a store cleans up stale sibling transfer dirs first", async () => {
+	await withTempRoot(async (tempRoot) => {
+		const stalePath = join(tempRoot, "pi-ui-transfers-stale");
+		await mkdir(stalePath);
+		const longAgo = new Date(Date.now() - 1_000_000_000);
+		await utimes(stalePath, longAgo, longAgo);
+
+		const store = await TransferredFileStore.create({ tempRoot });
+		try {
+			const remaining = await readdir(tempRoot);
+			assert(
+				!remaining.includes("pi-ui-transfers-stale"),
+				"Expected the stale dir removed on startup",
+			);
+		} finally {
+			await store.dispose();
+		}
+	});
+});
+
 function memoryFile(name: string, contents: string) {
 	const bytes = new TextEncoder().encode(contents);
 	return {
@@ -195,4 +294,42 @@ async function withTempRoot(callback: (path: string) => Promise<void>): Promise<
 	} finally {
 		await rm(path, { recursive: true, force: true });
 	}
+}
+
+/**
+ * Spawns a genuinely separate OS process that creates its own
+ * `TransferredFileStore` under `tempRoot` and then blocks forever — a
+ * faithful reproduction of "two pi-ui instances against the same temp root",
+ * which a single process backdating a directory's mtime with `utimes` cannot
+ * exercise (there is no second, still-live owner to race against).
+ */
+async function spawnLiveOwner(
+	tempRoot: string,
+): Promise<{ rootPath: string; kill: () => Promise<void> }> {
+	const child = Bun.spawn(
+		[
+			process.execPath,
+			"--eval",
+			`
+			import { TransferredFileStore } from "./src/server/transferred-files.ts";
+			const store = await TransferredFileStore.create({ tempRoot: process.argv[1] });
+			process.stdout.write(store.rootPath + "\\n");
+			await new Promise(() => {});
+			`,
+			tempRoot,
+		],
+		{ cwd: `${import.meta.dir}/../..`, stdout: "pipe", stderr: "pipe" },
+	);
+	const reader = child.stdout.getReader();
+	const { value } = await reader.read();
+	await reader.cancel();
+	const rootPath = new TextDecoder().decode(value).trim();
+	assert(rootPath.length > 0, "Expected the live-owner child to report its store path");
+	return {
+		rootPath,
+		async kill() {
+			child.kill();
+			await child.exited;
+		},
+	};
 }

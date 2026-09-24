@@ -230,7 +230,7 @@ export function renderLiveWorkspace(
 							data-size="icon-xs"
 							aria-pressed="false"
 							data-attr:aria-pressed="$liveWorkspacePreferences.notifications ? 'true' : 'false'"
-							aria-label="Notify me when a turn finishes or needs input"
+							aria-label="Notify me when a turn finishes, needs input, or a background session completes"
 							data-tooltip="Notify on completion"
 							data-tooltip-delay
 							data-on:click={`

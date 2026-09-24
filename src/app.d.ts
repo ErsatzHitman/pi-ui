@@ -88,6 +88,14 @@ interface PiUiNamespace {
 	liveWorkspace: {
 		applyOpen(open: boolean): void;
 		requestNotificationPermission(): void;
+		notificationsOptedIn(): boolean;
+	};
+	notifications: {
+		sessionFinished(detail: {
+			id: number;
+			workspace: string;
+			sessionPath?: string;
+		}): boolean;
 	};
 	terminal: {
 		encodeKey(event: KeyboardEvent): string | undefined;

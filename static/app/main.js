@@ -23,6 +23,7 @@ import {
 	trimOldMessages,
 } from "./message-scroll.js";
 import { filterModelSearch } from "./model-search.js";
+import { bindNotifications } from "./notifications.js";
 import {
 	bindPickers,
 	closePickers,
@@ -63,6 +64,7 @@ window.piUi = {
 		trimOldMessages,
 	},
 	modelSearch: { filter: filterModelSearch },
+	notifications: bindNotifications(),
 	pickers: {
 		close: closePickers,
 		complete: completeSlashCommand,

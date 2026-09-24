@@ -238,13 +238,16 @@ test("PiUiElementStore applies set/patch/append/remove/channel ops", () => {
 		store.apply({ op: "channel", channel: "subagents:fleet", payload: { jobs: 1 } }),
 		true,
 	);
-	assertEquals(store.channels(), [
-		{
-			channel: "subagents:fleet",
-			payload: { jobs: 1 },
-			updatedAt: element.updatedAt,
-		},
-	]);
+	// Both timestamps come from Date.now() on separate calls, so under a loaded full-suite
+	// run the channel's can land a millisecond after the element's; compare the shape and
+	// ordering rather than exact equality.
+	const [channelEntry, ...otherChannels] = store.channels();
+	assertEquals(otherChannels, []);
+	assertEquals(
+		{ channel: channelEntry?.channel, payload: channelEntry?.payload },
+		{ channel: "subagents:fleet", payload: { jobs: 1 } },
+	);
+	assertEquals((channelEntry?.updatedAt ?? 0) >= element.updatedAt, true);
 
 	assertEquals(store.apply({ op: "remove", id: "panel", ns: "advisor" }), true);
 	assertEquals(store.elements(), []);

@@ -1,10 +1,10 @@
 import type { AuthEvent, AuthPrompt, AuthType } from "@earendil-works/pi-ai";
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
-import { openBrowser } from "../../node_modules/@earendil-works/pi-coding-agent/dist/utils/open-browser.js";
 import type { AppAuthDialog, AppAuthProvider, AppStore } from "../state/app-store.ts";
 import { errorMessage } from "../utils/errors.ts";
 import { withAgentHttpProxy } from "../utils/http-proxy.ts";
+import { openHostBrowser } from "../utils/open-host-browser.ts";
 
 type AuthInputResolver = (value: string | undefined) => void;
 
@@ -386,5 +386,5 @@ function compareAuthProviders(a: AppAuthProvider, b: AppAuthProvider): number {
 }
 
 function openExternalUrl(url: string): void {
-	openBrowser(url);
+	openHostBrowser(url);
 }

@@ -3,6 +3,7 @@ import { activeFontStacks } from "../fonts.ts";
 import { activeKeybind, keybindActions } from "../keybinds.ts";
 import { liveWorkspaceRatioDefault } from "../live-workspace-types.ts";
 import { getPierreThemes } from "../pierre-theme.ts";
+import { isRemoteMode } from "../remote-mode.ts";
 import {
 	endpoints,
 	workspaceFilesBase,
@@ -69,12 +70,15 @@ export function renderPage(
 	// Shared by the initial connection and the forced-reconnect handler below, so
 	// a stale mobile connection is re-opened with the exact same options. Passing
 	// 'cleanup' aborts any still-open request under this same key before starting
-	// the new one, so re-issuing this action is always safe to call again.
+	// the new one, so re-issuing this action is always safe to call again. Datastar's
+	// @get closes the stream whenever the tab is hidden; a remote client keeps it open
+	// so a background tab still receives the "session finished" effect its Web
+	// Notification depends on (static/app/notifications.js). Local mode is unchanged.
 	const streamConnectAction = `@get('${endpoints.stream}?clientId=${displayClientId}&appVersion=${appVersion}', {
 						payload: {},
 						retry: 'always',
 						retryMaxCount: Infinity,
-						requestCancellation: 'cleanup',
+						requestCancellation: 'cleanup',${isRemoteMode() ? " openWhenHidden: true," : ""}
 					})`;
 
 	return syncHtml(

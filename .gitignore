@@ -9,7 +9,8 @@ static/app.css
 static/theme-lab.css
 static/build/
 /plans
-/docs
+/docs/*
+!/docs/remote.md
 
 /scratch/
 /.playwright-cli/

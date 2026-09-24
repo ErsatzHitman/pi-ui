@@ -1968,13 +1968,21 @@ export class RuntimeController {
 	}
 
 	private notifyRuntimeDone(runtime: AgentSessionRuntime, background: boolean): void {
-		void this.notifyRuntimeDoneWhenAppropriate(
-			{
-				workspace: formatHomePath(runtime.session.sessionManager.getCwd()),
-				sessionPath: runtime.session.sessionManager.getSessionFile(),
-			},
-			background,
-		);
+		const details: SessionDoneNotification = {
+			workspace: formatHomePath(runtime.session.sessionManager.getCwd()),
+			sessionPath: runtime.session.sessionManager.getSessionFile(),
+		};
+		if (background) {
+			// Broadcasts to every connected client (round RM1 "notifications"), for
+			// `static/app/notifications.js` to turn into a Web Notification where it's
+			// warranted. The foreground session already gets an equivalent "Turn finished"
+			// notification from `src/client/live-workspace.ts`'s `notifyTurnEvent` (driven by
+			// the "Now" tab's turn banner, which only ever reflects the foreground run), so
+			// this stays background-only to avoid firing both for the same completion. See
+			// `AppStore.notifySessionFinished`.
+			this.state.notifySessionFinished(details);
+		}
+		void this.notifyRuntimeDoneWhenAppropriate(details, background);
 	}
 
 	private async notifyRuntimeDoneWhenAppropriate(

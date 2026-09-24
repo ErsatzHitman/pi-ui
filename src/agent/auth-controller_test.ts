@@ -1,7 +1,8 @@
-import { test } from "bun:test";
+import { afterEach, mock, test } from "bun:test";
 
 import { assertEquals, assertExists } from "#testing/assertions";
 
+import { setRemoteMode } from "../remote-mode.ts";
 import {
 	AppStore,
 	type AppStorePresentation,
@@ -9,6 +10,11 @@ import {
 } from "../state/app-store.ts";
 import { AuthController } from "./auth-controller.ts";
 import { agentSessionRuntimeStub } from "./test-fixtures.ts";
+
+const openBrowserSpecifier =
+	"../../node_modules/@earendil-works/pi-coding-agent/dist/utils/open-browser.js";
+
+afterEach(() => setRemoteMode(false));
 
 function nextTurn(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
@@ -28,6 +34,29 @@ function presentationRecordingEffects(effects: UiCommitEffect[]): AppStorePresen
 					: () => {},
 		},
 	) as AppStorePresentation;
+}
+
+function oauthProvider() {
+	return {
+		id: "cloud-oauth",
+		name: "Cloud OAuth",
+		auth: {
+			oauth: {
+				name: "Cloud OAuth",
+				login: async (interaction: {
+					notify(event: { type: "auth_url"; url: string }): void;
+				}) => {
+					interaction.notify({
+						type: "auth_url",
+						url: "https://example.com/authorize",
+					});
+					// The oauth flow never resolves in these tests; only the
+					// auth_url notification matters.
+					return new Promise<never>(() => {});
+				},
+			},
+		},
+	};
 }
 
 test("provider-owned API key login can request multiple fields and accept empty values", async () => {
@@ -209,4 +238,73 @@ test("submitting an auth prompt answer without a client id still notifies (older
 	const toast = effects.find((effect) => effect.type === "toast");
 	assertExists(toast);
 	assertEquals(toast.type === "toast" ? toast.excludeClientId : "unset", undefined);
+});
+
+test("oauth login opens the auth URL on the host when not in remote mode", async () => {
+	const opened: string[] = [];
+	mock.module(openBrowserSpecifier, () => ({
+		openBrowser: (target: string) => {
+			opened.push(target);
+		},
+	}));
+	const provider = oauthProvider();
+	const modelRuntime = {
+		getProviders: () => [provider],
+		getProvider: () => provider,
+		login: async (
+			_providerId: string,
+			_type: string,
+			interaction: Parameters<NonNullable<typeof provider.auth.oauth.login>>[0],
+		) => await provider.auth.oauth.login(interaction),
+	};
+	const runtime = agentSessionRuntimeStub({ services: { modelRuntime } });
+	const state = new AppStore();
+	const controller = new AuthController(
+		() => runtime,
+		state,
+		() => {},
+	);
+
+	controller.openLogin();
+	assertEquals(controller.startLogin("cloud-oauth", "oauth"), true);
+	await nextTurn();
+
+	assertEquals(state.authDialog?.url, "https://example.com/authorize");
+	assertEquals(opened, ["https://example.com/authorize"]);
+});
+
+test("oauth login shows the auth URL but does not open it on the host in remote mode", async () => {
+	const opened: string[] = [];
+	mock.module(openBrowserSpecifier, () => ({
+		openBrowser: (target: string) => {
+			opened.push(target);
+		},
+	}));
+	setRemoteMode(true);
+	const provider = oauthProvider();
+	const modelRuntime = {
+		getProviders: () => [provider],
+		getProvider: () => provider,
+		login: async (
+			_providerId: string,
+			_type: string,
+			interaction: Parameters<NonNullable<typeof provider.auth.oauth.login>>[0],
+		) => await provider.auth.oauth.login(interaction),
+	};
+	const runtime = agentSessionRuntimeStub({ services: { modelRuntime } });
+	const state = new AppStore();
+	const controller = new AuthController(
+		() => runtime,
+		state,
+		() => {},
+	);
+
+	controller.openLogin();
+	assertEquals(controller.startLogin("cloud-oauth", "oauth"), true);
+	await nextTurn();
+
+	// A remote client can only act on the URL shown in the dialog: it must
+	// still be there even though nothing was opened on the server's host.
+	assertEquals(state.authDialog?.url, "https://example.com/authorize");
+	assertEquals(opened, []);
 });

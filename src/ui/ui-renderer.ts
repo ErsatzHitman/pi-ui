@@ -593,6 +593,18 @@ export class UiRenderer implements AppStorePresentation {
 					`if (${guard}) window.piUi.toast?.show(${JSON.stringify(effect.message)});`,
 				);
 			}
+			if (effect.type === "session-finished") {
+				// Reaches every connected client (see `AppStore.notifySessionFinished`);
+				// `static/app/notifications.js` decides per-tab whether to show a Web
+				// Notification (opted in, permitted, and this tab isn't the one being watched).
+				scripts.push(
+					`window.piUi.notifications.sessionFinished(${JSON.stringify({
+						id: effect.id,
+						workspace: effect.workspace,
+						sessionPath: effect.sessionPath,
+					})})`,
+				);
+			}
 		}
 		return scripts;
 	}

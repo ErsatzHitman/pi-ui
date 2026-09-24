@@ -3,6 +3,7 @@ import { runInNewContext } from "node:vm";
 
 import { assertEquals, assertFalse, assertStringIncludes } from "#testing/assertions";
 
+import { setRemoteMode } from "../remote-mode.ts";
 import { renderPage } from "./page.tsx";
 import { appRenderSnapshot } from "./test-fixtures.ts";
 
@@ -90,4 +91,22 @@ test("configured sidebar width is applied before styles", () => {
 			custom.indexOf('rel="stylesheet"'),
 		true,
 	);
+});
+
+test("in remote mode the SSE stream stays open while the tab is hidden", () => {
+	// Datastar's @get closes its stream on visibilitychange -> hidden by default, so a
+	// remote client in a background tab would never receive the "session finished" effect
+	// that its Web Notification depends on. Local mode keeps Datastar's default.
+	const streamAction = (page: string) =>
+		/data-init="(@get\('\/stream\?[^"]*)"/.exec(page)?.[1] ?? "";
+	const local = streamAction(renderSidebarPage());
+	assertStringIncludes(local, "retry: 'always'");
+	assertFalse(local.includes("openWhenHidden"));
+
+	setRemoteMode(true);
+	try {
+		assertStringIncludes(streamAction(renderSidebarPage()), "openWhenHidden: true");
+	} finally {
+		setRemoteMode(false);
+	}
 });

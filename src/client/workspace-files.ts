@@ -22,7 +22,7 @@ import {
 	type WorkspaceFileData,
 	type WorkspaceFilePreviewData,
 } from "./workspace-files-api.ts";
-import { syncWorkspaceTreePaths } from "./workspace-tree.ts";
+import { revealTreePath, syncWorkspaceTreePaths } from "./workspace-tree.ts";
 
 type WorkspaceFilesOptions = {
 	endpoint: string;
@@ -349,6 +349,27 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		const item = tree.getItem(path);
 		if (item) item.select();
 		else await selectFile(path);
+	}
+
+	/**
+	 * Reveals a directory (or file) already in the tree without opening it in
+	 * the editor/viewer — used in remote mode, where a linked folder can't be
+	 * opened on the server's desktop and is shown in the Files view instead.
+	 * Returns false when the path isn't part of this workspace's tree (for
+	 * example a path outside the workspace root), so the caller can fall back.
+	 */
+	async function revealPath(path: string): Promise<boolean> {
+		visible = true;
+		await loadFiles();
+		const canonicalPath = revealTreePath(tree, path);
+		if (canonicalPath === undefined) return false;
+		tree.scrollToPath(canonicalPath, { focus: true });
+		// `scrollToPath`'s `focus` option only moves the tree's internal roving
+		// tabindex; when another row (e.g. the file `loadFiles` opens by default)
+		// already holds real DOM focus, that row keeps it unless we also move
+		// keyboard focus onto the tree host, same as the toolbar/shortcut path.
+		focusTreeHost(treeHost);
+		return true;
 	}
 
 	function refresh(treeChanged = true): void {
@@ -874,6 +895,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		refreshAfterDiscard,
 		requestConfirmation,
 		requestNotice,
+		revealPath,
 		setGitStatus,
 		setVisible,
 		setWorkspace,

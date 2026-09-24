@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { mock, test } from "bun:test";
 import { mkdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,6 +9,7 @@ import { assertEquals, assertStringIncludes } from "#testing/assertions";
 import { makeTempDir, makeTempFile } from "#testing/temp";
 
 import { getToolPath } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/utils/tools-manager.js";
+import { setRemoteMode } from "../../remote-mode.ts";
 import { sessionSidebarWidthDefault } from "../../session-sidebar-types.ts";
 import { AppStore } from "../../state/app-store.ts";
 import { assertStringExcludes } from "../../testing/assertions.ts";
@@ -1387,6 +1388,61 @@ test("file links resolve inside and outside paths to the editor without download
 	}
 });
 
+test("opening a linked directory opens it on the host outside remote mode", async () => {
+	const opened: string[] = [];
+	mock.module(openBrowserSpecifier, () => ({
+		openBrowser: (target: string) => {
+			opened.push(target);
+		},
+	}));
+	const workspace = await makeTempDir();
+	const nested = `${workspace}/notes`;
+	await mkdir(nested);
+	try {
+		const context = fakeContext();
+		context.store.setWorkspacePath(workspace);
+		const response = await createRouter(context).fetch(
+			fileOpenRequest(pathToFileURL(nested).href),
+		);
+		assertEquals(response.status, 200);
+		assertEquals(await response.json(), { opened: true });
+		assertEquals(opened.length, 1);
+	} finally {
+		await rm(workspace, { recursive: true });
+	}
+});
+
+test("remote mode reveals a linked directory in the Files view instead of opening it on the host", async () => {
+	const opened: string[] = [];
+	mock.module(openBrowserSpecifier, () => ({
+		openBrowser: (target: string) => {
+			opened.push(target);
+		},
+	}));
+	const workspace = await makeTempDir();
+	const nested = `${workspace}/notes`;
+	await mkdir(nested);
+	try {
+		const context = fakeContext();
+		context.store.setWorkspacePath(workspace);
+		setRemoteMode(true);
+		const response = await createRouter(context).fetch(
+			fileOpenRequest(pathToFileURL(nested).href),
+		);
+		assertEquals(response.status, 200);
+		assertEquals(await response.json(), {
+			opened: false,
+			directory: true,
+			path: "notes",
+			workspacePath: workspace,
+		});
+		assertEquals(opened, []);
+	} finally {
+		setRemoteMode(false);
+		await rm(workspace, { recursive: true });
+	}
+});
+
 test("outside files can be read, edited and downloaded without changing workspaces", async () => {
 	const workspace = await makeTempDir();
 	const outside = await makeTempFile({ suffix: "-example ü.ts" });
@@ -1753,6 +1809,9 @@ function fakeHost(overrides: Partial<RuntimeResource> = {}): RuntimeResource {
 		...overrides,
 	};
 }
+
+const openBrowserSpecifier =
+	"../../../node_modules/@earendil-works/pi-coding-agent/dist/utils/open-browser.js";
 
 function fileOpenRequest(uri: string): Request {
 	return new Request("http://localhost/files/open", {
