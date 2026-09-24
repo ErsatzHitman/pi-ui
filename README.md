@@ -206,7 +206,7 @@ all options with their defaults:
 	},
 	"toolOutputHidden": false,
 	"toolbarHidden": false,
-	"updateCheck": true
+	"updateCheck": false
 }
 ```
 
