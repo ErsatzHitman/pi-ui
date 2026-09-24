@@ -5,6 +5,7 @@ import {
 	type PiUiElement,
 	piUiDialogId,
 	piUiDismissedStorageKey,
+	piUiSlug,
 } from "../extension-surface-types.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
@@ -539,8 +540,17 @@ function renderPanelSection(
 		);
 		const sectionActions = parseActions(record.actions);
 		if (sectionFields.length === 0 && sectionActions.length === 0) return "";
+		// One single-line field plus icon-only actions (btw's send/stop) is a composer: keep
+		// the icons inline at the end of the input row instead of wrapping under it.
+		const composerRow =
+			sectionFields.length === 1 &&
+			sectionFields[0]?.kind === "text" &&
+			sectionActions.length > 0 &&
+			sectionActions.every((action) => action.icon);
 		return syncHtml(
-			<div class="piui-panel-section piui-panel-form">
+			<div
+				class={`piui-panel-section piui-panel-form${composerRow ? " piui-composer-row" : ""}`}
+			>
 				{sectionFields.length > 0 && renderFields(element, sectionFields)}
 				{sectionActions.length > 0 && (
 					<div class="piui-actions">
@@ -549,6 +559,13 @@ function renderPanelSection(
 								element,
 								action,
 								fieldValuesExpression(element, sectionFields),
+								undefined,
+								// Sending from a composer clears it for the next message (the
+								// kept-across-morphs <input> no longer resets itself); Stop
+								// keeps a draft typed while the reply streamed.
+								composerRow && action.variant === "primary"
+									? clearFieldsExpression(element, sectionFields)
+									: undefined,
 							),
 						)}
 					</div>
@@ -664,11 +681,16 @@ function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 		return syncHtml(
 			<div class="field">
 				{field.label && (
-					<label class={fieldLabelClass(element, field)} safe>
+					<label
+						class={fieldLabelClass(element, field)}
+						for={fieldDomId(element, field)}
+						safe
+					>
 						{field.label}
 					</label>
 				)}
 				<textarea
+					id={fieldDomId(element, field)}
 					class="dialog-editor"
 					placeholder={field.placeholder}
 					data-signals={`{${signal}: ''}`}
@@ -787,11 +809,16 @@ function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 	return syncHtml(
 		<div class="field">
 			{field.label && (
-				<label class={fieldLabelClass(element, field)} safe>
+				<label
+					class={fieldLabelClass(element, field)}
+					for={fieldDomId(element, field)}
+					safe
+				>
 					{field.label}
 				</label>
 			)}
 			<input
+				id={fieldDomId(element, field)}
 				type="text"
 				placeholder={field.placeholder}
 				data-signals={`{${signal}: ''}`}
@@ -860,8 +887,11 @@ function renderActionButton(
 	action: PiUiAction,
 	valueExpression: string,
 	size?: "xs",
+	afterPost?: string,
 ): string {
-	const post = actionPost(element, action.id, valueExpression);
+	const post = afterPost
+		? `${actionPost(element, action.id, valueExpression)}; ${afterPost}`
+		: actionPost(element, action.id, valueExpression);
 	const onClick = action.confirm
 		? `if (confirm(${JSON.stringify(action.confirm)})) { ${post} }`
 		: post;
@@ -929,6 +959,14 @@ function dialogId(element: PiUiElement): string {
  * The Datastar signal name holding a field's value. Only identifier characters are kept:
  * `piUiSlug` allows `-`, which Datastar expressions would parse as subtraction.
  */
+/**
+ * A field's stable DOM id. It keeps that exact `<input>` (and its focus) across a morph when
+ * sections before it come and go: btw's composer lost focus after every send without it.
+ */
+function fieldDomId(element: PiUiElement, field: PiUiFieldSpec): string {
+	return `piui-field-${piUiSlug(element.ns)}-${piUiSlug(element.id)}-${piUiSlug(field.id)}`;
+}
+
 function fieldSignal(element: PiUiElement, field: PiUiFieldSpec): string {
 	return `_piuiField_${signalPart(element.ns)}_${signalPart(element.id)}_${signalPart(field.id)}`;
 }
@@ -1018,6 +1056,13 @@ function sheetOpenFocusScript(): string {
 			target?.focus();
 		});
 	});`;
+}
+
+function clearFieldsExpression(
+	element: PiUiElement,
+	fields: readonly PiUiFieldSpec[],
+): string {
+	return fields.map((field) => `$${fieldSignal(element, field)} = ''`).join("; ");
 }
 
 function fieldValuesExpression(

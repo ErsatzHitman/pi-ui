@@ -393,7 +393,10 @@ test("a field label that repeats the sheet title is visually hidden, not dropped
 	});
 	assertStringIncludes(html, `<label class="sr-only">${question}</label>`);
 	assertStringIncludes(html, `<legend class="sr-only">${question}</legend>`);
-	assertStringIncludes(html, "<label>Custom answer</label>");
+	assertStringIncludes(
+		html,
+		'<label for="piui-field-ask-user-panel-freeform">Custom answer</label>',
+	);
 });
 
 test("a select field with no description and not marked searchable stays a plain select (no filter box, no regression for other bridge callers)", () => {
@@ -564,4 +567,107 @@ test("roster rows render detail and per-row actions replying with the row id", (
 	assertStringIncludes(html, 'data-variant="destructive"');
 	assertStringIncludes(html, "{&#34;id&#34;:&#34;s1&#34;}");
 	assertStringExcludes(html, "<b>scout</b>");
+});
+
+// UX audit: btw's composer lost keyboard focus after every send — a new turns/status
+// section shifted the id-less form section, so the morph rebuilt the <input> instead of
+// keeping it. A stable per-element, per-field id lets the morph keep the focused field.
+test("text and textarea fields carry a stable id (and a label pointing at it) so a morph keeps the focused field", () => {
+	const render = () =>
+		renderPiUiSheets({
+			extensionElements: [
+				element({
+					ns: "btw",
+					data: {
+						fields: [
+							{ id: "q", kind: "text", label: "Ask" },
+							{ id: "comment", kind: "textarea", label: "Extra context" },
+						],
+					},
+				}),
+			],
+		});
+	const html = render();
+	assertStringIncludes(html, 'id="piui-field-btw-panel-q"');
+	assertStringIncludes(html, 'for="piui-field-btw-panel-q"');
+	assertStringIncludes(html, 'id="piui-field-btw-panel-comment"');
+	assertStringIncludes(html, 'for="piui-field-btw-panel-comment"');
+	assertStringIncludes(render(), 'id="piui-field-btw-panel-q"');
+});
+
+// UX audit: the plan asks for btw's composer to be ONE input row with an inline send icon;
+// the icon button used to wrap onto its own row under the input.
+test("a form section with one single-line field and only icon actions lays out as one inline composer row", () => {
+	const composer = (
+		actions: unknown[],
+		fields: unknown[] = [{ id: "q", kind: "text" }],
+	) =>
+		renderPiUiSheets({
+			extensionElements: [
+				element({
+					ns: "btw",
+					data: { sections: [{ kind: "form", id: "c", fields, actions }] },
+				}),
+			],
+		});
+	const send = { id: "submit", label: "Send", variant: "primary", icon: "send" };
+	const stop = { id: "cancel", label: "Stop", icon: "stop" };
+	assertStringIncludes(
+		composer([send, stop]),
+		'class="piui-panel-section piui-panel-form piui-composer-row"',
+	);
+	assertStringExcludes(
+		composer([{ id: "submit", label: "Send" }]),
+		"piui-composer-row",
+	);
+	assertStringExcludes(
+		composer([send], [{ id: "q", kind: "textarea" }]),
+		"piui-composer-row",
+	);
+});
+
+// With the composer's <input> now kept across morphs (stable id), nothing reset it after a
+// send any more — the next message was appended to the previous one. Sending clears it.
+test("a composer's primary (send) action clears its field after posting; its stop action keeps the draft", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				ns: "btw",
+				data: {
+					sections: [
+						{
+							kind: "form",
+							id: "c",
+							fields: [{ id: "q", kind: "text" }],
+							actions: [
+								{
+									id: "submit",
+									label: "Send",
+									variant: "primary",
+									icon: "send",
+								},
+								{
+									id: "cancel",
+									label: "Stop",
+									variant: "secondary",
+									icon: "stop",
+								},
+							],
+						},
+					],
+				},
+			}),
+		],
+	});
+	const clear = "$_piuiField_btw_panel_q = ''";
+	const send = html.slice(
+		html.indexOf('aria-label="Send"') - 600,
+		html.indexOf('aria-label="Send"'),
+	);
+	const stop = html.slice(
+		html.indexOf('aria-label="Send"'),
+		html.indexOf('aria-label="Stop"'),
+	);
+	assertStringIncludes(send, clear);
+	assertStringExcludes(stop, clear);
 });

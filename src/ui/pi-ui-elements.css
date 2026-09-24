@@ -257,6 +257,15 @@
 		display: grid;
 		gap: 0.625rem;
 	}
+
+	/* The multiselect's <fieldset> groups its checkboxes for assistive tech; visually it reads
+	 * like the single-select's option rows, not as a boxed native fieldset. */
+	.piui-multiselect {
+		margin: 0;
+		border: 0;
+		padding: 0;
+		min-inline-size: 0;
+	}
 	.piui-multiselect-option {
 		display: flex;
 		align-items: center;
@@ -308,6 +317,25 @@
 		flex-wrap: wrap;
 		gap: 0.375rem;
 		margin-block-start: 0.375rem;
+	}
+
+	/* A composer (one single-line field + icon-only actions, e.g. btw's send/stop): one
+	 * input row with the icon buttons inline at its end, like the main prompt's send. */
+	.piui-composer-row {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+	}
+	.piui-composer-row:has(label:not(.sr-only)) {
+		align-items: flex-end;
+	}
+	.piui-composer-row > .piui-fields {
+		flex: 1;
+		min-width: 0;
+	}
+	.piui-composer-row > .piui-actions {
+		flex-wrap: nowrap;
+		margin-block-start: 0;
 	}
 	.piui-generic-data {
 		display: grid;
