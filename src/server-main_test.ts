@@ -8,12 +8,12 @@ import {
 	assertThrows,
 } from "#testing/assertions";
 
+import { isPiCliPassthrough } from "./pi-cli-passthrough.ts";
 import { serverAutostartConfig, systemdService } from "./server-autostart.ts";
 import {
 	buildServiceInstallAutostartConfig,
 	createShutdown,
 	formatCliError,
-	isPiCliPassthrough,
 } from "./server-main.ts";
 
 // subagents stream: reproduces "sub-agents don't work under pi-ui" (PLAN-ux.md §subagents).

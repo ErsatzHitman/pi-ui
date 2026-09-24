@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { importLoginShellEnvironment } from "./login-shell-environment.ts";
+import { isPiCliPassthrough, runPiCli } from "./pi-cli-passthrough.ts";
 import { isRemoteMode, resolveRemoteMode, setRemoteMode } from "./remote-mode.ts";
 import {
 	disableServerAutostart,
@@ -35,7 +36,12 @@ import { isVersionRequest, version } from "./version.ts";
 // this runs and neither can hit this. Detected by this file living directly in a "src"
 // directory next to a tsconfig.json, true only for the raw-source entry point, never the
 // built outputs — so re-exec with the right --cwd only in that one narrow, unsupported case.
-if (basename(import.meta.dir) === "src") {
+//
+// Never for pi CLI passthrough argv (pi-cli-passthrough.ts): that runs the prebuilt pi
+// CLI, which needs none of this JSX, and `--cwd` would move a sub-agent child out of the
+// directory its parent extension spawned it in (`spawn(..., { cwd })`) into this repo,
+// so it would read and edit the wrong project.
+if (basename(import.meta.dir) === "src" && !isPiCliPassthrough(process.argv.slice(2))) {
 	const projectRoot = join(import.meta.dir, "..");
 	if (existsSync(join(projectRoot, "tsconfig.json")) && process.cwd() !== projectRoot) {
 		const child = Bun.spawn({
@@ -186,74 +192,6 @@ export function createShutdown(
  * are user mistakes or environment problems, not bugs to debug from a stack. */
 export function formatCliError(cause: unknown): string {
 	return cause instanceof Error ? cause.message : String(cause);
-}
-
-/**
- * pi-ui's own closed set of top-level flags (see `serverUsage`), recognized regardless of
- * where they appear relative to `isPiCliPassthrough`'s check of `args[0]` only.
- */
-const piUiOwnFlags = new Set([
-	"--host",
-	"--port",
-	"--auth-token",
-	"--remote",
-	"--insecure-no-auth",
-	"--workspace",
-	"--help",
-	"-h",
-	"--version",
-]);
-
-function isPiUiOwnFlag(token: string): boolean {
-	if (piUiOwnFlags.has(token)) return true;
-	return (
-		token.startsWith("--host=") ||
-		token.startsWith("--port=") ||
-		token.startsWith("--auth-token=") ||
-		token.startsWith("--workspace=")
-	);
-}
-
-/**
- * True when `args` are plain pi CLI arguments rather than a pi-ui invocation, so `main()`
- * should run the bundled pi CLI and exit instead of parsing `args` as server options.
- *
- * Extensions that spawn a child pi process re-invoke "the running pi" (see
- * `~/.pi/agent/extensions/subagents.ts` `piInvocation()`): `process.execPath` +
- * `process.argv[1]` when argv[1] is a real script, else `process.execPath` alone when it
- * isn't node/bun, else `pi` on PATH. Under pi-ui the running program is pi-ui — the
- * compiled binary or `bun src/server-main.ts` from source — so a sub-agent (or any other
- * such extension: workflows, delegate, jev, loop, advisor, btw, handoff, herdr-*) handed
- * pi-ui plain pi CLI arguments like `--mode json -p --no-session ...`. Before this, those
- * never matched anything `parseServerOptions` recognized, so every such child died
- * immediately with "unknown option: --mode" instead of running a turn.
- *
- * pi-ui recognizes only its own small, closed set of top-level forms: `service`/
- * `autostart` (subcommands), `--version`/`--help`/`-h`, and the handful of server flags in
- * `serverUsage`. Everything else — including a bare positional prompt, any pi CLI flag
- * pi-ui itself has never heard of, or a genuinely mistyped pi-ui flag — is pi CLI
- * passthrough; the bundled pi CLI has its own clean "unknown option" handling for the
- * arguments it doesn't recognize either, so pi-ui does not need to special-case every pi
- * CLI flag to keep its own recognized forms' behaviour unchanged.
- */
-export function isPiCliPassthrough(args: readonly string[]): boolean {
-	const [first] = args;
-	if (first === undefined) return false;
-	if (first === "service" || first === "autostart") return false;
-	if (isVersionRequest(args)) return false;
-	return !isPiUiOwnFlag(first);
-}
-
-/**
- * Runs the bundled pi CLI (the same `@earendil-works/pi-coding-agent` SDK version pi-ui
- * embeds for its own in-process runtime) in this process with `args`, in place of starting
- * a pi-ui server. This is what makes an extension's unmodified re-invocation of "the
- * running pi" work under pi-ui: same executable, same argv, now handled by the CLI it was
- * actually written for instead of pi-ui's own server option parser.
- */
-async function runPiCli(args: readonly string[]): Promise<void> {
-	const { main: piCliMain } = await import("@earendil-works/pi-coding-agent");
-	await piCliMain([...args]);
 }
 
 async function main(): Promise<void> {

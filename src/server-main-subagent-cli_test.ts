@@ -1,5 +1,5 @@
 import { afterEach, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -105,4 +105,81 @@ test("a sub-agent child's exact argv now runs a real (fake-model) turn instead o
 	);
 	const text = JSON.stringify(messageEnd);
 	assertStringIncludes(text, "Fake reply: subagent-cli-smoke");
+}, 30_000);
+
+// A sub-agent child is spawned in its parent's workspace (`spawn(..., { cwd })`), almost
+// never this repo. From source, server-main.ts used to re-exec itself with
+// `--cwd=<repo root>` whenever the cwd was anything else (its JSX-tsconfig guard), so the
+// child's pi session silently ran in the pi-ui checkout instead of the workspace, reading
+// and editing the wrong project. It also inherited the server's `PI_UI_BRIDGE` marker,
+// which would push a bridge-aware extension in the child onto pi-ui's native-sheet path
+// with no pi-ui on the other end.
+test("a sub-agent child keeps its spawn cwd and drops pi-ui's bridge marker", async () => {
+	const scratch = await mkdtemp(join(tmpdir(), "pi-ui-subagent-cwd-"));
+	cleanupDirs.push(scratch);
+	const agentDir = join(scratch, "agent");
+	const homeDir = join(scratch, "home");
+	const workspace = join(scratch, "workspace");
+	await mkdir(workspace, { recursive: true });
+	const providerPath = await writeFakeStreamProviderExtensionFile(agentDir);
+	const probePath = join(scratch, "probe-extension.js");
+	await Bun.write(
+		probePath,
+		[
+			"export default function () {",
+			"\tprocess.stderr.write(`PROBE_CWD=${process.cwd()}\n`);",
+			"\tprocess.stderr.write(`PROBE_BRIDGE=${process.env.PI_UI_BRIDGE ?? ''}\n`);",
+			"}",
+			"",
+		].join("\n"),
+	);
+
+	const proc = Bun.spawn({
+		cmd: [
+			process.execPath,
+			join(import.meta.dir, "server-main.ts"),
+			"--mode",
+			"json",
+			"-p",
+			"--no-session",
+			"--no-extensions",
+			"--no-skills",
+			"-e",
+			providerPath,
+			"-e",
+			probePath,
+			"--model",
+			"pi-ui-fake-stream/scripted-1",
+			"Say hello. [[TEXT:subagent-cwd]]",
+		],
+		cwd: workspace,
+		env: {
+			...process.env,
+			PI_CODING_AGENT_DIR: agentDir,
+			HOME: homeDir,
+			USERPROFILE: homeDir,
+			APPDATA: join(scratch, "appdata"),
+			LOCALAPPDATA: join(scratch, "localappdata"),
+			PI_UI_NO_UPDATE_CHECK: "1",
+			PI_OFFLINE: "1",
+			PI_UI_BRIDGE: "1",
+			ANTHROPIC_API_KEY: "",
+			OPENAI_API_KEY: "",
+			GEMINI_API_KEY: "",
+		},
+		stdout: "pipe",
+		stderr: "pipe",
+		stdin: "ignore",
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+
+	assertEquals(exitCode, 0, `pi CLI exited non-zero; stderr: ${stderr}`);
+	assertStringIncludes(stdout, "Fake reply: subagent-cwd");
+	const reportedCwd = /PROBE_CWD=(.*)/.exec(stderr)?.[1]?.trim();
+	assertEquals(reportedCwd && (await realpath(reportedCwd)), await realpath(workspace));
+	assertStringIncludes(stderr, "PROBE_BRIDGE=\n");
 }, 30_000);
