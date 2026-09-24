@@ -424,8 +424,19 @@ export class ExtensionUiController {
 	}
 
 	/** Applies a client-measured grid resize to a mounted surface. `false` if `id` is unknown. */
-	resizeTerminalSurface(id: string, cols: number, rows: number): boolean {
-		return this.#terminalSurfaces.resize(id, { columns: cols, rows });
+	resizeTerminalSurface(
+		id: string,
+		cols: number,
+		rows: number,
+		clientId?: string,
+	): boolean {
+		return this.#terminalSurfaces.resize(id, { columns: cols, rows }, clientId);
+	}
+
+	/** Forgets one client's reported terminal-surface sizes once its connection closes —
+	 * see `TerminalSurfaceController.forgetClient`. */
+	forgetTerminalSurfaceClient(clientId: string): void {
+		this.#terminalSurfaces.forgetClient(clientId);
 	}
 
 	/**

@@ -300,6 +300,45 @@ terminal:
   the pre-`"tui"` binding, for the unlikely case a `ctx.mode === "tui"`-gated extension assumes a
   real terminal process in a way the terminal surface shim doesn't cover.
 
+### known gaps
+
+- **bash-background / subagents on Windows can fail to launch a real shell under Bun.** The
+  bash-background extension's own `console-bash.ts` spawns its shell through node-pty's ConPTY
+  backend (`useConpty: true`) so descendant processes share one invisible console instead of
+  flashing a Windows Terminal window per command. When pi-ui's Bun host is the process that makes
+  that `node-pty` call, the child exits immediately with code `-1073741510`
+  (`STATUS_CONTROL_C_EXIT`, an unhandled Ctrl+C/Break) before producing any output, so every
+  Windows `/bg` command fails. This is a Bun/node-pty ConPTY incompatibility, not a pi-ui
+  regression, and pi-ui itself never calls node-pty — only this extension does, in-process — so
+  there is no generic, safe fix pi-ui can apply to how it launches its own process.
+
+    Isolated with a minimal, standalone repro against the extension's own node-pty build, varying
+    only one thing at a time:
+    - Bun parent + ConPTY (`useConpty: true`), any child (`cmd.exe`, or `bun.exe` itself as the
+      child) — the child dies immediately with `STATUS_CONTROL_C_EXIT`, before emitting anything
+      beyond ConPTY's own initial VT handshake bytes. Reproduces identically under `bun run` and
+      under a `bun build --compile`'d executable, so it is not a dev-mode-only quirk.
+    - Node parent, same machine, same node-pty build, same non-console shell, same ConPTY backend,
+      same children (including `bun.exe` as the ConPTY-attached child) — works, exit `0`, real
+      output captured.
+    - Bun parent + node-pty's older winpty backend (`useConpty: false`) — works, exit `0`, real
+      output captured, under both `bun run` and the compiled executable.
+
+    Every case above has the same lack of an attached Win32 console (`process.stdout.isTTY` and
+    `process.stdin.isTTY` are `undefined` throughout), which rules out "no attached console" as the
+    cause: winpty needs no console either, and it works fine under Bun in the exact same shell.
+    Swapping which end is Bun (a Node parent spawning `bun.exe` as its ConPTY-attached child)
+    succeeds, which further isolates the failure to Bun specifically being the _parent_ process that
+    calls node-pty's native `startProcess()` — not to Bun appearing anywhere in the process tree.
+
+    A verified, unapplied patch for the extension exists (falling back to `useConpty: false` only
+    when hosted under Bun, leaving a real Node-hosted `pi` CLI's own ConPTY path untouched) for
+    anyone maintaining that extension to review and apply to their own `~/.pi/agent` at their
+    discretion; it lives outside this repository, alongside the rest of this investigation's
+    scratch work, and pi-ui does not apply it itself. A durable, in-scope fix would host node-pty in
+    a small Node subprocess pi-ui launches once and talks to over a pipe, but that is a meaningfully
+    larger change than this round covers and is left for a future round.
+
 ## mobile and Capacitor wrapping
 
 pi-ui's shell is built to drop into a Capacitor WebView with no code changes:

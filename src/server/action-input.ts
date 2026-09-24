@@ -107,6 +107,20 @@ export function nonnegativeIntegerField(signals: ActionSignals, field: string): 
 	return value;
 }
 
+/** Like {@link nonnegativeIntegerField}, but a missing/`null` field is `undefined`
+ * rather than a validation error — for an optional hint a caller may not send. */
+export function optionalNonnegativeIntegerField(
+	signals: ActionSignals,
+	field: string,
+): number | undefined {
+	const value = signals[field];
+	if (value === undefined || value === null) return undefined;
+	if (!nonnegativeIntegerValidator.Check(value)) {
+		throw new ActionInputError(`Invalid ${field}.`);
+	}
+	return value;
+}
+
 export function enumField<const T extends readonly string[]>(
 	signals: ActionSignals,
 	field: string,

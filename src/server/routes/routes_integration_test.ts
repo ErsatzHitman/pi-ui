@@ -935,6 +935,46 @@ test("an invalid color scheme value is rejected", async () => {
 	assertEquals(context.store.clientColorScheme, "dark");
 });
 
+test("the client's reported viewport carries the optional prompt-column and overlay-percent hints", async () => {
+	const context = fakeContext();
+	const router = createRouter(context);
+	assertEquals(context.store.clientViewportCells, undefined);
+
+	const response = await router.fetch(
+		signalRequest(endpoints.terminalViewport, {
+			cols: 158,
+			rows: 43,
+			promptCols: 92,
+			overlayPercentCols: 150,
+		}),
+	);
+
+	assertEquals(response.status, 204);
+	assertEquals(context.store.clientViewportCells, {
+		columns: 158,
+		rows: 43,
+		promptColumns: 92,
+		overlayPercentColumns: 150,
+	});
+});
+
+test("the client's reported viewport tolerates missing prompt-column and overlay-percent hints", async () => {
+	const context = fakeContext();
+	const router = createRouter(context);
+
+	const response = await router.fetch(
+		signalRequest(endpoints.terminalViewport, { cols: 100, rows: 30 }),
+	);
+
+	assertEquals(response.status, 204);
+	assertEquals(context.store.clientViewportCells, {
+		columns: 100,
+		rows: 30,
+		promptColumns: undefined,
+		overlayPercentColumns: undefined,
+	});
+});
+
 test("terminal surface input routes a raw byte sequence to the active runtime", async () => {
 	let received: { surfaceId: string; data: string } | undefined;
 	const host = fakeHost({
@@ -1011,6 +1051,51 @@ test("terminal surface resize forwards the client-measured grid to the active ru
 
 	assertEquals(response.status, 204);
 	assertEquals(received, { surfaceId: "overlay-1", cols: 80, rows: 24 });
+});
+
+test("terminal surface resize forwards the reporting client's id", async () => {
+	let receivedClientId: string | undefined;
+	const clientId = crypto.randomUUID();
+	const host = fakeHost({
+		resizeTerminalSurface: (_surfaceId, _cols, _rows, thisClientId) => {
+			receivedClientId = thisClientId;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest(endpoints.terminalSurfaceResize, {
+			surfaceId: "widget-1",
+			cols: 80,
+			rows: 24,
+			clientId,
+		}),
+	);
+
+	assertEquals(response.status, 204);
+	assertEquals(receivedClientId, clientId);
+});
+
+test("terminal surface resize rejects a malformed client id without reaching the runtime", async () => {
+	let called = false;
+	const host = fakeHost({
+		resizeTerminalSurface: () => {
+			called = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest(endpoints.terminalSurfaceResize, {
+			surfaceId: "widget-1",
+			cols: 80,
+			rows: 24,
+			clientId: "not-a-uuid",
+		}),
+	);
+
+	assertEquals(response.status, 400);
+	assertEquals(called, false);
 });
 
 test("terminal surface resize rejects a negative grid size without reaching the runtime", async () => {
@@ -1523,6 +1608,7 @@ function fakeHost(overrides: Partial<RuntimeResource> = {}): RuntimeResource {
 		deleteSession: async () => true,
 		dispatchExtensionUiAction: async () => true,
 		dispose: async () => {},
+		forgetTerminalSurfaceClient: () => {},
 		forkSessionToWorkspace: async () => ({ status: "success" }),
 		getArgumentCompletions: async () => [],
 		getWorkspacePath: () => process.cwd(),

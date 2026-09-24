@@ -190,6 +190,70 @@ function measureCell() {
 	return { width, height };
 }
 
+/**
+ * The `#prompt-box` column's own available width, in cells (R7-B item 2): closer to a
+ * prompt-column surface's (inline/widget/footer/header) true first-frame size than the whole
+ * browser viewport ever was — the prompt column's own padding/gutters aren't a fixed fraction of
+ * the viewport, so on a phone that gap alone was a further ~150ms of first-paint overflow after
+ * the Round 6 fix (see `r6-audit.md`'s open item, and `TerminalSurfaceController`'s use of this
+ * hint). `undefined` before `#prompt-box` exists in the DOM (there is no column to measure yet).
+ */
+export function measurePromptColumnCells(cell) {
+	const box = document.getElementById("prompt-box");
+	if (!box) return undefined;
+	const width = box.clientWidth - inlinePadding(box);
+	if (!(width > 0)) return undefined;
+	return Math.max(20, Math.floor(width / cell.width));
+}
+
+/**
+ * An off-screen replica of a percentage-width overlay's dialog chrome (R7-B item 3): the same
+ * `.dialog.terminal-surface-dialog > .terminal-surface-dialog-content > .terminal-surface-grid >
+ * .terminal-surface-body` nesting `renderTerminalSurfaceDialog` renders, positioned out of flow
+ * so nothing sees it. Its own border/padding sum (`measureOverlayChrome`) is CSS-fixed, not
+ * proportional to how wide the box currently is (the same assumption
+ * `percentOverlayAvailableWidth` below relies on for a *live* dialog), so this needs no live
+ * overlay to answer the same question one would once its own resize report lands.
+ */
+let overlayChromeProbe;
+function ensureOverlayChromeProbe() {
+	if (overlayChromeProbe?.dialog.isConnected) return overlayChromeProbe;
+	// Best-effort, like every other probe/report in this module: a DOM too minimal to build
+	// this (a test's fake `document`, an exotic embed) just means `measureOverlayChrome` falls
+	// back to 0 — the same "no chrome known yet" answer this hint gave before R7-B.
+	try {
+		const dialog = document.createElement("div");
+		dialog.className = "dialog terminal-surface-dialog terminal-surface-probe";
+		dialog.setAttribute("aria-hidden", "true");
+		dialog.style.cssText =
+			"position:absolute;visibility:hidden;left:-9999px;top:-9999px;margin:0;";
+		const content = document.createElement("div");
+		content.className = "terminal-surface-dialog-content";
+		const grid = document.createElement("div");
+		grid.className = "terminal-surface-grid";
+		const body = document.createElement("pre");
+		body.className = "terminal-surface-body";
+		grid.appendChild(body);
+		content.appendChild(grid);
+		dialog.appendChild(content);
+		document.body.appendChild(dialog);
+		overlayChromeProbe = { dialog, content, body };
+	} catch {
+		overlayChromeProbe = undefined;
+	}
+	return overlayChromeProbe;
+}
+
+/** The fixed horizontal chrome `percentOverlayAvailableWidth` subtracts from the viewport for a
+ * *live* percentage overlay, measured up front from the probe above instead. */
+function measureOverlayChrome() {
+	const probe = ensureOverlayChromeProbe();
+	if (!probe) return 0;
+	const bodyAvailable = probe.body.clientWidth - inlinePadding(probe.body);
+	const chrome = probe.content.getBoundingClientRect().width - bodyAvailable;
+	return Number.isFinite(chrome) && chrome > 0 ? chrome : 0;
+}
+
 let viewportReportTimer;
 
 /**
@@ -204,6 +268,12 @@ let viewportReportTimer;
  * `display-refresh.js`'s identical pattern, so `page.tsx`'s `data-on:pi-ui-terminal-viewport`
  * handler (on `<body>`, no `__window` modifier) can embed the server-rendered per-tab client id
  * a plain JS module has no other way to reach.
+ *
+ * R7-B items 2 & 3: alongside the whole-viewport `cols`/`rows`, also reports this tab's actually
+ * measured `#prompt-box` width (`promptCols`) and the width a percentage-width overlay will
+ * resolve against once a real dialog's chrome is subtracted (`overlayPercentCols`) — both closer
+ * approximations `TerminalSurfaceController` prefers over the raw viewport hint when a client
+ * sends them (see that module's `#create`).
  */
 function reportViewportCells() {
 	const cell = measureCell();
@@ -216,9 +286,18 @@ function reportViewportCells() {
 		3,
 		Math.floor(document.documentElement.clientHeight / cell.height),
 	);
+	const promptCols = measurePromptColumnCells(cell);
+	const overlayPercentCols = Math.max(
+		20,
+		Math.floor(
+			(document.documentElement.clientWidth - measureOverlayChrome()) / cell.width,
+		),
+	);
 	try {
 		document.body.dispatchEvent(
-			new CustomEvent("pi-ui-terminal-viewport", { detail: { cols, rows } }),
+			new CustomEvent("pi-ui-terminal-viewport", {
+				detail: { cols, rows, promptCols, overlayPercentCols },
+			}),
 		);
 	} catch {
 		// Best-effort, same as postJson below: a `document.body` that cannot
@@ -346,7 +425,16 @@ function sendResize(surfaceId, grid) {
 		grid.dataset.terminalSurfacePercentWidth === "true"
 			? percentOverlayReport(surfaceId, { cols, rows }, previousCols, previousRows)
 			: { cols, rows };
-	if (size) postJson(endpoints.terminalSurfaceResize, { surfaceId, ...size });
+	if (size) {
+		// R7-B item 1: which tab this report is from, so a non-overlay surface (an overlay
+		// ignores it server-side — see `TerminalSurfaceController.resize`) can be sized at the
+		// narrowest of every tab currently displaying it instead of whichever last reported.
+		postJson(endpoints.terminalSurfaceResize, {
+			surfaceId,
+			...size,
+			clientId: document.body?.dataset?.displayClientId,
+		});
+	}
 }
 
 /** The size each percentage-width overlay was last reported at by THIS tab. */

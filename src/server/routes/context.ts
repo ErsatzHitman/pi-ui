@@ -16,6 +16,7 @@ export type RouteRuntime = Pick<
 	| "cycleThinkingLevel"
 	| "deleteSession"
 	| "dispatchExtensionUiAction"
+	| "forgetTerminalSurfaceClient"
 	| "forkSessionToWorkspace"
 	| "getArgumentCompletions"
 	| "getWorkspacePath"

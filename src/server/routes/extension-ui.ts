@@ -1,4 +1,7 @@
-import { clampTerminalSize } from "../../agent/terminal-surface/headless-terminal.ts";
+import {
+	clampTerminalSize,
+	maxTerminalColumns,
+} from "../../agent/terminal-surface/headless-terminal.ts";
 import type { JsonValue } from "../../utils/json-types.ts";
 import {
 	ActionInputError,
@@ -6,6 +9,7 @@ import {
 	enumField,
 	jsonSizeField,
 	nonnegativeIntegerField,
+	optionalNonnegativeIntegerField,
 	optionalString,
 	readActionSignals,
 	requiredString,
@@ -133,7 +137,20 @@ export const extensionUiRoutes = {
 				columns: nonnegativeIntegerField(signals, "cols"),
 				rows: nonnegativeIntegerField(signals, "rows"),
 			});
-			context.store.setClientViewportCells(size.columns, size.rows, clientId);
+			// R7-B items 2 & 3: the client's own measured `#prompt-box` width and, for a
+			// percentage-width overlay, the width its `N%` will resolve against once a real
+			// dialog's chrome is subtracted — both optional (an older client, or a report sent
+			// before `#prompt-box` exists) and clamped the same way `cols`/`rows` are.
+			const promptColumns = clampReportedColumns(
+				optionalNonnegativeIntegerField(signals, "promptCols"),
+			);
+			const overlayPercentColumns = clampReportedColumns(
+				optionalNonnegativeIntegerField(signals, "overlayPercentCols"),
+			);
+			context.store.setClientViewportCells(
+				{ ...size, promptColumns, overlayPercentColumns },
+				clientId,
+			);
 			return datastarResponse();
 		},
 	},
@@ -179,12 +196,26 @@ export const extensionUiRoutes = {
 	[endpoints.terminalSurfaceResize]: {
 		POST: async (request, context) => {
 			const signals = await readActionSignals(request);
+			const clientId = optionalString(signals, "clientId");
+			if (clientId !== undefined && !isDisplayClientId(clientId)) {
+				throw new ActionInputError("Invalid clientId.");
+			}
 			requireHost(context).resizeTerminalSurface(
 				requiredString(signals, "surfaceId", { maxLength: maxElementIdLength }),
 				nonnegativeIntegerField(signals, "cols"),
 				nonnegativeIntegerField(signals, "rows"),
+				clientId,
 			);
 			return datastarResponse();
 		},
 	},
 } satisfies RouteMap<RouteContext>;
+
+/**
+ * Clamps an optional client-reported column hint the same way `clampTerminalSize` clamps
+ * `cols`/`rows` — an untrusted client could report anything, and this feeds
+ * `TerminalSurfaceController`'s `viewportHint`, not a validated surface size of its own.
+ */
+function clampReportedColumns(value: number | undefined): number | undefined {
+	return value === undefined ? undefined : Math.min(maxTerminalColumns, value);
+}
