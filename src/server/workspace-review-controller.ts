@@ -3,6 +3,7 @@ import os from "node:os";
 import * as path from "node:path";
 
 import type { AppStore } from "../state/app-store.ts";
+import { readWorkspaceGitGraph } from "./workspace-git-graph.ts";
 import {
 	areWorkspacePathsIgnored,
 	findGitWatchPaths,
@@ -50,8 +51,14 @@ export class WorkspaceReviewController {
 			try {
 				do {
 					refreshAgain = false;
-					const snapshot = await readWorkspaceReview(path, metadataCache);
-					if (active()) this.store.setWorkspaceReview(snapshot);
+					const [snapshot, graphSnapshot] = await Promise.all([
+						readWorkspaceReview(path, metadataCache),
+						readWorkspaceGitGraph(path),
+					]);
+					if (active()) {
+						this.store.setWorkspaceReview(snapshot);
+						this.store.setWorkspaceGitGraph(graphSnapshot);
+					}
 				} while (refreshAgain && active());
 			} finally {
 				refreshing = false;
