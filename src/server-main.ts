@@ -3,7 +3,11 @@ import { basename, join } from "node:path";
 
 import { importLoginShellEnvironment } from "./login-shell-environment.ts";
 import { resolveRemoteMode, setRemoteMode } from "./remote-mode.ts";
-import { disableServerAutostart, enableServerAutostart } from "./server-autostart.ts";
+import {
+	disableServerAutostart,
+	enableServerAutostart,
+	serverAutostartConfig,
+} from "./server-autostart.ts";
 import { isLoopbackHostname, parseServerOptions, serverUsage } from "./server-options.ts";
 import { withAuthToken } from "./server/request-auth.ts";
 import { isVersionRequest, version } from "./version.ts";
@@ -68,18 +72,38 @@ async function main(): Promise<void> {
 	} else if (args[0] === "service" || args[0] === "autostart") {
 		const installAction = args[0] === "service" ? "install" : "enable";
 		const uninstallAction = args[0] === "service" ? "uninstall" : "disable";
-		if (
-			args.length !== 2 ||
-			(args[1] !== installAction && args[1] !== uninstallAction)
-		) {
-			throw new Error("usage: pi-ui service install|uninstall");
-		}
+		const rest = args.slice(2);
 		if (args[1] === installAction) {
-			await enableServerAutostart();
+			// On a headless Linux host (a VPS or a laptop reached over SSH, no desktop
+			// session), `service install` also accepts the usual --host/--port/--remote/
+			// --auth-token flags to persist for the service, plus --headless to force
+			// headless detection when the installing shell happens to have a $DISPLAY.
+			const headlessIndex = rest.indexOf("--headless");
+			const headless = headlessIndex !== -1;
+			if (headless) rest.splice(headlessIndex, 1);
+			const options = parseServerOptions(rest, {
+				host: process.env.PI_UI_HOST,
+				port: process.env.PI_UI_PORT,
+				authToken: process.env.PI_UI_AUTH_TOKEN,
+				remote: process.env.PI_UI_REMOTE,
+			});
+			await enableServerAutostart(
+				serverAutostartConfig(undefined, undefined, {
+					headless,
+					serviceEnvironment: {
+						hostname: options.hostname,
+						port: options.port,
+						remote: options.remote,
+						authToken: options.authToken,
+					},
+				}),
+			);
 			console.log("pi-ui service installed and started");
-		} else {
+		} else if (args[1] === uninstallAction && rest.length === 0) {
 			await disableServerAutostart();
 			console.log("pi-ui service stopped and uninstalled");
+		} else {
+			throw new Error("usage: pi-ui service install|uninstall");
 		}
 	} else {
 		await importLoginShellEnvironment();

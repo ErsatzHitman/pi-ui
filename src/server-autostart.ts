@@ -1,7 +1,8 @@
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 
+import { isLoopbackHostname } from "./server-options.ts";
 import { outputCommand } from "./utils/command.ts";
 import { isNotFound } from "./utils/fs-errors.ts";
 import { operatingSystem } from "./utils/platform.ts";
@@ -14,6 +15,20 @@ const windowsRunKey = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 
 export type ServerAutostartPlatform = "linux" | "darwin" | "windows";
 
+/**
+ * Values a headless (VPS / remote-laptop) service install persists so `--host`,
+ * `--port`, `--remote`, and `--auth-token` survive across restarts and reboots without
+ * ever appearing on the `ExecStart` command line (visible to any local user via `ps`).
+ * Written to a 0600 systemd `EnvironmentFile`; picked up by `server-main.ts` exactly like
+ * the `PI_UI_*` environment variables it already reads.
+ */
+export type ServerAutostartServiceEnvironment = {
+	hostname?: string;
+	port?: number;
+	remote?: boolean;
+	authToken?: string;
+};
+
 export type ServerAutostartConfig = {
 	platform: ServerAutostartPlatform;
 	executable: string;
@@ -21,6 +36,14 @@ export type ServerAutostartConfig = {
 	home: string;
 	uid?: number;
 	transient?: boolean;
+	/** Linux only: no graphical session to wait for — see `resolveHeadless`. */
+	headless?: boolean;
+	serviceEnvironment?: ServerAutostartServiceEnvironment;
+};
+
+export type ServerAutostartOverrides = {
+	headless?: boolean;
+	serviceEnvironment?: ServerAutostartServiceEnvironment;
 };
 
 type ServerRuntime = Readonly<{
@@ -29,9 +52,29 @@ type ServerRuntime = Readonly<{
 	standalone: boolean;
 }>;
 
+/**
+ * A Linux service install is headless — no desktop session will ever start it — when
+ * `--headless` was passed explicitly, when `--remote` or a non-loopback `--host` was
+ * passed (a VPS has no desktop either way), or, absent all of that, when the installing
+ * process itself has no `$DISPLAY`/`$WAYLAND_DISPLAY` (an SSH session on a VPS).
+ */
+export function resolveHeadless(
+	overrides: ServerAutostartOverrides,
+	environment: Record<string, string | undefined> = process.env,
+): boolean {
+	if (overrides.headless) return true;
+	const service = overrides.serviceEnvironment;
+	if (service?.remote) return true;
+	if (service?.hostname !== undefined && !isLoopbackHostname(service.hostname)) {
+		return true;
+	}
+	return !environment.DISPLAY && !environment.WAYLAND_DISPLAY;
+}
+
 export function serverAutostartConfig(
 	platform = operatingSystem,
 	runtime: ServerRuntime = currentServerRuntime(),
+	overrides: ServerAutostartOverrides = {},
 ): ServerAutostartConfig {
 	if (platform !== "linux" && platform !== "darwin" && platform !== "windows") {
 		throw new Error(`server autostart is not supported on ${platform}`);
@@ -49,6 +92,9 @@ export function serverAutostartConfig(
 		home,
 		uid: platform === "darwin" ? process.getuid?.() : undefined,
 		transient: script ? isBunxPath(script) : false,
+		headless: platform === "linux" ? resolveHeadless(overrides) : false,
+		serviceEnvironment:
+			platform === "linux" ? overrides.serviceEnvironment : undefined,
 	};
 }
 
@@ -93,18 +139,23 @@ export async function disableServerAutostart(
 }
 
 export function systemdService(config: ServerAutostartConfig): string {
+	const headless = config.headless === true;
+	const unitDependencies = headless
+		? ""
+		: "After=graphical-session.target\nPartOf=graphical-session.target\n";
+	const environmentFile = hasServiceEnvironment(config.serviceEnvironment)
+		? `EnvironmentFile=-${systemdEnvironmentPath(config)}\n`
+		: "";
 	return `[Unit]
 Description=pi-ui server
-After=graphical-session.target
-PartOf=graphical-session.target
-
+${unitDependencies}
 [Service]
-ExecStart=${serverCommand(config).map(systemdArgument).join(" ")}
+${environmentFile}ExecStart=${serverCommand(config).map(systemdArgument).join(" ")}
 Restart=on-failure
 RestartSec=2
 
 [Install]
-WantedBy=graphical-session.target
+WantedBy=${headless ? "default.target" : "graphical-session.target"}
 `;
 }
 
@@ -149,11 +200,19 @@ export function windowsRunCommand(config: ServerAutostartConfig): string {
 
 async function enableSystemdService(config: ServerAutostartConfig): Promise<void> {
 	await disableSystemdService(config, legacyServiceName);
+	await writeSystemdServiceEnvironment(config);
 	const path = systemdServicePath(config, serviceName);
 	await writeConfig(path, systemdService(config));
 	await command("systemctl", ["--user", "daemon-reload"]);
 	await command("systemctl", ["--user", "reenable", `${serviceName}.service`]);
 	await command("systemctl", ["--user", "restart", `${serviceName}.service`]);
+	if (config.headless) {
+		console.log(
+			"pi-ui has no desktop session on this host, so its service targets " +
+				"default.target instead of waiting for one. Keep it running after you log " +
+				"out: loginctl enable-linger $USER",
+		);
+	}
 }
 
 async function disableSystemdService(
@@ -162,6 +221,59 @@ async function disableSystemdService(
 ): Promise<void> {
 	await command("systemctl", ["--user", "disable", "--now", `${name}.service`], true);
 	await removeIfPresent(systemdServicePath(config, name));
+	if (name === serviceName) await removeIfPresent(systemdEnvironmentPath(config));
+}
+
+/**
+ * Writes (0600) or removes the `EnvironmentFile` a headless service's unit references,
+ * holding `PI_UI_HOST`/`PI_UI_PORT`/`PI_UI_REMOTE`/`PI_UI_AUTH_TOKEN` — never the
+ * `ExecStart` line, which any local user can read via `ps`. Exported so a caller (or a
+ * test) can persist it without going through `systemctl`.
+ */
+export async function writeSystemdServiceEnvironment(
+	config: ServerAutostartConfig,
+): Promise<string> {
+	const path = systemdEnvironmentPath(config);
+	if (hasServiceEnvironment(config.serviceEnvironment)) {
+		await writeConfig(
+			path,
+			systemdEnvironmentFileContents(config.serviceEnvironment),
+		);
+		await chmod(path, 0o600);
+	} else {
+		await removeIfPresent(path);
+	}
+	return path;
+}
+
+function hasServiceEnvironment(
+	environment: ServerAutostartServiceEnvironment | undefined,
+): environment is ServerAutostartServiceEnvironment {
+	return (
+		environment !== undefined &&
+		(environment.hostname !== undefined ||
+			environment.port !== undefined ||
+			environment.remote !== undefined ||
+			environment.authToken !== undefined)
+	);
+}
+
+function systemdEnvironmentPath(config: ServerAutostartConfig): string {
+	return `${config.home}/.config/pi-ui/${serviceName}.env`;
+}
+
+function systemdEnvironmentFileContents(
+	environment: ServerAutostartServiceEnvironment,
+): string {
+	const lines: string[] = [];
+	if (environment.hostname !== undefined)
+		lines.push(`PI_UI_HOST=${environment.hostname}`);
+	if (environment.port !== undefined) lines.push(`PI_UI_PORT=${environment.port}`);
+	if (environment.remote) lines.push("PI_UI_REMOTE=1");
+	if (environment.authToken !== undefined) {
+		lines.push(`PI_UI_AUTH_TOKEN=${environment.authToken}`);
+	}
+	return `${lines.join("\n")}\n`;
 }
 
 async function enableLaunchAgent(config: ServerAutostartConfig): Promise<void> {

@@ -1,4 +1,5 @@
 import { test } from "bun:test";
+import { stat } from "node:fs/promises";
 
 import {
 	assertEquals,
@@ -6,13 +7,16 @@ import {
 	assertRejects,
 	assertStringIncludes,
 } from "#testing/assertions";
+import { makeTempDir } from "#testing/temp";
 
 import {
 	enableServerAutostart,
 	launchAgent,
+	resolveHeadless,
 	serverAutostartConfig,
 	systemdService,
 	windowsRunCommand,
+	writeSystemdServiceEnvironment,
 } from "./server-autostart.ts";
 
 test("systemd service starts the current server executable", () => {
@@ -93,6 +97,140 @@ test("autostart runs a global bun package through its runtime", () => {
 		"/home/test/.bun/install/global/node_modules/@hyperpuncher/pi-ui/dist/npm/server-main.js",
 	]);
 	assertFalse(config.transient);
+});
+
+test("systemd service on a headless host targets default.target, not a graphical session", () => {
+	const service = systemdService({
+		platform: "linux",
+		executable: "/usr/bin/pi-ui",
+		args: [],
+		home: "/home/test",
+		headless: true,
+	});
+
+	assertStringIncludes(service, "WantedBy=default.target");
+	assertFalse(service.includes("graphical-session.target"));
+});
+
+test("systemd service references an EnvironmentFile for host/port/remote/token, never ExecStart", () => {
+	const service = systemdService({
+		platform: "linux",
+		executable: "/usr/bin/pi-ui",
+		args: [],
+		home: "/home/test",
+		headless: true,
+		serviceEnvironment: {
+			hostname: "0.0.0.0",
+			port: 31415,
+			remote: true,
+			authToken: "super-secret",
+		},
+	});
+
+	assertStringIncludes(service, "EnvironmentFile=-/home/test/.config/pi-ui/pi-ui.env");
+	assertFalse(service.includes("super-secret"));
+});
+
+test("systemd service omits EnvironmentFile when no host/port/remote/token is persisted", () => {
+	const service = systemdService({
+		platform: "linux",
+		executable: "/usr/bin/pi-ui",
+		args: [],
+		home: "/home/test",
+	});
+
+	assertFalse(service.includes("EnvironmentFile"));
+});
+
+test("resolveHeadless detects a headless linux host from the display environment", () => {
+	assertEquals(resolveHeadless({}, {}), true);
+	assertEquals(resolveHeadless({}, { DISPLAY: ":0" }), false);
+	assertEquals(resolveHeadless({}, { WAYLAND_DISPLAY: "wayland-0" }), false);
+});
+
+test("resolveHeadless is forced by --headless or remote options regardless of the display", () => {
+	assertEquals(resolveHeadless({ headless: true }, { DISPLAY: ":0" }), true);
+	assertEquals(
+		resolveHeadless({ serviceEnvironment: { remote: true } }, { DISPLAY: ":0" }),
+		true,
+	);
+	assertEquals(
+		resolveHeadless(
+			{ serviceEnvironment: { hostname: "0.0.0.0" } },
+			{ DISPLAY: ":0" },
+		),
+		true,
+	);
+	assertEquals(
+		resolveHeadless(
+			{ serviceEnvironment: { hostname: "127.0.0.1" } },
+			{ DISPLAY: ":0" },
+		),
+		false,
+	);
+});
+
+test("serverAutostartConfig resolves headless from overrides on linux only", () => {
+	const linux = serverAutostartConfig(
+		"linux",
+		{ executable: "/usr/bin/pi-ui", standalone: true },
+		{ headless: true },
+	);
+	assertEquals(linux.headless, true);
+
+	const darwin = serverAutostartConfig(
+		"darwin",
+		{ executable: "/usr/bin/pi-ui", standalone: true },
+		{ headless: true },
+	);
+	assertEquals(darwin.headless, false);
+	assertEquals(darwin.serviceEnvironment, undefined);
+});
+
+test("writeSystemdServiceEnvironment writes a 0600 file with the persisted options", async () => {
+	const home = await makeTempDir();
+	const config = serverAutostartConfig(
+		"linux",
+		{ executable: "/usr/bin/pi-ui", standalone: true },
+		{
+			serviceEnvironment: {
+				hostname: "0.0.0.0",
+				port: 31415,
+				remote: true,
+				authToken: "tok",
+			},
+		},
+	);
+
+	const path = await writeSystemdServiceEnvironment({ ...config, home });
+
+	const contents = await Bun.file(path).text();
+	assertStringIncludes(contents, "PI_UI_HOST=0.0.0.0");
+	assertStringIncludes(contents, "PI_UI_PORT=31415");
+	assertStringIncludes(contents, "PI_UI_REMOTE=1");
+	assertStringIncludes(contents, "PI_UI_AUTH_TOKEN=tok");
+	if (process.platform !== "win32") {
+		const mode = (await stat(path)).mode & 0o777;
+		assertEquals(mode, 0o600);
+	}
+});
+
+test("writeSystemdServiceEnvironment removes a stale file when nothing is persisted", async () => {
+	const home = await makeTempDir();
+	const withEnvironment = {
+		...serverAutostartConfig("linux", {
+			executable: "/usr/bin/pi-ui",
+			standalone: true,
+		}),
+		home,
+		serviceEnvironment: { hostname: "0.0.0.0" },
+	};
+	const path = await writeSystemdServiceEnvironment(withEnvironment);
+	assertEquals(await Bun.file(path).exists(), true);
+
+	const withoutEnvironment = { ...withEnvironment, serviceEnvironment: undefined };
+	await writeSystemdServiceEnvironment(withoutEnvironment);
+	assertEquals(await Bun.file(path).exists(), false);
 });
 
 test("autostart rejects a transient bunx package", async () => {
