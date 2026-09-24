@@ -19,11 +19,19 @@ export const streamRoutes = {
 					},
 				});
 			}
-			return context.renderer.createStream(request.signal, clientId, () => {
-				// The current host at disconnect time, whichever `RuntimeController` that is —
-				// see `UiRenderer.createStream`'s doc comment on this parameter.
-				context.resources.host?.forgetTerminalSurfaceClient(clientId);
-			});
+			return context.renderer.createStream(
+				request.signal,
+				clientId,
+				() => {
+					// The current host at disconnect time, whichever `RuntimeController` that
+					// is — see `UiRenderer.createStream`'s doc comment on this parameter.
+					context.resources.host?.forgetTerminalSurfaceClient(clientId);
+				},
+				// Datastar's own fetch-based `@get` reconnect logic tracks and resends this
+				// automatically (see `DatastarClientHub`'s `lastEventId` doc comment) — round
+				// RM2 sse-resume.
+				request.headers.get("Last-Event-ID"),
+			);
 		},
 	},
 } satisfies RouteMap<RouteContext>;

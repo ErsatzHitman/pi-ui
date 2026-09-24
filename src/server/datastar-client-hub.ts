@@ -8,7 +8,38 @@ export type DatastarClient = Pick<
 export type DatastarStreamFactory = typeof datastarStream;
 export type DatastarClientStreamOptions = {
 	onDisconnect?: () => void;
+	/**
+	 * The `Last-Event-ID` a reconnecting client sent (see `routes/stream.ts`). When it
+	 * still names a broadcast this hub can replay, `createStream` sends only the missed
+	 * patches instead of the caller's full `initial()` view — see the "sse-resume" doc
+	 * comment on `resumeSince` below.
+	 */
+	lastEventId?: string | null;
 };
+
+type BroadcastElementsOptions = {
+	selector?: string;
+	mode?: "outer" | "replace" | "append" | "after" | "remove";
+};
+
+type BroadcastEntry =
+	| { kind: "elements"; elements: string; options?: BroadcastElementsOptions }
+	| { kind: "signals"; signals: string }
+	| { kind: "script"; script: string };
+
+/**
+ * One SSE frame this hub has broadcast to every connected client, kept around so a
+ * reconnecting client can be caught back up without a full `renderView()`. `seq` is this
+ * hub's own monotonically increasing counter; `eventId` (`<epochId>:<seq>`, sent as the SSE
+ * `id:` line) is what a reconnecting browser echoes back as `Last-Event-ID` — see
+ * `resumeSince`.
+ */
+type BroadcastRecord = BroadcastEntry & { seq: number; eventId: string };
+
+/** Bounds how much broadcast history `resumeSince` can ever replay, by entry count. */
+const defaultMaxRingBufferEntries = 512;
+/** Bounds the same history by approximate content size (elements/signals/script chars). */
+const defaultMaxRingBufferBytes = 2_000_000;
 
 /**
  * Default interval between empty signal-patch heartbeats sent to every connected
@@ -25,6 +56,20 @@ export class DatastarClientHub {
 	private readonly clients = new Map<string, DatastarClient>();
 	private readonly disconnectCallbacks = new Map<string, () => void>();
 	private readonly heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+	/**
+	 * Identifies this hub's current unbroken run of connected clients (round RM2
+	 * sse-resume). Regenerated in `disconnect` the moment `clients` drops to 0, which
+	 * invalidates every previously issued `eventId`: once no client is connected the
+	 * broadcast methods below (guarded by their callers' `clientCount > 0` checks, e.g.
+	 * `UiRenderer.flush`) simply stop being called, so nothing is recorded for whatever the
+	 * app state does next — an old `Last-Event-ID` from before the gap names a point a
+	 * fresh render, not a replay, must resolve from. A resume is only ever valid across a
+	 * connection blip where at least one other client kept the broadcast stream live.
+	 */
+	private epochId = crypto.randomUUID();
+	private sequence = 0;
+	private readonly ringBuffer: BroadcastRecord[] = [];
+	private ringBufferBytes = 0;
 
 	constructor(
 		private readonly streamFactory: DatastarStreamFactory = datastarStream,
@@ -34,6 +79,8 @@ export class DatastarClientHub {
 			callback: () => void,
 			intervalMs: number,
 		) => ReturnType<typeof setInterval> = setInterval,
+		private readonly maxRingBufferEntries: number = defaultMaxRingBufferEntries,
+		private readonly maxRingBufferBytes: number = defaultMaxRingBufferBytes,
 	) {
 		if (heartbeatIntervalMs <= 0) return;
 		this.heartbeatTimer = scheduleInterval(
@@ -66,13 +113,18 @@ export class DatastarClientHub {
 					this.disconnectCallbacks.set(id, options.onDisconnect);
 				}
 				try {
-					const view = initial();
-					this.patchClient(
-						stream,
-						view.elements,
-						view.signals,
-						view.scripts ?? [],
-					);
+					const resume = this.resumeSince(options.lastEventId);
+					if (resume) {
+						this.replay(stream, resume);
+					} else {
+						const view = initial();
+						this.patchClient(
+							stream,
+							view.elements,
+							view.signals,
+							view.scripts ?? [],
+						);
+					}
 				} catch {
 					this.disconnect(id, stream);
 					return;
@@ -89,9 +141,22 @@ export class DatastarClientHub {
 	}
 
 	patchView(elements: string, signals: string, scripts: readonly string[]): void {
+		const elementsId = elements
+			? this.recordBroadcast({ kind: "elements", elements }).eventId
+			: undefined;
+		const signalsId = this.recordBroadcast({ kind: "signals", signals }).eventId;
+		const scriptId =
+			scripts.length > 0
+				? this.recordBroadcast({ kind: "script", script: scripts.join(";") })
+						.eventId
+				: undefined;
 		for (const [id, client] of this.clients) {
 			try {
-				this.patchClient(client, elements, signals, scripts);
+				this.patchClient(client, elements, signals, scripts, {
+					elements: elementsId,
+					signals: signalsId,
+					script: scriptId,
+				});
 			} catch {
 				this.disconnect(id, client);
 			}
@@ -106,13 +171,27 @@ export class DatastarClientHub {
 			scripts?: readonly string[];
 		} = {},
 	): void {
+		const mode = options.mode ?? "outer";
+		const elementsRecord = this.recordBroadcast({
+			kind: "elements",
+			elements,
+			options: { selector, mode },
+		});
+		const scriptRecords = (options.scripts ?? []).map((script) =>
+			this.recordBroadcast({ kind: "script", script }),
+		);
 		for (const [id, client] of this.clients) {
 			try {
 				client.patchElements(elements, {
 					selector,
-					mode: options.mode ?? "outer",
+					mode,
+					eventId: elementsRecord.eventId,
 				});
-				for (const script of options.scripts ?? []) client.executeScript(script);
+				for (const scriptRecord of scriptRecords) {
+					client.executeScript(scriptRecord.script, {
+						eventId: scriptRecord.eventId,
+					});
+				}
 				if (this.recordPerformance) {
 					sessionPerformance.recordTargetedMessagePatch(elements);
 				}
@@ -123,9 +202,18 @@ export class DatastarClientHub {
 	}
 
 	replaceElement(elements: string, selector: string): void {
+		const record = this.recordBroadcast({
+			kind: "elements",
+			elements,
+			options: { selector, mode: "replace" },
+		});
 		for (const [id, client] of this.clients) {
 			try {
-				client.patchElements(elements, { selector, mode: "replace" });
+				client.patchElements(elements, {
+					selector,
+					mode: "replace",
+					eventId: record.eventId,
+				});
 				if (this.recordPerformance) {
 					sessionPerformance.recordFatMorph(elements);
 					sessionPerformance.markFirstTranscriptPatch();
@@ -137,9 +225,10 @@ export class DatastarClientHub {
 	}
 
 	patchSignals(signals: string): void {
+		const record = this.recordBroadcast({ kind: "signals", signals });
 		for (const [id, client] of this.clients) {
 			try {
-				client.patchSignals(signals);
+				client.patchSignals(signals, { eventId: record.eventId });
 			} catch {
 				this.disconnect(id, client);
 			}
@@ -153,9 +242,18 @@ export class DatastarClientHub {
 
 	private sendHeartbeat(): void {
 		if (this.clients.size === 0) return;
-		// An empty JSON Merge Patch changes no signal, so this is invisible to the
-		// client beyond keeping the connection warm.
-		this.patchSignals("{}");
+		// An empty JSON Merge Patch changes no signal, so this is invisible to the client
+		// beyond keeping the connection warm. Sent directly to every client (not through
+		// the public `patchSignals`, which records a resumable broadcast): a heartbeat
+		// carries no id and must never advance a client's Last-Event-ID or consume a
+		// resume sequence number.
+		for (const [id, client] of this.clients) {
+			try {
+				client.patchSignals("{}");
+			} catch {
+				this.disconnect(id, client);
+			}
+		}
 	}
 
 	private patchClient(
@@ -163,9 +261,13 @@ export class DatastarClientHub {
 		elements: string,
 		signals: string,
 		scripts: readonly string[],
+		eventIds?: { elements?: string; signals?: string; script?: string },
 	): void {
 		if (elements) {
-			client.patchElements(elements);
+			client.patchElements(
+				elements,
+				eventIds?.elements ? { eventId: eventIds.elements } : undefined,
+			);
 			if (this.recordPerformance) {
 				sessionPerformance.recordFatMorph(elements);
 				if (elements.includes('id="messages"')) {
@@ -173,8 +275,16 @@ export class DatastarClientHub {
 				}
 			}
 		}
-		client.patchSignals(signals);
-		if (scripts.length > 0) client.executeScript(scripts.join(";"));
+		client.patchSignals(
+			signals,
+			eventIds?.signals ? { eventId: eventIds.signals } : undefined,
+		);
+		if (scripts.length > 0) {
+			client.executeScript(
+				scripts.join(";"),
+				eventIds?.script ? { eventId: eventIds.script } : undefined,
+			);
+		}
 	}
 
 	private disconnectById(id: string): void {
@@ -187,10 +297,101 @@ export class DatastarClientHub {
 		const onDisconnect = this.disconnectCallbacks.get(id);
 		this.disconnectCallbacks.delete(id);
 		onDisconnect?.();
+		if (this.clients.size === 0) this.resetResumeState();
 		try {
 			client.close();
 		} catch {
 			/* Already closed. */
+		}
+	}
+
+	/** See the `epochId` doc comment: starts a fresh, empty resume window. */
+	private resetResumeState(): void {
+		this.epochId = crypto.randomUUID();
+		this.sequence = 0;
+		this.ringBuffer.length = 0;
+		this.ringBufferBytes = 0;
+	}
+
+	/**
+	 * Generic over the specific `BroadcastEntry` arm so callers keep their variant's own
+	 * field (e.g. `.script`) on the returned record, instead of widening to the full
+	 * `BroadcastRecord` union.
+	 */
+	private recordBroadcast<Entry extends BroadcastEntry>(
+		entry: Entry,
+	): Entry & { seq: number; eventId: string } {
+		this.sequence += 1;
+		const record = {
+			...entry,
+			seq: this.sequence,
+			eventId: `${this.epochId}:${this.sequence}`,
+		};
+		this.ringBuffer.push(record);
+		this.ringBufferBytes += this.approximateSize(record);
+		this.evictRingBuffer();
+		return record;
+	}
+
+	private evictRingBuffer(): void {
+		while (
+			this.ringBuffer.length > 0 &&
+			(this.ringBuffer.length > this.maxRingBufferEntries ||
+				this.ringBufferBytes > this.maxRingBufferBytes)
+		) {
+			const removed = this.ringBuffer.shift();
+			if (removed) this.ringBufferBytes -= this.approximateSize(removed);
+		}
+	}
+
+	private approximateSize(record: BroadcastRecord): number {
+		if (record.kind === "elements") {
+			return record.elements.length + (record.options?.selector?.length ?? 0);
+		}
+		if (record.kind === "signals") return record.signals.length;
+		return record.script.length;
+	}
+
+	/**
+	 * Resolves a reconnecting client's `Last-Event-ID` (see `DatastarClientStreamOptions`)
+	 * against this hub's broadcast history.
+	 *
+	 * Returns the (possibly empty) list of broadcasts the client missed when resumable, or
+	 * `undefined` when `createStream` must fall back to a full `initial()` render: no id
+	 * given, an id from a different resume epoch (a different, unbroken connected-clients
+	 * run — see `epochId` — including one ended by a server restart), a sequence number
+	 * this hub never issued, or one older than what the bounded ring buffer still retains
+	 * (a gap `resumeSince` cannot safely paper over).
+	 */
+	private resumeSince(
+		lastEventId: string | null | undefined,
+	): readonly BroadcastRecord[] | undefined {
+		if (!lastEventId) return undefined;
+		const separator = lastEventId.indexOf(":");
+		if (separator < 0) return undefined;
+		if (lastEventId.slice(0, separator) !== this.epochId) return undefined;
+		const seq = Number(lastEventId.slice(separator + 1));
+		if (!Number.isSafeInteger(seq) || seq < 0 || seq > this.sequence)
+			return undefined;
+		if (seq === this.sequence) return [];
+		const oldest = this.ringBuffer[0];
+		if (oldest === undefined || oldest.seq > seq + 1) return undefined;
+		return this.ringBuffer.filter((record) => record.seq > seq);
+	}
+
+	/** Sends previously broadcast records to exactly one (reconnecting) client. */
+	private replay(client: DatastarClient, records: readonly BroadcastRecord[]): void {
+		for (const record of records) {
+			if (record.kind === "elements") {
+				client.patchElements(record.elements, {
+					eventId: record.eventId,
+					...record.options,
+				});
+			} else if (record.kind === "signals") {
+				client.patchSignals(record.signals, { eventId: record.eventId });
+			} else {
+				client.executeScript(record.script, { eventId: record.eventId });
+			}
 		}
 	}
 }

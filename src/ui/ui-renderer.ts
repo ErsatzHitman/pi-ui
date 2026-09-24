@@ -118,6 +118,13 @@ export class UiRenderer implements AppStorePresentation {
 		signal: AbortSignal,
 		clientId: string = crypto.randomUUID(),
 		onDisconnect?: () => void,
+		/**
+		 * The reconnecting client's `Last-Event-ID` (round RM2 sse-resume), threaded
+		 * straight through to `DatastarClientHub.createStream` — see its doc comment on
+		 * `DatastarClientStreamOptions.lastEventId` for how it decides between a resume
+		 * replay and this method's own `initial()` full-render callback below.
+		 */
+		lastEventId?: string | null,
 	): Response {
 		this.flush();
 		this.displayClients.connect(clientId);
@@ -167,7 +174,7 @@ export class UiRenderer implements AppStorePresentation {
 					}
 					return view;
 				},
-				{ onDisconnect: disconnect },
+				{ onDisconnect: disconnect, lastEventId },
 			);
 		} catch (error) {
 			disconnect();
