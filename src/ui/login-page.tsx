@@ -137,4 +137,18 @@ const loginPageStyle = `
 	.login-card .btn {
 		width: 100%;
 	}
+
+	/* Overrides app.css's shared .field > input sizing (2rem tall, 14px text) just for this
+	   field: at least 16px (iOS Safari zooms in on focus below that) and, on coarse
+	   pointers, a real 44px touch target matching the submit button (controls.css's own
+	   coarse-pointer floor for .btn). RM1 audit open issue 7. */
+	.field > input#login-token {
+		font-size: 16px;
+	}
+
+	@media (pointer: coarse) {
+		.field > input#login-token {
+			height: 2.75rem;
+		}
+	}
 `;
