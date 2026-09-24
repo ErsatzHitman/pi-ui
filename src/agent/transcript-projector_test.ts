@@ -6,10 +6,16 @@ import { assertEquals, assertExists } from "#testing/assertions";
 
 import type { ExtensionActivity } from "../extension-activity-types.ts";
 import { encodeActivityEntry } from "../extension-activity/persistence.ts";
-import { sessionEntryStub } from "./test-fixtures.ts";
+import type { TranscriptMessageInput } from "../state/transcript-state.ts";
+import {
+	agentSessionRuntimeStub,
+	sessionEntryStub,
+	sessionManagerStub,
+} from "./test-fixtures.ts";
 import {
 	projectExtensionActivities,
 	TranscriptProjector,
+	type ProjectedTranscript,
 	type TranscriptCustomRenderers,
 } from "./transcript-projector.ts";
 
@@ -316,4 +322,138 @@ test("projectExtensionActivities ignores an unrelated CustomEntry customType", (
 		sessionEntryStub({ type: "custom", customType: "workflow-help", data: {} }),
 	];
 	assertEquals(projectExtensionActivities(entries).size, 0);
+});
+
+/** Records `replaceMessages`'s argument instead of driving a real
+ * `TranscriptState`, matching this suite's other `ProjectedTranscript`
+ * stubs — `load()`'s only observable effect for these tests. */
+function capturingTranscript() {
+	let captured: readonly TranscriptMessageInput[] = [];
+	const transcript: ProjectedTranscript = {
+		replaceMessages: (messages) => {
+			captured = messages;
+		},
+	};
+	return { transcript, messages: () => captured };
+}
+
+function toolCallEntry(id: string, toolCallId: string, toolName = "read") {
+	return sessionEntryStub({
+		id,
+		type: "message",
+		message: {
+			role: "assistant",
+			content: [
+				{ type: "toolCall", id: toolCallId, name: toolName, arguments: {} },
+			],
+			stopReason: "toolUse",
+			timestamp: 1,
+		},
+	});
+}
+
+function toolResultEntry(id: string, toolCallId: string, toolName = "read") {
+	return sessionEntryStub({
+		id,
+		type: "message",
+		message: {
+			role: "toolResult",
+			toolCallId,
+			toolName,
+			content: [],
+			isError: false,
+			timestamp: 2,
+		},
+	});
+}
+
+test("TranscriptProjector.load() folds an anchored activity into its tool call's own message as a step", () => {
+	const activity = activityFixture({
+		state: "done",
+		finishedAt: 50,
+		anchor: { toolCallId: "call-1" },
+	});
+	const entries = [
+		toolCallEntry("assistant", "call-1"),
+		toolResultEntry("result", "call-1"),
+		sessionEntryStub({
+			type: "custom",
+			customType: "pi-ui.extension-activity",
+			data: encodeActivityEntry("finish", activity),
+		}),
+	];
+	const runtime = agentSessionRuntimeStub({
+		session: { sessionManager: sessionManagerStub({ getBranch: () => entries }) },
+	});
+	const { transcript, messages } = capturingTranscript();
+	new TranscriptProjector().load(runtime, transcript);
+
+	const projected = messages();
+	// No standalone "extension-activity" card — it merged into the tool card.
+	assertEquals(
+		projected.filter((message) => message.role === "extension-activity"),
+		[],
+	);
+	const toolMessage = projected.find((message) => message.role === "tool");
+	assertExists(toolMessage);
+	assertEquals(toolMessage?.toolCallId, "call-1");
+	assertEquals(toolMessage?.activities?.length, 1);
+	assertEquals(toolMessage?.activities?.[0]?.id, activity.id);
+	assertEquals(toolMessage?.extension, activity.extension);
+});
+
+test("TranscriptProjector.load() still folds when the anchored activity's own entry precedes the tool result (JEV's pre-launch gate)", () => {
+	const activity = activityFixture({
+		state: "done",
+		finishedAt: 50,
+		anchor: { toolCallId: "call-1" },
+	});
+	const entries = [
+		toolCallEntry("assistant", "call-1"),
+		sessionEntryStub({
+			type: "custom",
+			customType: "pi-ui.extension-activity",
+			data: encodeActivityEntry("finish", activity),
+		}),
+		toolResultEntry("result", "call-1"),
+	];
+	const runtime = agentSessionRuntimeStub({
+		session: { sessionManager: sessionManagerStub({ getBranch: () => entries }) },
+	});
+	const { transcript, messages } = capturingTranscript();
+	new TranscriptProjector().load(runtime, transcript);
+
+	const projected = messages();
+	assertEquals(
+		projected.filter((message) => message.role === "extension-activity"),
+		[],
+	);
+	const toolMessage = projected.find((message) => message.role === "tool");
+	assertExists(toolMessage);
+	assertEquals(toolMessage?.activities?.[0]?.id, activity.id);
+});
+
+test("TranscriptProjector.load() keeps an anchored activity as a standalone card when no tool message matches", () => {
+	const activity = activityFixture({
+		state: "done",
+		finishedAt: 50,
+		anchor: { toolCallId: "no-such-call" },
+	});
+	const entries = [
+		sessionEntryStub({
+			type: "custom",
+			customType: "pi-ui.extension-activity",
+			data: encodeActivityEntry("finish", activity),
+		}),
+	];
+	const runtime = agentSessionRuntimeStub({
+		session: { sessionManager: sessionManagerStub({ getBranch: () => entries }) },
+	});
+	const { transcript, messages } = capturingTranscript();
+	new TranscriptProjector().load(runtime, transcript);
+
+	const projected = messages();
+	assertEquals(projected.length, 1);
+	assertEquals(projected[0]?.role, "extension-activity");
+	assertEquals(projected[0]?.toolCallId, "no-such-call");
 });

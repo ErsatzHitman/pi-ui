@@ -7,6 +7,7 @@ import {
 	activityMessageState,
 	activityMessageText,
 	formatActivityDuration,
+	mergeActivitySteps,
 	toExtensionActivityView,
 } from "./view.ts";
 
@@ -68,6 +69,22 @@ test("activityMessageText prefers summary, then progress, then title", () => {
 		activityMessageText(activity({ progress: "loading", summary: "done" })),
 		"done",
 	);
+});
+
+test("mergeActivitySteps appends a new step and keeps prior steps in order", () => {
+	const step1 = toExtensionActivityView(activity({ id: "xa-1" }));
+	const step2 = toExtensionActivityView(activity({ id: "xa-2" }));
+	assertEquals(mergeActivitySteps(undefined, step1), [step1]);
+	assertEquals(mergeActivitySteps([step1], step2), [step1, step2]);
+});
+
+test("mergeActivitySteps patches an existing step by id in place instead of duplicating it", () => {
+	const started = toExtensionActivityView(activity({ id: "xa-1", state: "working" }));
+	const finished = toExtensionActivityView(
+		activity({ id: "xa-1", state: "done", workingAt: 0, finishedAt: 100 }),
+	);
+	const other = toExtensionActivityView(activity({ id: "xa-2" }));
+	assertEquals(mergeActivitySteps([started, other], finished), [finished, other]);
 });
 
 test("activityMessageState maps error/cancelled to error, started/working to running, done to success", () => {

@@ -30,6 +30,27 @@ export function activityMessageText(activity: ExtensionActivity): string {
 	return activity.summary ?? activity.progress ?? activity.title;
 }
 
+/**
+ * Merges one activity's view into a tool card's `activities` step list,
+ * keyed by `id` — an anchored `ExtensionActivity` (`anchor.toolCallId` set)
+ * folds into the owning tool's own `TranscriptMessage` as a step instead of
+ * a standalone `role: "extension-activity"` card (DESIGN-ext-activity.md
+ * §2.4 "Anchored"). Both `runtime-controller.ts`'s live path and
+ * `transcript-projector.ts`'s replay path call this so a re-run of the same
+ * scope (JEV's pre-launch gate, Vision Proxy's `tool_result` rewrite, …)
+ * patches its own step in place instead of duplicating it.
+ */
+export function mergeActivitySteps(
+	existing: readonly ExtensionActivityView[] | undefined,
+	step: ExtensionActivityView,
+): ExtensionActivityView[] {
+	const steps = existing ? [...existing] : [];
+	const index = steps.findIndex((candidate) => candidate.id === step.id);
+	if (index === -1) steps.push(step);
+	else steps[index] = step;
+	return steps;
+}
+
 /** Maps the activity's own five-state machine down to `TranscriptMessage`'s
  * three-value `state` (`"running" | "success" | "error"`): `cancelled` reads
  * as `"error"` too — it is an abnormal outcome, not a clean finish. */

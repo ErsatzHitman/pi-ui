@@ -13,6 +13,7 @@ import {
 	activityMessageState,
 	activityMessageText,
 	formatActivityDuration,
+	mergeActivitySteps,
 } from "../extension-activity/view.ts";
 import type {
 	TranscriptMessageInput,
@@ -138,6 +139,53 @@ function extensionActivityMessageInput(
 }
 
 /**
+ * Folds every anchored `role: "extension-activity"` message (`toolCallId`
+ * set from `ExtensionActivity.anchor.toolCallId`) into the `role: "tool"`
+ * message it belongs to — merging its one activity into that tool
+ * message's own `activities` step list by id (`mergeActivitySteps`) and
+ * dropping the standalone card — matching `runtime-controller.ts`'s live
+ * `upsertExtensionActivityMessage` path and `DESIGN-ext-activity.md` §2.4
+ * ("Anchored: … calls `updateMessage(toolMsgId, {activities:[...steps]})`").
+ *
+ * A two-pass scan (index the tool messages first, then fold) rather than a
+ * single left-to-right pass, because an anchored activity's *first* entry
+ * (what orders it in `projected`) can precede its tool call's own
+ * `toolResult` entry — e.g. JEV's `subagent_start` pre-launch gate fires
+ * from a `tool_call` hook, before the tool (or its result) exists at all.
+ *
+ * An anchor with no matching tool message (the tool call isn't on this
+ * branch, or hasn't produced a result yet) is left as a standalone card —
+ * still visible, just not folded — rather than silently dropped.
+ */
+function foldAnchoredActivities(
+	messages: readonly TranscriptMessageInput[],
+): TranscriptMessageInput[] {
+	const toolIndexByCallId = new Map<string, number>();
+	messages.forEach((message, index) => {
+		if (message.role === "tool" && message.toolCallId !== undefined) {
+			toolIndexByCallId.set(message.toolCallId, index);
+		}
+	});
+	const folded = messages.map((message) => ({ ...message }));
+	const foldedIndexes = new Set<number>();
+	messages.forEach((message, index) => {
+		if (message.role !== "extension-activity" || message.toolCallId === undefined) {
+			return;
+		}
+		const step = message.activities?.[0];
+		if (!step) return;
+		const targetIndex = toolIndexByCallId.get(message.toolCallId);
+		if (targetIndex === undefined) return;
+		const target = folded[targetIndex];
+		if (!target) return;
+		target.activities = mergeActivitySteps(target.activities, step);
+		target.extension = message.extension;
+		foldedIndexes.add(index);
+	});
+	return folded.filter((_message, index) => !foldedIndexes.has(index));
+}
+
+/**
  * Renders `pi.registerMessageRenderer`/`registerEntryRenderer` output for one
  * `customType`, supplied by the caller (`RuntimeController`) already bound to
  * the live `session.extensionRunner`, the requesting client's terminal width
@@ -184,7 +232,7 @@ export class TranscriptProjector {
 			const activityMessages = activityMessagesByEntryIndex.get(index);
 			if (activityMessages) projected.push(...activityMessages);
 		});
-		state.replaceMessages(projected);
+		state.replaceMessages(foldAnchoredActivities(projected));
 	}
 
 	entry(
@@ -505,6 +553,10 @@ function toolResultToAppMessage(
 		titleParts: toolCall ? toolTitleParts(toolCall.name, toolCall.args) : undefined,
 		state: message.isError ? "error" : "success",
 		format: view.format,
+		// Lets a replayed anchored `ExtensionActivity` (§2.4 "Anchored") find
+		// this message by `toolCallId` the same way the live path's
+		// `session-event-reducer.ts` stamps it — see `foldAnchoredActivities`.
+		toolCallId: message.toolCallId,
 	};
 }
 

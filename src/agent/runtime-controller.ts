@@ -44,6 +44,7 @@ import { ExtensionActivityTracker } from "../extension-activity/tracker.ts";
 import {
 	activityMessageState,
 	activityMessageText,
+	mergeActivitySteps,
 	toExtensionActivityView,
 } from "../extension-activity/view.ts";
 import {
@@ -2102,30 +2103,82 @@ export class RuntimeController {
 			case "created":
 				this.upsertExtensionActivityMessage(change.activity);
 				this.persistExtensionActivityEntry("start", change.activity);
+				this.syncExtensionActivityAttribution(change.activity, false);
 				break;
 			case "updated":
 				this.upsertExtensionActivityMessage(change.activity);
+				this.syncExtensionActivityAttribution(change.activity, false);
 				break;
 			case "finished":
 				this.upsertExtensionActivityMessage(change.activity);
 				this.persistExtensionActivityEntry("finish", change.activity);
+				this.syncExtensionActivityAttribution(change.activity, true);
 				break;
 		}
 		if (change.kind !== "none") this.refreshExtensionActivityChips();
 	}
 
-	/** Appends a new `role: "extension-activity"` transcript message for an
-	 * activity that has never been rendered before, or patches its existing
-	 * one — mirrors `transcript-projector.ts`'s `projectExtensionActivities`
-	 * replay path via the same `view.ts` helpers, so a live card and a
-	 * replayed one read identically. */
+	/**
+	 * Attaches (`clear:false`) or clears (`clear:true`) this activity's id on
+	 * the `AppExtensionStatus`/working-indicator line it's attributed to, so
+	 * the footer shows one chip — the activity's — instead of a duplicate
+	 * plain status/working chip for the same signal (`AppExtensionStatus
+	 * .activityId`, `AppStateSnapshot.extensionWorkingActivityId`). Only a
+	 * `{trigger:"ui", signal:"status"|"working"}` carrier activity has a
+	 * status/working line to attach to; a hook/tool/widget-only activity's
+	 * card stands on its own (no plain chip exists for it to link from).
+	 */
+	private syncExtensionActivityAttribution(
+		activity: ExtensionActivity,
+		clear: boolean,
+	): void {
+		if (activity.trigger.kind !== "ui") return;
+		const activityId = clear ? undefined : activity.id;
+		if (activity.trigger.signal === "status") {
+			this.extensionUi.setStatusActivityId(activity.trigger.key, activityId);
+		} else if (activity.trigger.signal === "working") {
+			this.extensionUi.setWorkingActivityId(activityId);
+		}
+	}
+
+	/**
+	 * Renders one `ExtensionActivity` change. An anchored activity
+	 * (`anchor.toolCallId` set — a `tool_call`/`tool_result` hook scope, or
+	 * the tool's own `execute()` scope) folds into the owning tool's own
+	 * `role: "tool"` message as a step, via the same `mergeActivitySteps`
+	 * `transcript-projector.ts`'s replay path uses, instead of a separate
+	 * `role: "extension-activity"` card (DESIGN-ext-activity.md §2.4
+	 * "Anchored"). Everything else appends a new standalone
+	 * `role: "extension-activity"` message the first time it's rendered, or
+	 * patches its existing one — mirroring `transcript-projector.ts`'s
+	 * `projectExtensionActivities` replay path via the same `view.ts`
+	 * helpers, so a live card and a replayed one read identically.
+	 */
 	private upsertExtensionActivityMessage(activity: ExtensionActivity): void {
 		const view = toExtensionActivityView(activity);
+		const toolCallId = activity.anchor?.toolCallId;
+		if (toolCallId) {
+			const toolMessageId =
+				this.activityMessageIds.get(activity.id) ??
+				this.findToolMessageId(toolCallId);
+			if (toolMessageId) {
+				const existing = this.state.transcript.getMessage(toolMessageId);
+				this.state.updateMessage(toolMessageId, {
+					activities: mergeActivitySteps(existing?.activities, view),
+					extension: activity.extension,
+				});
+				this.activityMessageIds.set(activity.id, toolMessageId);
+				return;
+			}
+			// No tool message found yet (e.g. the hook fired before its tool
+			// call's own message exists) — fall through to a standalone card
+			// so the activity is still visible, rather than silently dropped.
+		}
 		const patch = {
 			text: activityMessageText(activity),
 			state: activityMessageState(activity),
 			extension: activity.extension,
-			toolCallId: activity.anchor?.toolCallId,
+			toolCallId,
 			activities: [view],
 		};
 		const existingId = this.activityMessageIds.get(activity.id);
@@ -2135,6 +2188,22 @@ export class RuntimeController {
 		}
 		const id = this.state.appendMessage("extension-activity", patch.text, patch);
 		this.activityMessageIds.set(activity.id, id);
+	}
+
+	/** Reverse-scans for the `role: "tool"` message carrying this
+	 * `toolCallId` — see `transcript-state.ts`'s `toolCallId` doc comment.
+	 * `tools.messageIds` (`session-event-reducer.ts`) can't be used instead:
+	 * it's deleted at `tool_execution_end`, before a `tool_result` hook's
+	 * anchored activity (e.g. Vision Proxy's `read` rewrite) is even seen. */
+	private findToolMessageId(toolCallId: string): string | undefined {
+		const messages = this.state.transcript.allMessages;
+		for (let index = messages.length - 1; index >= 0; index -= 1) {
+			const message = messages[index];
+			if (message?.role === "tool" && message.toolCallId === toolCallId) {
+				return message.id;
+			}
+		}
+		return undefined;
 	}
 
 	/** Writes a `pi-ui.extension-activity` `CustomEntry` so the card survives a
