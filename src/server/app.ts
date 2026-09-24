@@ -27,12 +27,20 @@ import { expandHomePath } from "../utils/workspace.ts";
 import { normalizeWorkspaceReviewPreferences } from "../workspace-review-types.ts";
 import { ensureAppConfig } from "./app-config.ts";
 import { DatastarClientHub } from "./datastar-client-hub.ts";
+import { PushService } from "./push/push-service.ts";
+import { PushSubscriptionStore } from "./push/subscription-store.ts";
+import { loadOrCreateVapidKeys } from "./push/vapid-keys.ts";
 import type { RouteContext, RouteResources } from "./routes/context.ts";
 import { SessionImageStore } from "./session-image-store.ts";
 import { createStaticAssetServer } from "./static-assets.ts";
 import { staticRoot } from "./static-path.ts";
 import { TransferredFileStore } from "./transferred-files.ts";
 import { WorkspaceReviewController } from "./workspace-review-controller.ts";
+
+/** RFC 8292 `sub` contact URI a push service may use if this server's VAPID
+ * key ever misbehaves. Not user-facing and not configurable yet: any valid
+ * URI satisfies the RFC, and pi-ui has no notion of an operator email. */
+const vapidSubject = "mailto:pi-ui@localhost";
 
 export async function createApp() {
 	const fdReady = ensureTool("fd", ({ message }) => console.error(message));
@@ -75,10 +83,19 @@ export async function createApp() {
 	const transitions = new SessionTransitionController((transition) =>
 		store.setSessionTransition(transition),
 	);
+	const vapidKeys = await loadOrCreateVapidKeys();
+	const pushSubscriptions = new PushSubscriptionStore();
+	const pushService = new PushService({
+		vapidKeys,
+		vapidSubject,
+		subscriptions: pushSubscriptions,
+		hub,
+	});
 	const host = await RuntimeController.create(store, undefined, {
 		autoTitle,
 		extensionsMode: extensions.mode,
 		transitionController: transitions,
+		sendWebPush: (details) => pushService.notifySessionFinished(details),
 	}).catch((error: ErrorOptions["cause"]) => {
 		console.error("Failed to start pi SDK runtime", error);
 		return undefined;
@@ -96,6 +113,8 @@ export async function createApp() {
 		renderer,
 		resources,
 		transferredFiles,
+		pushPublicKey: vapidKeys.publicKeyRaw.toString("base64url"),
+		pushSubscriptions,
 		appVersion: staticAssets.version,
 		keybindHints: appConfig.keybindHints !== false,
 		minimalMode: appConfig.minimalMode === true,

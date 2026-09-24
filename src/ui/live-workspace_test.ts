@@ -54,6 +54,34 @@ test("an opt-in notifications toggle is rendered and reflects the saved preferen
 	);
 });
 
+test("opting in waits for the permission decision before announcing the preference (RM2 fix)", () => {
+	// Regression: the preferences event used to dispatch (and so trigger push.js's
+	// ensureSubscribed()) BEFORE requestNotificationPermission()'s prompt resolved, so the very
+	// first opt-in click always found permission still "default" and never subscribed.
+	const html = renderLiveWorkspace(snapshot(), {}, emptyUsage);
+	const button = html
+		.split('id="live-workspace-notifications-toggle"')[1]
+		?.split("</button>")[0];
+	if (!button) throw new Error("notifications toggle button not found");
+
+	const requestIndex = button.indexOf(
+		"window.piUi.liveWorkspace.requestNotificationPermission().then(",
+	);
+	const dispatchIndex = button.indexOf("document.body.dispatchEvent(new CustomEvent(");
+	if (requestIndex === -1) {
+		throw new Error(
+			"expected the click handler to await requestNotificationPermission()",
+		);
+	}
+	if (dispatchIndex === -1 || dispatchIndex < requestIndex) {
+		throw new Error(
+			"expected the preferences event to dispatch inside requestNotificationPermission()'s .then(), after the permission decision, not before",
+		);
+	}
+	// Turning notifications off must still dispatch immediately (no permission to wait for).
+	assertStringIncludes(button, "} else {");
+});
+
 test("a click-to-close backdrop is rendered alongside the pane, hidden until it opens (A#14)", () => {
 	const html = renderLiveWorkspace(snapshot(), {}, emptyUsage);
 	assertStringIncludes(html, 'id="live-workspace-backdrop"');

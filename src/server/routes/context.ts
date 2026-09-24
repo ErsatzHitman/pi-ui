@@ -1,6 +1,7 @@
 import type { RuntimeController } from "../../agent/runtime-controller.ts";
 import type { AppStore } from "../../state/app-store.ts";
 import type { UiRenderer } from "../../ui/ui-renderer.ts";
+import type { PushSubscriptionStore } from "../push/subscription-store.ts";
 import { RouteError } from "../route.ts";
 import type { SessionImageStore } from "../session-image-store.ts";
 import type { TransferredFileStore } from "../transferred-files.ts";
@@ -71,6 +72,10 @@ export interface RouteContext {
 	renderer: UiRenderer;
 	resources: RouteResources;
 	transferredFiles: Pick<TransferredFileStore, "importFiles">;
+	/** The raw VAPID public key (base64url), embedded in the page for
+	 * `static/app/push.js`'s `PushManager.subscribe({ applicationServerKey })`. */
+	pushPublicKey: string;
+	pushSubscriptions: Pick<PushSubscriptionStore, "add" | "remove">;
 	openWorkspace(path: string): Promise<boolean>;
 	serveStatic(request: Request): Promise<Response>;
 }

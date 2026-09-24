@@ -15,6 +15,11 @@ export interface LoginPageOptions {
  * before any of that exists. It links the app's real, unversioned `/app.css` and
  * `/theme.js` (see the public-asset allowlist in request-auth.ts) so it already looks
  * like the rest of pi-ui, in both themes, rather than a bespoke unstyled form.
+ *
+ * It also links the PWA manifest and icons (round RM2 "pwa"), also public in that same
+ * allowlist: Chrome's install prompt and "Add to Home Screen" can trigger from this page
+ * (before the person has ever seen the authenticated app), and the launch splash screen
+ * a standalone launch shows comes from these same tags either way.
  */
 export function renderLoginPage({ next, loginPath, error }: LoginPageOptions): string {
 	return syncHtml(
@@ -30,7 +35,9 @@ export function renderLoginPage({ next, loginPath, error }: LoginPageOptions): s
 					<meta name="color-scheme" content="light dark" />
 					<meta name="theme-color" content="" />
 					<title>Sign in — pi-ui</title>
+					<link rel="manifest" href="/manifest.webmanifest" />
 					<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+					<link rel="apple-touch-icon" href="/icon-180.png" />
 					<link rel="stylesheet" href="/app.css" />
 					<script src="/theme.js"></script>
 					<style>{loginPageStyle}</style>
