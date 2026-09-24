@@ -1589,6 +1589,18 @@ export class RuntimeController {
 			this.unbindSession({ cancelExtensionUi: false });
 			this.bindSessionState();
 			this.loadCurrentSessionMessages();
+			// `session.reload()` re-discovers/reloads extensions in place (unlike a
+			// `/new` or `/resume`, it never goes through `createRuntime` again), so
+			// the reloaded `Extension` objects need their own instrumentation pass —
+			// idempotent per-object, so this is a no-op for anything unchanged.
+			const tracker = extensionActivityTrackers.get(this.runtime.session);
+			if (tracker) {
+				instrumentExtensions(
+					this.runtime.services.resourceLoader.getExtensions().extensions,
+					tracker,
+					resolveExtensionRef,
+				);
+			}
 			this.state.appendMessage(
 				"system",
 				"Reloaded extensions, skills, prompts, and context files.",
