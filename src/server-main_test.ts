@@ -14,6 +14,7 @@ import {
 	buildServiceInstallAutostartConfig,
 	createShutdown,
 	formatCliError,
+	isEntryPoint,
 } from "./server-main.ts";
 
 // subagents stream: reproduces "sub-agents don't work under pi-ui" (PLAN-ux.md §subagents).
@@ -295,4 +296,31 @@ test("shutdown's closeActiveConnections is still overridable for callers that ne
 	);
 	await shutdown();
 	assertEquals(calls, ["stop(false)", "dispose"]);
+});
+
+test("isEntryPoint: true when this module's own path is the one that ran (source, same separators)", () => {
+	assert(isEntryPoint("/home/x/src/server-main.ts", "/home/x/src/server-main.ts"));
+});
+
+test("isEntryPoint: true across a Windows backslash vs. compiled-binary forward-slash mismatch (root-caused Bun.build compile bug: bun 1.4.2's import.meta.main reports false for a Windows exe compiled through the Bun.build() JS API, even though Bun.main correctly resolves to this module's own path — this is why dist/pi-ui.exe from scripts/build.ts silently exited)", () => {
+	assert(isEntryPoint("B:\\~BUN\\root\\pi-ui.exe", "B:/~BUN/root/pi-ui.exe"));
+});
+
+test("isEntryPoint: true when both paths use backslashes (bun src/server-main.ts from source on Windows)", () => {
+	assert(
+		isEntryPoint("C:\\repo\\src\\server-main.ts", "C:\\repo\\src\\server-main.ts"),
+	);
+});
+
+test("isEntryPoint: false when a different file ran (e.g. this module was only imported, as server-main_test.ts does)", () => {
+	assertFalse(
+		isEntryPoint(
+			"C:\\repo\\src\\server-main.ts",
+			"C:\\repo\\src\\server-main_test.ts",
+		),
+	);
+});
+
+test("isEntryPoint: false for two unrelated compiled-binary paths", () => {
+	assertFalse(isEntryPoint("B:/~BUN/root/pi-ui.exe", "B:/~BUN/root/other.exe"));
 });

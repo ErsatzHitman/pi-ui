@@ -280,11 +280,31 @@ async function main(): Promise<void> {
 	}
 }
 
+// `import.meta.main` is unreliable for a Windows executable compiled through the
+// `Bun.build()` JS API's `compile` option (as opposed to the `bun build --compile` CLI,
+// or `bun run`/`bun` on the raw source): confirmed empirically (Bun 1.4.2) that such a
+// binary's `Bun.main` and `process.argv[1]` both correctly resolve to this module's own
+// path, yet `import.meta.main` still reports false — so `scripts/build.ts`, which builds
+// this way to also copy the pi CLI theme files alongside the exe, produced a Windows
+// `dist/pi-ui.exe` that silently exited without ever reaching this block (no `--version`
+// output, no server). Comparing `import.meta.path` to `Bun.main` ourselves sidesteps
+// whatever internal flag `import.meta.main` relies on, and needs normalizing first: a
+// from-source Windows path uses `\`, but a compiled binary's internal paths use `/`
+// regardless of platform (`isEntryPoint`'s own test covers exactly this mismatch).
+//
 // Guarded so importing this module (e.g. from server-main_test.ts, to exercise
 // `buildServiceInstallAutostartConfig` through the same entry point `bun src/server-main.ts`
 // uses) never starts a server or touches the real CLI argv/environment — only running it
 // directly (`bun run`, `bun test` on this file itself, the compiled executable) does.
-if (import.meta.main) {
+export function isEntryPoint(
+	modulePath: string = import.meta.path,
+	mainPath: string = Bun.main,
+): boolean {
+	const normalize = (value: string) => value.replaceAll("\\", "/");
+	return normalize(modulePath) === normalize(mainPath);
+}
+
+if (isEntryPoint()) {
 	process.on("unhandledRejection", (error) => {
 		console.error("Unhandled rejection", error);
 	});

@@ -79,7 +79,7 @@ test.concurrent(
 			await git(workspace, "add", "-f", "tracked.log");
 			await git(workspace, "commit", "-m", "initial");
 			await controller.open(workspace);
-			assertEquals(store.workspaceReview.commits.length, 1);
+			assertEquals(store.workspaceReview.isGitRepository, true);
 			const refreshes = store.refreshes;
 			const filesRevision = store.workspaceFilesRevision;
 			await Bun.write(`${workspace}/ignored.log`, "ignored edit\n");
@@ -124,7 +124,7 @@ for (const linkedWorktree of [false, true]) {
 				if (linkedWorktree)
 					await git(repository, "worktree", "add", "-b", "linked", workspace);
 				await controller.open(workspace);
-				assertEquals(store.workspaceReview.commits.length, 1);
+				assertEquals(store.workspaceReview.isGitRepository, true);
 				const filesRevision = store.workspaceFilesRevision;
 				await Bun.write(`${repository}/.git/objects/pack/noise.tmp`, "noise");
 				await Bun.write(`${repository}/.git/logs/noise`, "noise");
@@ -142,9 +142,12 @@ for (const linkedWorktree of [false, true]) {
 						),
 					watcherWaitTimeoutMs,
 				);
+				const revisionBeforeCommit = store.workspaceReview.revision;
 				await git(workspace, "commit", "--allow-empty", "-m", "next");
+				// The snapshot's content-derived revision changes whenever HEAD moves
+				// — the watcher observing the new commit is what makes this happen.
 				await waitFor(
-					() => store.workspaceReview.commits.length === 2,
+					() => store.workspaceReview.revision !== revisionBeforeCommit,
 					watcherWaitTimeoutMs,
 				);
 				await git(workspace, "checkout", "-b", "switched");

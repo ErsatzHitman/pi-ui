@@ -9,7 +9,6 @@ import {
 	areWorkspacePathsIgnored,
 	findGitRoot,
 	findGitWatchPaths,
-	parseCommitLog,
 	parseNameStatus,
 	parsePorcelainStatus,
 	readWorkspaceReview,
@@ -52,7 +51,9 @@ test("reused metadata preserves content updates and retries an unborn history", 
 		await git(workspace, "init");
 		await git(workspace, "config", "user.email", "pi-ui@example.test");
 		await git(workspace, "config", "user.name", "pi-ui");
-		assertEquals((await readWorkspaceReview(workspace, cache)).commits, []);
+		// An unborn HEAD (no commit yet) must not be cached — checked below by
+		// comparing the cached and uncached reads after the first commit lands.
+		await readWorkspaceReview(workspace, cache);
 		await Bun.write(`${workspace}/file.txt`, "initial\n");
 		await git(workspace, "add", ".");
 		await git(workspace, "commit", "-m", "initial");
@@ -86,23 +87,7 @@ test("porcelain status parsing keeps rename destinations and status precedence",
 	);
 });
 
-test("commit metadata and name-status parsing preserve Git data", () => {
-	assertEquals(
-		parseCommitLog(
-			"0123456789012345678901234567890123456789\x1f0123456\x1fAda\x1f2026-07-20T12:00:00Z\x1ffeat: ship\x1e",
-			new Set(["0123456789012345678901234567890123456789"]),
-		),
-		[
-			{
-				author: "Ada",
-				authoredAt: "2026-07-20T12:00:00Z",
-				hash: "0123456789012345678901234567890123456789",
-				pushed: false,
-				shortHash: "0123456",
-				subject: "feat: ship",
-			},
-		],
-	);
+test("name-status parsing preserves rename destinations and status precedence", () => {
 	assertEquals(parseNameStatus("M\0README.md\0R100\0old.ts\0new.ts\0"), [
 		{ additions: 0, deletions: 0, path: "README.md", status: "modified" },
 		{ additions: 0, deletions: 0, path: "new.ts", status: "renamed" },
@@ -132,10 +117,7 @@ test("workspace review combines repository files with tracked and untracked chan
 		const snapshot = await readWorkspaceReview(nestedWorkspace);
 		assertEquals(snapshot.isGitRepository, true);
 		assertEquals(snapshot.changeCount, 3);
-		assertEquals(snapshot.commits.length, 1);
 		assertEquals(Boolean(snapshot.branch), true);
-		assertEquals(snapshot.commits[0].subject, "initial");
-		assertEquals(snapshot.commits[0].pushed, null);
 		assertEquals(snapshot.changes, [
 			{
 				additions: 0,
@@ -209,7 +191,6 @@ test("workspace review reports non-repositories without throwing", async () => {
 		const snapshot = await readWorkspaceReview(workspace);
 		assertEquals(snapshot.isGitRepository, false);
 		assertEquals(snapshot.changes, []);
-		assertEquals(snapshot.commits, []);
 		assertEquals("patch" in snapshot, false);
 		assertEquals(snapshot.revision, "non-git");
 	} finally {

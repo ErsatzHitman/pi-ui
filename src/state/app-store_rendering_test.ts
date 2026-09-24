@@ -874,7 +874,6 @@ test("workspace review snapshots travel through the app stream", async () => {
 			additions: 0,
 			deletions: 0,
 		})),
-		commits: [],
 		isGitRepository: true,
 		changeCount: 1,
 		revision: "review-1",
