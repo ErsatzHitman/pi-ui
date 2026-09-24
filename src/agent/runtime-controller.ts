@@ -25,7 +25,10 @@ import { resolveModelScopeFromModels } from "../../node_modules/@earendil-works/
 import { exportSessionToJsonl } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-export.js";
 import { resolvePath as canonicalizeSessionPath } from "../../node_modules/@earendil-works/pi-coding-agent/dist/utils/paths.js";
 import agentPackageJson from "../../node_modules/@earendil-works/pi-coding-agent/package.json" with { type: "json" };
-import type { PiUiActionRequest } from "../extension-surface-types.ts";
+import {
+	isPiUiSheetElement,
+	type PiUiActionRequest,
+} from "../extension-surface-types.ts";
 import { activeKeybind, keybindIds } from "../keybinds.ts";
 import { sessionPerformance } from "../perf/session-performance.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
@@ -1613,8 +1616,17 @@ export class RuntimeController {
 	 * Returns `false` (rather than throwing) when no extension in the current
 	 * session registered `pi_ui_event` — e.g. the bridge-aware extension that
 	 * owned this element unloaded, or the session changed underneath the click.
+	 *
+	 * `clientId` is the acting tab's display client id. When the action closes
+	 * a PIUI sheet (an `ask_user` question answered, a form submitted), every
+	 * other client's copy of it just vanished, so they get the same "Answered
+	 * on another device" toast `respondExtensionUi`/auth input broadcast (round
+	 * RM2 multi-client). An action that leaves the sheet open is not an answer.
 	 */
-	async dispatchExtensionUiAction(request: PiUiActionRequest): Promise<boolean> {
+	async dispatchExtensionUiAction(
+		request: PiUiActionRequest,
+		clientId?: string,
+	): Promise<boolean> {
 		const session = this.runtime.session;
 		// Every bridge-aware extension may register its own `pi_ui_event`; the SDK then
 		// suffixes invocation names (`pi_ui_event:1`, `:2`, ...), so match on the base
@@ -1638,6 +1650,7 @@ export class RuntimeController {
 			elementId: this.extensionUi.resolveElementId(request.elementId, this.runtime),
 		};
 		const args = Buffer.from(JSON.stringify(resolved), "utf8").toString("base64url");
+		const sheetWasOpen = this.hasOpenPiUiSheet(resolved.elementId);
 		for (const command of commands) {
 			try {
 				await command.handler(
@@ -1648,7 +1661,19 @@ export class RuntimeController {
 				console.error("Extension pi_ui_event handler failed", error);
 			}
 		}
+		if (sheetWasOpen && !this.hasOpenPiUiSheet(resolved.elementId)) {
+			this.state.notifyOtherClients("Answered on another device", clientId);
+		}
 		return true;
+	}
+
+	/** Whether the foreground's PIUI elements include a sheet/screen `${ns}:${id}`. */
+	private hasOpenPiUiSheet(elementId: string): boolean {
+		return this.state.extensionElements.some(
+			(element) =>
+				isPiUiSheetElement(element) &&
+				`${element.ns}:${element.id}` === elementId,
+		);
 	}
 
 	async refreshModels(signal?: AbortSignal): Promise<void> {

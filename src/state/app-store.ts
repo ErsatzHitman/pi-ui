@@ -934,18 +934,21 @@ export class AppStore {
 			id: "extension-dialog",
 			open: Boolean(dialog),
 		});
-		if (dialog) {
-			this.presentation?.requestCommit({
-				type: "signal-overrides",
-				values: {
-					extensionRequestId: dialog.id,
-					extensionResponse:
-						dialog.kind === "input" || dialog.kind === "editor"
-							? (dialog.prefill ?? "")
-							: "",
-				},
-			});
-		}
+		// Cleared on close too: `extension-dialog.tsx`'s `data-on:close` only
+		// auto-cancels while an id is live, so a server-side close with nothing
+		// queued never posts a stale cancellation (round RM2 multi-client).
+		this.presentation?.requestCommit({
+			type: "signal-overrides",
+			values: dialog
+				? {
+						extensionRequestId: dialog.id,
+						extensionResponse:
+							dialog.kind === "input" || dialog.kind === "editor"
+								? (dialog.prefill ?? "")
+								: "",
+					}
+				: { extensionRequestId: "" },
+		});
 	}
 	/**
 	 * Broadcasts a brief informational toast to every connected client, except

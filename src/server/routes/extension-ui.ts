@@ -93,15 +93,25 @@ export const extensionUiRoutes = {
 			const value = jsonSizeField(signals, "value", {
 				maxBytes: maxActionValueBytes,
 			}) as JsonValue | undefined;
-			await requireHost(context).dispatchExtensionUiAction({
-				elementId: requiredString(signals, "elementId", {
-					maxLength: maxElementIdLength,
-				}),
-				actionId: requiredString(signals, "actionId", {
-					maxLength: maxActionIdLength,
-				}),
-				value,
-			});
+			// Same optional per-tab id as `extensionUiResponse` above: when this
+			// action closes a PIUI sheet (e.g. answers `ask_user`), the other
+			// clients get the "Answered on another device" toast, not this one.
+			const clientId = optionalString(signals, "clientId");
+			if (clientId !== undefined && !isDisplayClientId(clientId)) {
+				throw new ActionInputError("Invalid clientId.");
+			}
+			await requireHost(context).dispatchExtensionUiAction(
+				{
+					elementId: requiredString(signals, "elementId", {
+						maxLength: maxElementIdLength,
+					}),
+					actionId: requiredString(signals, "actionId", {
+						maxLength: maxActionIdLength,
+					}),
+					value,
+				},
+				clientId,
+			);
 			return datastarResponse();
 		},
 	},

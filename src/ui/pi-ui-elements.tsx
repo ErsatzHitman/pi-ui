@@ -811,6 +811,7 @@ function actionPost(
 		elementId: ${JSON.stringify(`${element.ns}:${element.id}`)},
 		actionId: ${JSON.stringify(actionId)},
 		value: ${valueExpression},
+		clientId: document.body?.dataset?.displayClientId,
 	} })`;
 }
 

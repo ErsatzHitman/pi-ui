@@ -111,6 +111,39 @@ test("a losing respond() for an already-answered dialog id returns false without
 	);
 });
 
+test("answering the last dialog clears extensionRequestId; a queued one takes it over (RM2 multi-client)", async () => {
+	const store = new AppStore();
+	const effects: UiCommitEffect[] = [];
+	store.attachPresentation(presentationRecordingEffects(effects));
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+	const requestIdAfterCommit = () => {
+		let id: unknown;
+		for (const effect of effects) {
+			if (
+				effect.type === "signal-overrides" &&
+				"extensionRequestId" in effect.values
+			)
+				id = effect.values.extensionRequestId;
+		}
+		return id;
+	};
+
+	const first = ui.select("First", ["one"]);
+	const second = ui.confirm("Second?", "message");
+	const firstId = store.extensionDialog?.id ?? "";
+	effects.length = 0;
+	controller.respond(firstId, "one", false, "client-a");
+	await first;
+	const secondId = store.extensionDialog?.id ?? "";
+	assertEquals(requestIdAfterCommit(), secondId);
+
+	effects.length = 0;
+	controller.respond(secondId, "confirm", false, "client-a");
+	await second;
+	assertEquals(requestIdAfterCommit(), "");
+});
+
 test("select() marks hasOwnCancel when an option is already a cancel row, and not otherwise (m8)", async () => {
 	const store = new AppStore();
 	const controller = new ExtensionUiController(store);

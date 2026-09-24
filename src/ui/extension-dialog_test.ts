@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 
-import { assertStringIncludes } from "#testing/assertions";
+import { assertEquals, assertStringIncludes } from "#testing/assertions";
 
 import { assertStringExcludes } from "../testing/assertions.ts";
 import {
@@ -24,22 +24,56 @@ test("extension dialog escapes labels and posts attributed selections", () => {
 	assertStringIncludes(html, "request-1");
 });
 
-test("closing the dialog only auto-cancels when a request is still live (RM2 multi-client)", () => {
-	// Live-verified (two-CDP-client check): when client A answers, the server
-	// broadcast that closes the dialog on every OTHER client patches signals
-	// (clearing `extensionRequestId`) before it runs the `dialog.close()`
-	// script (`ui-renderer.ts`'s `pickerEffectScripts`). Native `<dialog>`
-	// fires its own "close" event for a script-driven `.close()` exactly like
-	// a user pressing Escape, so an unguarded `data-on:close` posted a
-	// `extensionRequestId: ""` cancellation from the LOSING client and got a
-	// visible 400 (`extensions/ui/respond` requires it). Guard the auto-post
-	// on the signal so a close with nothing left to cancel sends nothing.
+/**
+ * Runs the dialog's real `data-on:close` expression the way Datastar would:
+ * `$signal` reads from `signals`, `@post(...)` calls `post`, `el` is the
+ * `<dialog>`. Returns every payload it posted.
+ */
+function runCloseHandler(
+	signals: { extensionRequestId: string },
+	dialogOpenAtCloseEvent: boolean,
+): unknown[] {
 	const html = renderExtensionDialog(undefined);
+	const expression = /data-on:close="([^"]*)"/.exec(html)?.[1];
+	if (!expression) throw new Error("data-on:close missing");
+	const posts: unknown[] = [];
+	const code = expression
+		.replaceAll("&#39;", "'")
+		.replaceAll("&amp;", "&")
+		.replaceAll("$extensionRequestId", "signals.extensionRequestId")
+		.replaceAll("@post(", "post(");
+	new Function("el", "signals", "post", "document", code)(
+		{ open: dialogOpenAtCloseEvent },
+		signals,
+		(_url: string, options: { payload: unknown }) => posts.push(options.payload),
+		{ body: { dataset: { displayClientId: "client-b" } } },
+	);
+	return posts;
+}
 
-	assertStringIncludes(html, "data-on:close");
-	assertStringIncludes(html, "/extensions/ui/respond");
-	// The post is conditioned on the signal, not fired unconditionally: an
-	// empty/missing `extensionRequestId` means there is nothing left to
-	// cancel, so no request goes out at all.
-	assertStringIncludes(html, "if ($extensionRequestId)");
+test("a user closing the dialog cancels the request it is showing", () => {
+	const posts = runCloseHandler({ extensionRequestId: "request-1" }, false);
+	assertEquals(posts, [
+		{
+			extensionRequestId: "request-1",
+			extensionResponse: "",
+			extensionCancelled: true,
+			clientId: "client-b",
+		},
+	]);
+});
+
+test("a server close-and-reopen for the next queued dialog never cancels it (RM2 multi-client)", () => {
+	// When another client answers dialog 1 while dialog 2 is queued, one commit
+	// patches `extensionRequestId` to dialog 2 and runs `dialog.close()` then
+	// `showModal()` (`ui-renderer.ts`'s `pickerEffectScripts`). The native
+	// "close" event is queued, so it fires after the reopen: the signal already
+	// names dialog 2, which nobody has touched. The dialog being open again is
+	// what tells this close apart from a user's.
+	assertEquals(runCloseHandler({ extensionRequestId: "request-2" }, true), []);
+});
+
+test("a server close with nothing queued posts nothing", () => {
+	// `AppStore.setExtensionDialog(undefined)` clears the id before the close script.
+	assertEquals(runCloseHandler({ extensionRequestId: "" }, false), []);
 });

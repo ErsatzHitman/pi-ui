@@ -11,7 +11,11 @@ import {
 import { assertEquals } from "#testing/assertions";
 import { makeTempDir } from "#testing/temp";
 
-import { AppStore } from "../state/app-store.ts";
+import {
+	AppStore,
+	type AppStorePresentation,
+	type UiCommitEffect,
+} from "../state/app-store.ts";
 import {
 	RuntimeController,
 	type RuntimeControllerDependencies,
@@ -192,6 +196,112 @@ test("a bridge-aware extension's PIUI elements render natively and route actions
 					.text,
 			),
 			{ elementId: "fixture:panel", actionId: "go", value: { confirmed: true } },
+		);
+	} finally {
+		await controller?.dispose();
+		await rm(root, { recursive: true });
+	}
+});
+
+const piUiSheetFixtureSource = `
+export default function (pi) {
+  pi.registerCommand("piui-ask", {
+    description: "Open an ask_user-style PIUI sheet",
+    handler: async (_args, ctx) => {
+      ctx.ui.notify(
+        "PIUI " + JSON.stringify({
+          v: 1,
+          op: "set",
+          el: {
+            id: "ask",
+            ns: "ask-user",
+            kind: "panel",
+            placement: "sheet",
+            title: "Which one?",
+            actions: [{ id: "submit", label: "Submit" }, { id: "preview", label: "Preview" }],
+          },
+        }),
+        "info",
+      );
+    },
+  });
+  pi.registerCommand("pi_ui_event", {
+    description: "Internal Pi UI Bridge action receiver",
+    handler: async (args, ctx) => {
+      const decoded = JSON.parse(Buffer.from(args, "base64url").toString("utf8"));
+      // Like ask_user's bridge panel: a submit answers the question and closes
+      // (removes) the sheet; any other action leaves it open.
+      if (decoded.actionId === "submit") {
+        ctx.ui.notify(
+          "PIUI " + JSON.stringify({ v: 1, op: "remove", id: "ask", ns: "ask-user" }),
+          "info",
+        );
+      }
+    },
+  });
+}
+`;
+
+/** Records every `requestCommit` effect, like `extension-ui-controller_test.ts`'s double. */
+function presentationRecordingEffects(effects: UiCommitEffect[]): AppStorePresentation {
+	return new Proxy(
+		{},
+		{
+			get: (_target, name) =>
+				name === "requestCommit"
+					? (effect: UiCommitEffect | undefined) => {
+							if (effect) effects.push(effect);
+						}
+					: () => {},
+		},
+	) as AppStorePresentation;
+}
+
+test("answering an ask_user-style PIUI sheet toasts the other clients (RM2 multi-client)", async () => {
+	const root = await makeTempDir();
+	const agentDir = `${root}/agent`;
+	const cwd = `${root}/workspace`;
+	await mkdir(`${agentDir}/extensions`, { recursive: true });
+	await mkdir(cwd);
+	await Bun.write(`${agentDir}/extensions/piui-ask.js`, piUiSheetFixtureSource);
+
+	const store = new AppStore();
+	const effects: UiCommitEffect[] = [];
+	store.attachPresentation(presentationRecordingEffects(effects));
+	let controller: RuntimeController | undefined;
+	try {
+		controller = await RuntimeController.prepare(store, cwd, {
+			dependencies: dependencies(agentDir),
+		});
+		controller.activate();
+		assertEquals(await controller.prompt("/piui-ask"), true);
+		assertEquals(store.extensionElements.length, 1);
+
+		// An action that leaves the sheet open is not an answer: no toast.
+		effects.length = 0;
+		await controller.dispatchExtensionUiAction(
+			{ elementId: "ask-user:ask", actionId: "preview", value: undefined },
+			"client-a",
+		);
+		assertEquals(store.extensionElements.length, 1);
+		assertEquals(
+			effects.some((effect) => effect.type === "toast"),
+			false,
+		);
+
+		// The action that closed the sheet answered it on client A: every other
+		// client (whose copy of the sheet just vanished) is told why.
+		await controller.dispatchExtensionUiAction(
+			{ elementId: "ask-user:ask", actionId: "submit", value: { answer: "x" } },
+			"client-a",
+		);
+		assertEquals(store.extensionElements.length, 0);
+		const toast = effects.find((effect) => effect.type === "toast");
+		assertEquals(
+			toast?.type === "toast"
+				? { message: toast.message, exclude: toast.excludeClientId }
+				: undefined,
+			{ message: "Answered on another device", exclude: "client-a" },
 		);
 	} finally {
 		await controller?.dispose();

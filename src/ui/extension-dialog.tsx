@@ -175,12 +175,17 @@ function cancelCurrentAction(): string {
 	// it (Escape, `closedby="any"`, the Cancel button's `command="close"`) AND
 	// for the server's own `dialog.close()` script that closes this dialog on
 	// every OTHER client once one of them answers (`ui-renderer.ts`'s
-	// `pickerEffectScripts`) — indistinguishable at this event. That broadcast
-	// patches signals (clearing `extensionRequestId`) before running the close
-	// script, so an unconditional post here raced a real 400 out of the
-	// losing client (round RM2 multi-client #1, live-verified with two real
-	// clients). Only post when a request is still actually live.
-	return `if ($extensionRequestId) { ${postResponse("$extensionRequestId", "''", true)} }`;
+	// `pickerEffectScripts`). That broadcast patches signals before its
+	// scripts run, and the event itself is queued, so by the time it fires:
+	// - with a next dialog queued, the server already ran `close()` then
+	//   `showModal()` and `extensionRequestId` names the NEXT dialog — the
+	//   dialog is open again, and cancelling would kill a dialog nobody
+	//   touched;
+	// - with nothing queued, `AppStore.setExtensionDialog(undefined)` has
+	//   cleared `extensionRequestId`, so there is nothing to cancel.
+	// A user's close (Escape, backdrop, Cancel) leaves it closed with the id
+	// it was showing (round RM2 multi-client).
+	return `if (!el.open && $extensionRequestId) { ${postResponse("$extensionRequestId", "''", true)} }`;
 }
 
 function responseAction(id: string, value: string, expression = false): string {

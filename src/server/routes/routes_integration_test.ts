@@ -931,6 +931,37 @@ test("extension UI actions route to the active extension's pi_ui_event handler",
 	});
 });
 
+test("extension UI actions forward the acting client's id (RM2 multi-client toast)", async () => {
+	let receivedClientId: string | undefined;
+	const clientId = crypto.randomUUID();
+	const host = fakeHost({
+		dispatchExtensionUiAction: async (_request, thisClientId) => {
+			receivedClientId = thisClientId;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest("/extensions/ui/action", {
+			elementId: "ask-user:ask",
+			actionId: "submit",
+			clientId,
+		}),
+	);
+
+	assertEquals(response.status, 204);
+	assertEquals(receivedClientId, clientId);
+
+	const rejected = await router.fetch(
+		signalRequest("/extensions/ui/action", {
+			elementId: "ask-user:ask",
+			actionId: "submit",
+			clientId: "not-a-uuid",
+		}),
+	);
+	assertEquals(rejected.status, 400);
+});
+
 test("extension UI actions accept an action with no value", async () => {
 	let dispatched: unknown;
 	const host = fakeHost({
