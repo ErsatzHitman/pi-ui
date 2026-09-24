@@ -19,6 +19,7 @@ const gridSelector = "[data-terminal-surface-grid]";
 const bodySelector = "[data-terminal-surface-body]";
 const inputSelector = "[data-terminal-surface-input]";
 const keysBarSelector = "[data-terminal-surface-keys]";
+const pendingIndicatorSelector = "[data-terminal-surface-pending]";
 
 const MOD = { shift: 1, alt: 2, ctrl: 4 };
 
@@ -420,17 +421,51 @@ async function postJson(url, body) {
 const queuedInput = new Map();
 const sendingSurfaces = new Set();
 
-async function flushInput(surfaceId) {
-	sendingSurfaces.add(surfaceId);
-	while (queuedInput.has(surfaceId)) {
-		const data = queuedInput.get(surfaceId);
-		queuedInput.delete(surfaceId);
-		await postJson(endpoints.terminalSurfaceInput, { surfaceId, data });
+/**
+ * RM2 persistence item 2: on a high-RTT connection a flush (one POST, or several
+ * back to back if more keys were typed while the first was in flight — see
+ * `sendInput` below) can take a while; below this it's invisible, matching how
+ * local round-trips behave today. `terminal-surface.tsx` renders one
+ * `[data-terminal-surface-pending]` dot per surface for `setPendingIndicator` to
+ * toggle.
+ */
+const PENDING_INDICATOR_DELAY_MS = 250;
+
+/** The mounted grid for `surfaceId`, the same lookup `surfaceIdOf` does in reverse —
+ * comparing `dataset` values rather than interpolating the (untrusted, extension- or
+ * server-controlled) id into a CSS attribute selector. */
+function gridFor(surfaceId) {
+	for (const grid of document.querySelectorAll(gridSelector)) {
+		if (grid.dataset.terminalSurfaceGrid === surfaceId) return grid;
 	}
-	sendingSurfaces.delete(surfaceId);
+	return null;
 }
 
-function sendInput(surfaceId, data) {
+function setPendingIndicator(surfaceId, visible) {
+	const indicator = gridFor(surfaceId)?.querySelector(pendingIndicatorSelector);
+	indicator?.classList.toggle("is-pending", visible);
+}
+
+async function flushInput(surfaceId) {
+	sendingSurfaces.add(surfaceId);
+	const pendingTimer = setTimeout(
+		() => setPendingIndicator(surfaceId, true),
+		PENDING_INDICATOR_DELAY_MS,
+	);
+	try {
+		while (queuedInput.has(surfaceId)) {
+			const data = queuedInput.get(surfaceId);
+			queuedInput.delete(surfaceId);
+			await postJson(endpoints.terminalSurfaceInput, { surfaceId, data });
+		}
+	} finally {
+		clearTimeout(pendingTimer);
+		setPendingIndicator(surfaceId, false);
+		sendingSurfaces.delete(surfaceId);
+	}
+}
+
+export function sendInput(surfaceId, data) {
 	if (!surfaceId || !data) return;
 	// Keys typed while a post is in flight are batched into the next one, in order.
 	queuedInput.set(surfaceId, (queuedInput.get(surfaceId) ?? "") + data);

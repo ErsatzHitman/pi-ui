@@ -208,6 +208,29 @@
 		pointer-events: none;
 	}
 
+	/* RM2 persistence item 2: a subtle "still sending" dot, shown only once a
+	   batched key flush (`terminal-keys.js`'s `flushInput`) has been in flight
+	   longer than a fast local round-trip ever takes — see
+	   `PENDING_INDICATOR_DELAY_MS`. A plain opacity fade, not a pulse: the grid
+	   already has a blinking caret, and a second animation next to it would read
+	   as noise rather than status. */
+	.terminal-surface-pending {
+		position: absolute;
+		top: 0.375rem;
+		right: 0.5rem;
+		z-index: 1;
+		width: 0.375rem;
+		height: 0.375rem;
+		border-radius: 999px;
+		background: var(--text-muted);
+		opacity: 0;
+		pointer-events: none;
+		transition: opacity 150ms var(--ease-out);
+	}
+	.terminal-surface-pending.is-pending {
+		opacity: 0.7;
+	}
+
 	/* A hidden `<textarea>` proxy: the real focus/typing/IME-composition
 	   target (mirrors the classic xterm.js technique). Kept in the document
 	   flow near the caret — never `display:none`/`visibility:hidden`, which
