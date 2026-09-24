@@ -24,6 +24,18 @@ export type {
 } from "../workspace-git-graph-types.ts";
 
 type GitResult = Readonly<{ code: number; stderr: string; stdout: string }>;
+/**
+ * `git log --all --topo-order` bound on the first page: without a `commit-graph` file
+ * (most repos don't have one), topo-sorting needs to walk the whole reachable history
+ * before it can emit even the first commit, so on a very large repo a bounded `-n` alone
+ * doesn't keep it cheap. If it doesn't finish inside this budget, `readGraphLog` retries
+ * with `--date-order` instead, which Git can stream without a full topological sort —
+ * trading a possibly imperfect lane thread on that read for a graph that still loads. Ample
+ * for any repo this graph's own tests (or D:/pi-ui itself) exercise, so it changes nothing
+ * there; `readWorkspaceGitGraph`'s optional parameter exists so a test can force the
+ * fallback deterministically without needing a repo large enough to actually trip it for real.
+ */
+const graphLogTimeoutMs = 1500;
 const graphLogFormat = "--format=format:%H%x1f%h%x1f%an%x1f%aI%x1f%P%x1f%D%x1f%s%x1e";
 // The graph's fields plus the message body (%b), for one commit's detail only.
 const commitDetailFormat =
@@ -126,6 +138,7 @@ export async function findWorkspaceGitGraphMainBranch(
 export async function readWorkspaceGitGraph(
 	workspacePath: string,
 	pageSize = workspaceGitGraphPageSize,
+	logTimeoutMs = graphLogTimeoutMs,
 ): Promise<WorkspaceGitGraphSnapshot> {
 	const root = await findGitRoot(workspacePath);
 	if (!root) return emptyWorkspaceGitGraphSnapshot;
@@ -138,15 +151,7 @@ export async function readWorkspaceGitGraph(
 		statusResult,
 		branchesResult,
 	] = await Promise.all([
-		git(
-			root,
-			"log",
-			"--all",
-			"--topo-order",
-			`-n`,
-			String(pageSize + 1),
-			graphLogFormat,
-		),
+		readGraphLog(root, pageSize, logTimeoutMs),
 		git(root, "rev-parse", "--verify", "HEAD"),
 		git(root, "symbolic-ref", "--quiet", "--short", "HEAD"),
 		findWorkspaceGitGraphMainBranch(root),
@@ -286,6 +291,56 @@ export async function readWorkspaceGitGraphCommit(
 /** The message body (everything after the subject) from `commitDetailFormat` output. */
 export function parseCommitBody(output: string): string {
 	return (output.split("\x1e")[0]?.split("\x1f")[7] ?? "").trim();
+}
+
+/**
+ * The graph's commit log, `--topo-order` first (needed for `layoutGitGraphLanes`'s
+ * children-before-parents assumption), falling back to `--date-order` — Git can stream
+ * that without first sorting the whole reachable history — only when `--topo-order`
+ * doesn't finish inside `timeoutMs`. See `graphLogTimeoutMs`'s own comment.
+ */
+async function readGraphLog(
+	root: string,
+	pageSize: number,
+	timeoutMs: number,
+): Promise<GitResult> {
+	const rest = ["--all", "-n", String(pageSize + 1), graphLogFormat];
+	const topoOrder = await gitBounded(root, ["log", "--topo-order", ...rest], timeoutMs);
+	if (topoOrder) return topoOrder;
+	return git(root, "log", "--date-order", ...rest);
+}
+
+/** Like `git()`, but returns `undefined` (instead of resolving) if it takes over `timeoutMs`. */
+async function gitBounded(
+	cwd: string,
+	args: readonly string[],
+	timeoutMs: number,
+): Promise<GitResult | undefined> {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		const output = await outputCommand("git", {
+			args: ["-C", cwd, "-c", "core.quotePath=false", ...args],
+			env: { GIT_OPTIONAL_LOCKS: "0" },
+			signal: controller.signal,
+		});
+		// On this Bun/Windows combination, aborting the signal kills the spawned process
+		// but does not reject this promise: it resolves normally with a signal-derived
+		// exit code (e.g. 143) and empty output. Treat that the same as a rejection so a
+		// timed-out run is never mistaken for a real (if failing) git result.
+		if (controller.signal.aborted) return undefined;
+		return {
+			code: output.code,
+			stderr: decoder.decode(output.stderr),
+			stdout: decoder.decode(output.stdout),
+		};
+	} catch (error) {
+		if (controller.signal.aborted) return undefined;
+		if (!isNotFound(error)) throw error;
+		return { code: 127, stderr: "Git executable not found.", stdout: "" };
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 async function hash(value: string): Promise<string> {

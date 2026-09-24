@@ -5,6 +5,7 @@ import { assertEquals } from "#testing/assertions";
 import { makeTempDir } from "#testing/temp";
 
 import { outputCommand } from "../utils/command.ts";
+import { workspaceGitGraphPageSize } from "../workspace-git-graph-types.ts";
 import {
 	findWorkspaceGitGraphMainBranch,
 	parseGitBranches,
@@ -195,6 +196,58 @@ test("git graph honours a bounded page size and reports more history", async () 
 		assertEquals(
 			snapshot.rows.map((row) => row.subject),
 			["commit 4", "commit 3", "commit 2"],
+		);
+	} finally {
+		await rm(repository, { recursive: true });
+	}
+});
+
+test("git graph falls back to --date-order and still returns a usable page when --topo-order times out", async () => {
+	// Regression: `git log --all --topo-order` needs to topologically sort the whole
+	// reachable history before it can emit even the first commit on a repo with no
+	// commit-graph file, so a bounded `-n` alone doesn't keep a huge repo's first page
+	// cheap. A real repo large enough to reproduce that for real isn't practical in a
+	// unit test, so this forces the same code path with an ~always-tripped timeout
+	// instead (`readWorkspaceGitGraph`'s third parameter) and checks the graph it falls
+	// back to is still a correct, working one for a small repo with a merge and a tag —
+	// same fixture and assertions as the (default-timeout, --topo-order) test above.
+	const repository = await makeGitRepository();
+	try {
+		await Bun.write(`${repository}/file.txt`, "base\n");
+		await git(repository, "add", ".");
+		await git(repository, "commit", "-m", "base");
+		await git(repository, "checkout", "-b", "feature");
+		await Bun.write(`${repository}/feature.txt`, "feature\n");
+		await git(repository, "add", ".");
+		await git(repository, "commit", "-m", "feature work");
+		await git(repository, "checkout", "main");
+		await Bun.write(`${repository}/main.txt`, "main\n");
+		await git(repository, "add", ".");
+		await git(repository, "commit", "-m", "main work");
+		await git(repository, "merge", "--no-ff", "-m", "merge feature", "feature");
+		await git(repository, "tag", "v1.0.0");
+
+		const snapshot = await readWorkspaceGitGraph(
+			repository,
+			workspaceGitGraphPageSize,
+			0,
+		);
+		assertEquals(snapshot.isGitRepository, true);
+		assertEquals(snapshot.branch, "main");
+		assertEquals(snapshot.mainBranch, "main");
+		// --date-order sorts strictly by commit timestamp, not topologically, so "main
+		// work" (committed after "feature work") legitimately sorts before it here —
+		// unlike the --topo-order test above, which keeps children before parents but
+		// doesn't guarantee this cross-branch ordering either.
+		assertEquals(
+			snapshot.rows.map((row) => row.subject),
+			["merge feature", "main work", "feature work", "base"],
+		);
+		const merge = snapshot.rows[0]!;
+		assertEquals(merge.parents.length, 2);
+		assertEquals(
+			merge.refs.some((ref) => ref.name === "main" && ref.current && ref.main),
+			true,
 		);
 	} finally {
 		await rm(repository, { recursive: true });
