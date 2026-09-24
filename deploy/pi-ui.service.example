@@ -1,0 +1,50 @@
+# System-wide systemd unit for pi-ui, as an alternative to `pi-ui service install`.
+#
+# `pi-ui service install` (see ../README.md) writes a *user* unit under
+# ~/.config/systemd/user/, started by your own login/lingering session — the default, and
+# the one you want unless you specifically need pi-ui to run as its own system user,
+# independent of any login. See ../docs/remote.md for when to prefer each.
+#
+# Install:
+#   sudo useradd --system --create-home --home-dir /var/lib/pi-ui pi-ui
+#   sudo install -Dm0644 deploy/pi-ui.service.example /etc/systemd/system/pi-ui.service
+#   sudo install -Dm0600 -o pi-ui -g pi-ui /dev/null /etc/pi-ui/pi-ui.env
+#   sudoedit /etc/pi-ui/pi-ui.env      # PI_UI_HOST / PI_UI_PORT / PI_UI_REMOTE / PI_UI_AUTH_TOKEN — see below
+#   sudo -u pi-ui git clone <your repo> /var/lib/pi-ui/workspace   # or however you lay out repos
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now pi-ui
+#
+# /etc/pi-ui/pi-ui.env (0600, owned by the pi-ui user — never commit real values):
+#   PI_UI_HOST=100.x.x.x     # a tailnet/VPN interface address, not 0.0.0.0 — see docs/remote.md
+#   PI_UI_PORT=31415
+#   PI_UI_REMOTE=1
+#   PI_UI_AUTH_TOKEN=<a long random token>
+#
+# Point ExecStart at wherever you installed the pi-ui binary (see ../README.md "install"),
+# or a full `bun /path/to/server-main.js` command if you're running it from the npm
+# package instead of a standalone executable.
+
+[Unit]
+Description=pi-ui server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi-ui
+Group=pi-ui
+WorkingDirectory=/var/lib/pi-ui
+EnvironmentFile=-/etc/pi-ui/pi-ui.env
+ExecStart=/usr/local/bin/pi-ui
+Restart=on-failure
+RestartSec=2
+
+# pi-ui runs bash and writes files as this user by design — that is the point of a coding
+# agent, and it is not a security boundary against the agent itself (see ../docs/remote.md
+# "Security"). These settings only fence off the rest of the system, not the workspace:
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/pi-ui
+
+[Install]
+WantedBy=multi-user.target

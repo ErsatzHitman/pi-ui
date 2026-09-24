@@ -3,8 +3,13 @@ import { basename, join } from "node:path";
 
 import { importLoginShellEnvironment } from "./login-shell-environment.ts";
 import { isRemoteMode, resolveRemoteMode, setRemoteMode } from "./remote-mode.ts";
-import { disableServerAutostart, enableServerAutostart } from "./server-autostart.ts";
-import { parseServerOptions, serverUsage } from "./server-options.ts";
+import {
+	disableServerAutostart,
+	enableServerAutostart,
+	serverAutostartConfig,
+	type ServerAutostartOverrides,
+} from "./server-autostart.ts";
+import { explicitServerOptions, parseServerOptions, serverUsage } from "./server-options.ts";
 import { AuthRateLimiter } from "./server/auth-rate-limit.ts";
 import { withAuthToken, type AuthCheckDeps } from "./server/request-auth.ts";
 import { endpoints } from "./server/routes/endpoints.ts";
@@ -85,6 +90,50 @@ function remoteAuthRefusalMessage(): string {
 	);
 }
 
+/**
+ * Options a headless `pi-ui service install <flags>` (or `PI_UI_*` environment) resolves
+ * to for the systemd `EnvironmentFile` and unit. `--headless` is consumed here, not passed
+ * on to `parseServerOptions`. Only `hostname`/`port` that were explicitly requested (a
+ * flag or a non-empty `PI_UI_HOST`/`PI_UI_PORT`) are persisted — `parseServerOptions`
+ * always fills in the loopback defaults, and persisting those on a bare `pi-ui service
+ * install` would write a new `EnvironmentFile` (and reference it from the unit) on every
+ * desktop install where none existed before, changing desktop behaviour that must stay
+ * exactly as today. `remote`/`authToken` are already opt-in with no default value, so no
+ * such tracking is needed for them.
+ */
+export function buildServiceInstallAutostartConfig(
+	rest: readonly string[],
+	environment: {
+		host?: string;
+		port?: string;
+		authToken?: string;
+		remote?: string;
+	} = {
+		host: process.env.PI_UI_HOST,
+		port: process.env.PI_UI_PORT,
+		authToken: process.env.PI_UI_AUTH_TOKEN,
+		remote: process.env.PI_UI_REMOTE,
+	},
+): ServerAutostartOverrides {
+	const headlessIndex = rest.indexOf("--headless");
+	const headless = headlessIndex !== -1;
+	const filteredRest =
+		headlessIndex === -1
+			? rest
+			: [...rest.slice(0, headlessIndex), ...rest.slice(headlessIndex + 1)];
+	const options = parseServerOptions(filteredRest, environment);
+	const explicit = explicitServerOptions(filteredRest, environment);
+	return {
+		headless,
+		serviceEnvironment: {
+			hostname: explicit.hostname ? options.hostname : undefined,
+			port: explicit.port ? options.port : undefined,
+			remote: options.remote,
+			authToken: options.authToken,
+		},
+	};
+}
+
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 
@@ -93,18 +142,25 @@ async function main(): Promise<void> {
 	} else if (args[0] === "service" || args[0] === "autostart") {
 		const installAction = args[0] === "service" ? "install" : "enable";
 		const uninstallAction = args[0] === "service" ? "uninstall" : "disable";
-		if (
-			args.length !== 2 ||
-			(args[1] !== installAction && args[1] !== uninstallAction)
-		) {
-			throw new Error("usage: pi-ui service install|uninstall");
-		}
+		const rest = args.slice(2);
 		if (args[1] === installAction) {
-			await enableServerAutostart();
+			// On a headless Linux host (a VPS or a laptop reached over SSH, no desktop
+			// session), `service install` also accepts the usual --host/--port/--remote/
+			// --auth-token flags to persist for the service, plus --headless to force
+			// headless detection when the installing shell happens to have a $DISPLAY.
+			await enableServerAutostart(
+				serverAutostartConfig(
+					undefined,
+					undefined,
+					buildServiceInstallAutostartConfig(rest),
+				),
+			);
 			console.log("pi-ui service installed and started");
-		} else {
+		} else if (args[1] === uninstallAction && rest.length === 0) {
 			await disableServerAutostart();
 			console.log("pi-ui service stopped and uninstalled");
+		} else {
+			throw new Error("usage: pi-ui service install|uninstall");
 		}
 	} else {
 		await importLoginShellEnvironment();
@@ -161,14 +217,20 @@ async function main(): Promise<void> {
 	}
 }
 
-process.on("unhandledRejection", (error) => {
-	console.error("Unhandled rejection", error);
-});
-process.on("uncaughtException", (error) => {
-	console.error("Unhandled error", error);
-});
+// Guarded so importing this module (e.g. from server-main_test.ts, to exercise
+// `buildServiceInstallAutostartConfig` through the same entry point `bun src/server-main.ts`
+// uses) never starts a server or touches the real CLI argv/environment — only running it
+// directly (`bun run`, `bun test` on this file itself, the compiled executable) does.
+if (import.meta.main) {
+	process.on("unhandledRejection", (error) => {
+		console.error("Unhandled rejection", error);
+	});
+	process.on("uncaughtException", (error) => {
+		console.error("Unhandled error", error);
+	});
 
-main().catch((cause) => {
-	console.error(cause);
-	process.exitCode = 1;
-});
+	main().catch((cause) => {
+		console.error(cause);
+		process.exitCode = 1;
+	});
+}

@@ -5,6 +5,7 @@ import { assertEquals, assertStringIncludes, assertThrows } from "#testing/asser
 import {
 	defaultServerHostname,
 	defaultServerPort,
+	explicitServerOptions,
 	isLoopbackHostname,
 	parseServerOptions,
 	serverUsage,
@@ -90,6 +91,44 @@ test("server options accept an opt-in auth token from a flag or the environment"
 test("server options omit authToken entirely when not set, unlike an empty string", () => {
 	const options = parseServerOptions([], { authToken: "  " });
 	assertEquals("authToken" in options, false);
+});
+
+test("explicitServerOptions reports false for both when nothing was passed", () => {
+	assertEquals(explicitServerOptions([]), { hostname: false, port: false });
+	assertEquals(explicitServerOptions([], {}), { hostname: false, port: false });
+});
+
+test("explicitServerOptions is true for a flag, an environment variable, or both", () => {
+	assertEquals(explicitServerOptions(["--host", "0.0.0.0"]), {
+		hostname: true,
+		port: false,
+	});
+	assertEquals(explicitServerOptions(["--port=9000"]), {
+		hostname: false,
+		port: true,
+	});
+	assertEquals(explicitServerOptions([], { host: "0.0.0.0" }), {
+		hostname: true,
+		port: false,
+	});
+	assertEquals(explicitServerOptions([], { port: "8080" }), {
+		hostname: false,
+		port: true,
+	});
+	assertEquals(
+		explicitServerOptions(["--host", "0.0.0.0", "--port", "9000"], {
+			host: "1.2.3.4",
+			port: "1234",
+		}),
+		{ hostname: true, port: true },
+	);
+});
+
+test("explicitServerOptions is unaffected by --remote/--auth-token", () => {
+	assertEquals(explicitServerOptions(["--remote", "--auth-token", "tok"]), {
+		hostname: false,
+		port: false,
+	});
 });
 
 test("isLoopbackHostname recognizes loopback addresses only", () => {
