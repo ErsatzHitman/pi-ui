@@ -129,6 +129,11 @@ export function renderPage(
 					spellcheck="false"
 					data-keybind-hints={keybindHints}
 					data-minimal-mode={minimalMode}
+					// R7-B item 1: the only way a plain JS module (`terminal-keys.js`'s `sendResize`,
+					// a direct `fetch`, not a templated `data-on:`/`@post` action) can reach this
+					// connection's own per-tab id, the same one `streamConnectAction`/`displayRefresh`/
+					// the viewport report already carry as an embedded literal.
+					data-display-client-id={displayClientId}
 					data-files-import-endpoint={endpoints.filesImport}
 					data-files-open-endpoint={endpoints.filesOpen}
 					data-workspace-files-endpoint={workspaceFilesBase}
@@ -165,6 +170,8 @@ export function renderPage(
 							clientId: '${displayClientId}',
 							cols: evt.detail.cols,
 							rows: evt.detail.rows,
+							promptCols: evt.detail.promptCols,
+							overlayPercentCols: evt.detail.overlayPercentCols,
 						},
 						requestCancellation: 'disabled',
 					})`}

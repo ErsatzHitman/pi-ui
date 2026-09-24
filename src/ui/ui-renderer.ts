@@ -114,7 +114,11 @@ export class UiRenderer implements AppStorePresentation {
 		store.attachPresentation(this);
 	}
 
-	createStream(signal: AbortSignal, clientId: string = crypto.randomUUID()): Response {
+	createStream(
+		signal: AbortSignal,
+		clientId: string = crypto.randomUUID(),
+		onDisconnect?: () => void,
+	): Response {
 		this.flush();
 		this.displayClients.connect(clientId);
 		this.messages.setDisplayRefreshHz(this.displayClients.targetHz);
@@ -127,6 +131,12 @@ export class UiRenderer implements AppStorePresentation {
 			// Same reasoning for the viewport hint a freshly mounted terminal surface is
 			// seeded from (Round 6 F2) — see `AppStore.clearClientViewportCells`.
 			this.store.clearClientViewportCells(clientId);
+			// R7-B item 1: same reasoning for a closed tab's own reported terminal-surface
+			// sizes (`TerminalSurfaceController.forgetClient`). That lives on whichever
+			// `RuntimeController` is current at disconnect time, not on this long-lived
+			// renderer/store, so the caller (`stream.ts`, which still has `context.resources`)
+			// passes it in rather than this class reaching for a "current host" of its own.
+			onDisconnect?.();
 			if (this.hub.clientCount === 0) {
 				this.pendingEnhancements.clear();
 				this.messages.transcriptReplacing();

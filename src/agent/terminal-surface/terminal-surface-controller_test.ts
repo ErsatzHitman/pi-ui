@@ -1,6 +1,11 @@
 import { test } from "bun:test";
 
-import type { Component, OverlayHandle, OverlayOptions } from "@earendil-works/pi-tui";
+import type {
+	Component,
+	OverlayHandle,
+	OverlayOptions,
+	TUI,
+} from "@earendil-works/pi-tui";
 
 import { assertEquals, assertExists, assertStringIncludes } from "#testing/assertions";
 
@@ -10,6 +15,20 @@ import type { TerminalSurface } from "./types.ts";
 /** Minimal `Component` fixture: renders fixed lines, no cached state to invalidate. */
 function staticComponent(lines: string[] = []): Component {
 	return { render: () => lines, invalidate: () => {} };
+}
+
+/**
+ * A component whose `handleInput` forces a synchronous render (`tui.renderNow()`) — the same
+ * pattern the "handleInput routes…" test below uses to observe a `resize()`'s effect
+ * deterministically, since `resize()`/`forgetClient()` only ever schedule a coalesced
+ * re-render (matching a real `Component`'s own `requestRender`), never force one.
+ */
+function nudgingComponent(tui: TUI, lines: string[]): Component {
+	return {
+		render: () => lines,
+		invalidate: () => {},
+		handleInput: () => tui.renderNow(),
+	};
 }
 
 function makeController() {
@@ -344,4 +363,144 @@ test("a new prompt-column surface never starts wider than the default grid", asy
 	});
 	assertEquals(narrow.snapshot()[0]?.cols, 51);
 	narrow.disposeAll();
+});
+
+test("a new prompt-column surface uses the client's own measured prompt-column width when reported", async () => {
+	// Wider than the default (100) and than the whole-viewport hint's own capped fallback would
+	// give — the real settled width on a docked desktop layout is exactly this kind of case
+	// (r6-audit.md: "100 → 105/107 columns" at 1920px).
+	const controller = new TerminalSurfaceController({
+		onUpdate: () => {},
+		viewportHint: () => ({ columns: 252, rows: 63, promptColumns: 107 }),
+	});
+	controller.mountPersistent({
+		id: "widget-prompt-hint",
+		kind: "widget",
+		colorScheme: "dark",
+		title: undefined,
+		factory: () => staticComponent(["widget"]),
+	});
+	assertEquals(controller.snapshot()[0]?.cols, 107);
+	controller.disposeAll();
+});
+
+test("a new percentage-width overlay uses the client's chrome-adjusted hint instead of the raw viewport", async () => {
+	const controller = new TerminalSurfaceController({
+		onUpdate: () => {},
+		viewportHint: () => ({ columns: 180, rows: 50, overlayPercentColumns: 158 }),
+	});
+	void controller.mountCustom<string>({
+		id: "overlay-percent-hint",
+		overlay: true,
+		colorScheme: "dark",
+		overlayOptions: { width: "92%" },
+		factory: () => staticComponent(["percent"]),
+	});
+	await flush();
+	assertEquals(controller.snapshot()[0]?.cols, 158);
+	controller.disposeAll();
+});
+
+test("a fixed-width overlay ignores the chrome-adjusted percentage hint", async () => {
+	const controller = new TerminalSurfaceController({
+		onUpdate: () => {},
+		viewportHint: () => ({ columns: 180, rows: 50, overlayPercentColumns: 158 }),
+	});
+	void controller.mountCustom<string>({
+		id: "overlay-fixed-hint",
+		overlay: true,
+		colorScheme: "dark",
+		overlayOptions: { width: 60 },
+		factory: () => staticComponent(["fixed"]),
+	});
+	await flush();
+	// A fixed-width overlay's initial grid still spans the raw viewport (only the *resolved*
+	// component width is 60 — `TuiShim.render` clamps `options.width` to the surface it's given).
+	assertEquals(controller.snapshot()[0]?.cols, 180);
+	controller.disposeAll();
+});
+
+test("a persistent surface renders at the narrowest of every client currently reporting a size", async () => {
+	const { controller } = makeController();
+	controller.mountPersistent({
+		id: "widget-multi-tab",
+		kind: "widget",
+		colorScheme: "dark",
+		title: undefined,
+		factory: (tui) => nudgingComponent(tui, ["widget"]),
+	});
+	assertEquals(
+		controller.resize("widget-multi-tab", { columns: 120, rows: 30 }, "tab-a"),
+		true,
+	);
+	controller.handleInput("widget-multi-tab", "x");
+	assertEquals(controller.snapshot()[0]?.cols, 120);
+	// A second, narrower tab reports its own size: the surface narrows to fit it too.
+	assertEquals(
+		controller.resize("widget-multi-tab", { columns: 60, rows: 20 }, "tab-b"),
+		true,
+	);
+	controller.handleInput("widget-multi-tab", "x");
+	assertEquals(controller.snapshot()[0]?.cols, 60);
+	assertEquals(controller.snapshot()[0]?.rows, 20);
+	// The wider tab resizing again still can't widen the surface past the narrower tab's own size.
+	assertEquals(
+		controller.resize("widget-multi-tab", { columns: 200, rows: 40 }, "tab-a"),
+		true,
+	);
+	controller.handleInput("widget-multi-tab", "x");
+	assertEquals(controller.snapshot()[0]?.cols, 60);
+	controller.disposeAll();
+});
+
+test("forgetClient lets a persistent surface widen again once the only narrower tab disconnects", async () => {
+	const { controller } = makeController();
+	controller.mountPersistent({
+		id: "widget-forget",
+		kind: "widget",
+		colorScheme: "dark",
+		title: undefined,
+		factory: (tui) => nudgingComponent(tui, ["widget"]),
+	});
+	controller.resize("widget-forget", { columns: 120, rows: 30 }, "tab-a");
+	controller.resize("widget-forget", { columns: 60, rows: 20 }, "tab-b");
+	controller.handleInput("widget-forget", "x");
+	assertEquals(controller.snapshot()[0]?.cols, 60);
+
+	controller.forgetClient("tab-b");
+	controller.handleInput("widget-forget", "x");
+	assertEquals(controller.snapshot()[0]?.cols, 120);
+	assertEquals(controller.snapshot()[0]?.rows, 30);
+
+	// Forgetting the last reporting client leaves the surface at its last known size (mirrors
+	// `AppStore.clientViewportCells` falling back once every reporting client has disconnected).
+	controller.forgetClient("tab-a");
+	controller.handleInput("widget-forget", "x");
+	assertEquals(controller.snapshot()[0]?.cols, 120);
+	controller.disposeAll();
+});
+
+test("an overlay ignores per-client narrowing and keeps writing the reported size directly", async () => {
+	const { controller } = makeController();
+	void controller.mountCustom<string>({
+		id: "overlay-direct",
+		overlay: true,
+		colorScheme: "dark",
+		factory: (tui) => nudgingComponent(tui, ["overlay"]),
+	});
+	await flush();
+	controller.resize("overlay-direct", { columns: 120, rows: 30 }, "tab-a");
+	controller.handleInput("overlay-direct", "x");
+	assertEquals(controller.snapshot()[0]?.cols, 120);
+	// A second tab's smaller report replaces it outright — the client-side
+	// `percentOverlayReport` convergence (not this controller) is what keeps two tabs from
+	// fighting over an overlay's shared size.
+	controller.resize("overlay-direct", { columns: 60, rows: 20 }, "tab-b");
+	controller.handleInput("overlay-direct", "x");
+	assertEquals(controller.snapshot()[0]?.cols, 60);
+	controller.forgetClient("tab-a");
+	controller.handleInput("overlay-direct", "x");
+	// forgetClient is a no-op for an overlay: it never tracked per-client sizes to forget.
+	assertEquals(controller.snapshot()[0]?.cols, 60);
+	controller.disposeAll();
 });

@@ -1541,8 +1541,18 @@ export class RuntimeController {
 	}
 
 	/** Applies a client-measured grid resize to a mounted terminal surface. */
-	resizeTerminalSurface(surfaceId: string, cols: number, rows: number): boolean {
-		return this.extensionUi.resizeTerminalSurface(surfaceId, cols, rows);
+	resizeTerminalSurface(
+		surfaceId: string,
+		cols: number,
+		rows: number,
+		clientId?: string,
+	): boolean {
+		return this.extensionUi.resizeTerminalSurface(surfaceId, cols, rows, clientId);
+	}
+
+	/** Forgets one client's reported terminal-surface sizes once its connection closes. */
+	forgetTerminalSurfaceClient(clientId: string): void {
+		this.extensionUi.forgetTerminalSurfaceClient(clientId);
 	}
 
 	/**

@@ -6,6 +6,7 @@ import { endpoints } from "../../src/server/routes/endpoints.ts";
 import {
 	bindTerminalSurfaces,
 	encodeKeyEvent,
+	measurePromptColumnCells,
 	restoreFocusAfterSurfaceUnmount,
 } from "./terminal-keys.js";
 
@@ -583,6 +584,81 @@ test("a percentage-width overlay stops answering back another tab's smaller size
 		changed();
 		await settle();
 		assertEquals(dom.calls.length, 2);
+	} finally {
+		dom.restore();
+	}
+});
+
+// R7-B item 2: `measurePromptColumnCells` — the client's own measured `#prompt-box` width, used
+// to seed a prompt-column surface's (inline/widget/footer/header) first frame more accurately
+// than the whole viewport (see `TerminalSurfaceController`'s `promptColumns` use).
+test("the prompt-column hint is measured from #prompt-box's own padded width", () => {
+	const box = new FakeGridElement({ width: 0, height: 0 });
+	box.clientWidth = 800;
+	box.computedStyle = {
+		paddingInlineStart: "16px",
+		paddingInlineEnd: "16px",
+		lineHeight: "20px",
+	};
+	const restore = patchGlobal("document", {
+		getElementById: (id: string) => (id === "prompt-box" ? box : undefined),
+	});
+	const restoreStyle = patchGlobal(
+		"getComputedStyle",
+		(el: FakeGridElement) => el.computedStyle,
+	);
+	try {
+		// (800 - 32) available px / 7px cells = 109 cols.
+		assertEquals(measurePromptColumnCells({ width: 7, height: 14 }), 109);
+	} finally {
+		restore();
+		restoreStyle();
+	}
+});
+
+test("the prompt-column hint is undefined before #prompt-box exists in the DOM", () => {
+	const restore = patchGlobal("document", { getElementById: () => undefined });
+	try {
+		assertEquals(measurePromptColumnCells({ width: 7, height: 14 }), undefined);
+	} finally {
+		restore();
+	}
+});
+
+// R7-B item 1: a resize report now carries this tab's display client id, so
+// `TerminalSurfaceController` can size a persistent surface at the narrowest of every tab
+// currently reporting one instead of whichever tab's report landed last.
+test("a resize report carries this tab's display client id when the page has one", async () => {
+	const grid = new FakeGridElement({ width: 0, height: 480 });
+	grid.dataset.terminalSurfaceGrid = "s-client-id";
+	const body = new FakeGridElement({ width: 0, height: 0 });
+	body.dataset.cols = "80";
+	body.dataset.rows = "24";
+	body.clientWidth = 700;
+	grid.setQueryResult(body);
+
+	const dom = installFakeDom({
+		probeRect: { width: 140, height: 20 },
+		grids: [grid],
+		resizeObserver: true,
+	});
+	// `installFakeDom`'s fake `document.body` has no `dataset` of its own; give it one, the
+	// same way `page.tsx` embeds this tab's id as `data-display-client-id`.
+	(document.body as unknown as { dataset: Record<string, string> }).dataset = {
+		displayClientId: "tab-a",
+	};
+	try {
+		bindTerminalSurfaces();
+		await waitForCondition(() => dom.calls.length >= 1, {
+			timeoutMs: 1000,
+			message: "expected a resize POST when the surface first mounted",
+		});
+		assertEquals(dom.calls[0]?.body, {
+			surfaceId: "s-client-id",
+			cols: 100,
+			rows: 24,
+			clientId: "tab-a",
+		});
 	} finally {
 		dom.restore();
 	}

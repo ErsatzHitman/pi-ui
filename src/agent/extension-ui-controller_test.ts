@@ -451,6 +451,36 @@ test("custom() overlay wiring mounts a terminal surface, routes input, and resol
 	assertEquals(controller.resizeTerminalSurface("no-such-surface", 80, 24), false);
 });
 
+test("resizeTerminalSurface narrows a persistent surface to the smallest reporting client, and forgetTerminalSurfaceClient lets it widen again (R7-B item 1)", async () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	ui.setWidget("status", (tui) => ({
+		render: () => ["widget"],
+		invalidate: () => {},
+		handleInput: () => tui.renderNow(),
+	}));
+	await Promise.resolve();
+	await Promise.resolve();
+	const [widget] = store.snapshot().terminalSurfaces;
+	assertExists(widget);
+
+	assertEquals(controller.resizeTerminalSurface(widget.id, 120, 30, "tab-a"), true);
+	controller.handleTerminalSurfaceInput(widget.id, "x");
+	assertEquals(store.snapshot().terminalSurfaces[0]?.cols, 120);
+
+	// A second, narrower tab's report narrows the surface — never the other way around.
+	assertEquals(controller.resizeTerminalSurface(widget.id, 60, 20, "tab-b"), true);
+	controller.handleTerminalSurfaceInput(widget.id, "x");
+	assertEquals(store.snapshot().terminalSurfaces[0]?.cols, 60);
+
+	// The narrower tab disconnects: the surface widens back to the remaining tab's own size.
+	controller.forgetTerminalSurfaceClient("tab-b");
+	controller.handleTerminalSurfaceInput(widget.id, "x");
+	assertEquals(store.snapshot().terminalSurfaces[0]?.cols, 120);
+});
+
 test("a custom() surface's real Theme reflects the client's reported color scheme (m9)", async () => {
 	const store = new AppStore();
 	store.setClientColorScheme("light");

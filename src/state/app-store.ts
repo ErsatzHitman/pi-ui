@@ -129,6 +129,16 @@ export type AppExtensionWidget = {
 	placement: "aboveEditor" | "belowEditor";
 };
 /**
+ * One client's reported terminal-cell viewport (see `AppStore.clientViewportCells`'s doc
+ * comment for the R7-B `promptColumns`/`overlayPercentColumns` additions).
+ */
+export type ClientViewportCells = {
+	columns: number;
+	rows: number;
+	promptColumns?: number;
+	overlayPercentColumns?: number;
+};
+/**
  * The interactive working indicator an extension configured via
  * `ctx.ui.setWorkingIndicator()`. `undefined` (the field itself, not this
  * type) means "restore the default animated spinner"; `frames: []` means
@@ -451,11 +461,19 @@ export class AppStore {
 	 * dialog's own chrome, an overlay's percentage width, differ per surface), but close enough
 	 * that a fresh surface's first published frame is never off by the wide margin a fixed
 	 * 100-column guess (`defaultTerminalColumns`) was.
+	 *
+	 * R7-B: alongside the whole viewport, the same report now also carries the client's actually
+	 * measured `#prompt-box` width (`promptColumns`) and, for a percentage-width overlay, the
+	 * width its `N%` will resolve against once its own dialog chrome is subtracted
+	 * (`overlayPercentColumns`, mirroring `terminal-keys.js`'s `percentOverlayAvailableWidth`) —
+	 * closing the two remaining first-paint gaps the whole-viewport-only hint still had: a
+	 * prompt-column surface (inline/widget/footer/header) painting wider than the actual column
+	 * it sits in on a phone, and a percentage overlay painting ~5% too wide before its first real
+	 * resize report lands. Both are `undefined` from a client too old to report them, or before
+	 * `#prompt-box` exists in the DOM; `TerminalSurfaceController` falls back to the old
+	 * viewport-only approximation exactly as before in that case.
 	 */
-	private readonly clientViewportCellsByClient = new Map<
-		string,
-		{ columns: number; rows: number }
-	>();
+	private readonly clientViewportCellsByClient = new Map<string, ClientViewportCells>();
 	static readonly legacyClientViewportKey = "__legacy_viewport__";
 	private mostRecentViewportClientId: string | undefined;
 	/**
@@ -466,7 +484,7 @@ export class AppStore {
 	 * once every reporting client has disconnected — `TerminalSurfaceController` falls back to
 	 * `defaultTerminalColumns`/`defaultTerminalRows` in that case, exactly as before this round.
 	 */
-	get clientViewportCells(): { columns: number; rows: number } | undefined {
+	get clientViewportCells(): ClientViewportCells | undefined {
 		return this.mostRecentViewportClientId !== undefined
 			? this.clientViewportCellsByClient.get(this.mostRecentViewportClientId)
 			: undefined;
@@ -977,11 +995,10 @@ export class AppStore {
 	 * size does.
 	 */
 	setClientViewportCells(
-		columns: number,
-		rows: number,
+		size: ClientViewportCells,
 		clientId: string = AppStore.legacyClientViewportKey,
 	): void {
-		this.clientViewportCellsByClient.set(clientId, { columns, rows });
+		this.clientViewportCellsByClient.set(clientId, size);
 		this.mostRecentViewportClientId = clientId;
 	}
 	/**

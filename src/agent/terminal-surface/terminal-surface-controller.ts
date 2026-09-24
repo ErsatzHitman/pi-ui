@@ -118,7 +118,38 @@ type Mount = {
 	 * needs to carry a result value.
 	 */
 	settle: (() => void) | undefined;
+	/**
+	 * Every client currently reporting a measured size for this surface, keyed by its display
+	 * client id (R7-B item 1). Only populated for a non-overlay surface — a `custom()` inline,
+	 * `setWidget`, `setFooter`/`setHeader` component all share one broadcast render
+	 * (`DatastarClientHub` sends every connected tab the same HTML), so sizing from whichever
+	 * tab's report `resize()` saw last let a narrower tab's box clip it (an open finding from
+	 * the Round 6 audit). `resize()` renders at the narrowest of every currently-reporting
+	 * client instead, so no tab that can display this surface ever gets a size wider than it can
+	 * show. An overlay is exempt: it already converges to one size across tabs client-side
+	 * (`percentOverlayReport` in `terminal-keys.js`), so `resize()` keeps writing it directly.
+	 */
+	readonly clientSizes: Map<string, { columns: number; rows: number }>;
 };
+
+/** `resize()`'s fallback key for a caller that reports no client id (an older client, a direct
+ * test, or `#create`'s own initial seed) — one shared slot, matching pre-R7-B behavior exactly
+ * when only one caller ever resizes a given surface. */
+const legacyResizeClientKey = "__legacy_resize_client__";
+
+/** The smallest column/row count any currently-reporting client asked for. Only ever called with
+ * a non-empty map (see `resize()`/`forgetClient()`). */
+function narrowestClientSize(
+	sizes: ReadonlyMap<string, { columns: number; rows: number }>,
+) {
+	let columns = Number.POSITIVE_INFINITY;
+	let rows = Number.POSITIVE_INFINITY;
+	for (const size of sizes.values()) {
+		columns = Math.min(columns, size.columns);
+		rows = Math.min(rows, size.rows);
+	}
+	return { columns, rows };
+}
 
 export type TerminalSurfaceControllerOptions = {
 	/** Called with the full current surface list after every coalesced frame commit or disposal. */
@@ -136,8 +167,35 @@ export type TerminalSurfaceControllerOptions = {
 	 * instead of visibly resizing once the surface's own resize report lands a
 	 * round trip later. `undefined` (no report yet, or every reporting client
 	 * has disconnected) keeps the previous fixed-default behavior exactly.
+	 *
+	 * R7-B items 2 & 3: `promptColumns` and `overlayPercentColumns`, when the reporting client
+	 * sent them, replace that viewport-derived approximation with a real measurement — see
+	 * `#create`'s use of each.
 	 */
-	viewportHint?: () => { columns: number; rows: number } | undefined;
+	viewportHint?: () => TerminalSurfaceViewportHint | undefined;
+};
+
+export type TerminalSurfaceViewportHint = {
+	columns: number;
+	rows: number;
+	/**
+	 * The client's own measured `#prompt-box` width, in cells — closer to a prompt-column
+	 * surface's (inline/widget/footer/header) true first-frame size than the whole-viewport
+	 * `columns` capped at the default ever was, since the prompt column's own padding/gutters
+	 * aren't a fixed fraction of the viewport (a phone first-painted ~150ms of overflow from
+	 * that gap — see `#create`). `undefined` from a client too old to report it, or before
+	 * `#prompt-box` exists in the DOM — `#create` then falls back to `columns` capped at the
+	 * default, exactly as before this round.
+	 */
+	promptColumns?: number;
+	/**
+	 * The width a percentage-width overlay's `N%` will resolve against once a real dialog's own
+	 * fixed chrome is subtracted (mirrors `terminal-keys.js`'s `percentOverlayAvailableWidth`).
+	 * The raw `columns` hint overshoots a percentage overlay's true settled size by that chrome
+	 * (~5% at common widths), since it has no dialog to measure yet; `undefined` the same way
+	 * `promptColumns` can be, in which case `#create` falls back to the raw `columns` hint.
+	 */
+	overlayPercentColumns?: number;
 };
 
 /**
@@ -299,13 +357,46 @@ export class TerminalSurfaceController {
 		return true;
 	}
 
-	/** Applies a client-measured grid resize. Returns `false` if the surface is unknown. */
-	resize(id: string, size: { columns: number; rows: number }): boolean {
+	/**
+	 * Applies a client-measured grid resize. Returns `false` if the surface is unknown.
+	 * `clientId` identifies the reporting tab (`AppStore`'s display client id) — for a
+	 * non-overlay surface, `size` becomes just that client's own entry in `Mount.clientSizes`,
+	 * and the mount renders at the narrowest entry across every client currently reporting one
+	 * (R7-B item 1), never a size a connected tab reported as too small to show. An overlay
+	 * keeps the pre-R7-B behavior of writing `size` straight through: it already converges to
+	 * one shared size across tabs client-side (`percentOverlayReport`).
+	 */
+	resize(
+		id: string,
+		size: { columns: number; rows: number },
+		clientId?: string,
+	): boolean {
 		const mount = this.#mounts.get(id);
 		if (!mount || mount.disposed) return false;
 		// The size is client-measured and untrusted; `setSize` clamps it (`clampTerminalSize`).
-		mount.terminal.setSize(size);
+		if (mount.overlay) {
+			mount.terminal.setSize(size);
+			return true;
+		}
+		mount.clientSizes.set(clientId ?? legacyResizeClientKey, size);
+		mount.terminal.setSize(narrowestClientSize(mount.clientSizes));
 		return true;
+	}
+
+	/**
+	 * Forgets one client's reported terminal-surface sizes once its SSE connection closes
+	 * (mirrors `AppStore.clearClientViewportCells`), so a closed tab can't keep a persistent
+	 * surface pinned to a size no tab still open actually needs. A surface with no client left
+	 * reporting keeps its last known size, same as `clientViewportCells` falling back once every
+	 * reporting client has disconnected.
+	 */
+	forgetClient(clientId: string): void {
+		for (const mount of this.#mounts.values()) {
+			if (mount.disposed || mount.overlay) continue;
+			if (!mount.clientSizes.delete(clientId)) continue;
+			if (mount.clientSizes.size === 0) continue;
+			mount.terminal.setSize(narrowestClientSize(mount.clientSizes));
+		}
 	}
 
 	/** Disposes one surface: stops its terminal, disposes its component, resolves any pending promise. */
@@ -350,16 +441,34 @@ export class TerminalSurfaceController {
 		// wins; otherwise seed from the client's last reported viewport (`viewportHint`) rather
 		// than the fixed default, so a fresh surface's first frame is already close to its
 		// true size instead of visibly resizing once its own resize report lands.
-		// The hint is the whole viewport, which only an overlay can span: an inline, widget,
-		// header or footer surface sits in the prompt column, so on a wide screen the raw hint
-		// would first paint it far wider than its box (252 columns in a 107-column column at
-		// 1920px). Cap those at the default instead: never wider than the old fixed guess, and
-		// still narrower than it on a phone.
 		const hint = this.options.viewportHint?.();
-		const hintColumns =
-			hint && !params.overlay
-				? Math.min(hint.columns, defaultTerminalColumns)
-				: hint?.columns;
+		let hintColumns = hint?.columns;
+		if (hint) {
+			if (params.overlay) {
+				// R7-B item 3: a percentage-width overlay resolves its `N%` against this mount's
+				// initial terminal width, and the raw whole-viewport hint overshoots that by the
+				// dialog's own fixed chrome a real client resize report later subtracts
+				// (`percentOverlayAvailableWidth` in `terminal-keys.js`) — about 5% at common
+				// widths. Peeking at the not-yet-mounted overlay's own options (safe: already
+				// exception-guarded inside `overlayOptionsResolver`, and read again every commit
+				// regardless) lets this use the chrome-adjusted hint only for that case; a
+				// fixed-width or unsized overlay still spans the raw viewport, same as before.
+				if (
+					hint.overlayPercentColumns !== undefined &&
+					isPercentOverlayWidth(params.overlayOptionsResolver?.())
+				) {
+					hintColumns = hint.overlayPercentColumns;
+				}
+			} else {
+				// The hint is the whole viewport, which only an overlay can span: an inline,
+				// widget, header or footer surface sits in the narrower prompt column. R7-B item
+				// 2: the client's own `#prompt-box` measurement is the real column width; fall
+				// back to the viewport capped at the default (never wider than the old fixed
+				// guess, still narrower than it on a phone) only when a client hasn't reported one.
+				hintColumns =
+					hint.promptColumns ?? Math.min(hint.columns, defaultTerminalColumns);
+			}
+		}
 		const size = clampTerminalSize({
 			columns: params.cols ?? hintColumns ?? defaultTerminalColumns,
 			rows: params.rows ?? hint?.rows ?? defaultTerminalRows,
@@ -389,6 +498,7 @@ export class TerminalSurfaceController {
 			revision: 0,
 			disposed: false,
 			settle: undefined,
+			clientSizes: new Map(),
 		};
 		this.#mounts.set(params.id, mount);
 		tui.start();
@@ -469,6 +579,11 @@ export function resolveOverlayOptions(
 		}
 	}
 	return overlayOptions;
+}
+
+/** Whether a (already-resolved) `OverlayOptions.width` is a `N%` string — see `#create`'s use. */
+function isPercentOverlayWidth(options: OverlayOptions | undefined): boolean {
+	return isString(options?.width) && /^\d+(?:\.\d+)?%$/.test(options.width);
 }
 
 function toTerminalSurfaceOverlayOptions(
