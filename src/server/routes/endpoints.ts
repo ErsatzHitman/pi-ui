@@ -98,5 +98,6 @@ export const endpoints = {
 	filesPreview: `${filesPreviewBase}*`,
 	pushSubscribe: "/push/subscribe",
 	pushUnsubscribe: "/push/unsubscribe",
+	voiceTranscribe: "/voice/transcribe",
 	inspector: "/vendor/datastar-inspector.min.js",
 } as const;

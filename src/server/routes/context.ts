@@ -5,6 +5,7 @@ import type { PushSubscriptionStore } from "../push/subscription-store.ts";
 import { RouteError } from "../route.ts";
 import type { SessionImageStore } from "../session-image-store.ts";
 import type { TransferredFileStore } from "../transferred-files.ts";
+import type { VoiceService } from "../voice/voice-service.ts";
 
 export type RouteRuntime = Pick<
 	RuntimeController,
@@ -76,6 +77,7 @@ export interface RouteContext {
 	 * `static/app/push.js`'s `PushManager.subscribe({ applicationServerKey })`. */
 	pushPublicKey: string;
 	pushSubscriptions: Pick<PushSubscriptionStore, "add" | "remove">;
+	voice: VoiceService;
 	openWorkspace(path: string): Promise<boolean>;
 	serveStatic(request: Request): Promise<Response>;
 }

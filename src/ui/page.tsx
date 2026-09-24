@@ -51,6 +51,10 @@ export type PageRenderOptions = {
 	 * `PushManager.subscribe`. Omitted (rather than a magic empty string) when
 	 * a caller — a test, mainly — doesn't care about push. */
 	pushPublicKey?: string;
+	/** `RouteContext.voice.status()`. Defaults to `disabled`: an omitting
+	 * caller (a test, mainly) gets the same "hide the mic button" behavior a
+	 * real server would show with `voice.enabled: false`. */
+	voice?: { status: "ready" | "no-key" | "disabled"; maxSeconds: number };
 };
 
 export function renderPage(
@@ -65,6 +69,7 @@ export function renderPage(
 		toolbarHidden = false,
 		themeLab = false,
 		pushPublicKey,
+		voice = { status: "disabled", maxSeconds: 300 },
 	}: PageRenderOptions = {},
 ): string {
 	const staticBase = `/static/${appVersion}`;
@@ -164,6 +169,9 @@ export function renderPage(
 					data-toolbar-hidden={toolbarHidden}
 					data-remote-mode={isRemoteMode()}
 					data-push-public-key={pushPublicKey}
+					data-voice-endpoint={endpoints.voiceTranscribe}
+					data-voice-status={voice.status}
+					data-voice-max-seconds={voice.maxSeconds}
 					data-signals={initialSignals}
 					data-signals:_minimal-mode__ifmissing={minimalMode ? "true" : "false"}
 					data-signals:_tool-output-hidden__ifmissing={
