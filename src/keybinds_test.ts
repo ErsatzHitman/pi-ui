@@ -29,6 +29,7 @@ test("default keybinds come from commands and focus actions", () => {
 	assertEquals(activeKeybind("cycle-model-backward"), "ctrl shift P");
 	assertEquals(activeKeybind("toggle-sessions"), "ctrl B");
 	assertEquals(activeKeybind("focus-workspace-editor"), "alt E");
+	assertEquals(activeKeybind("voice-input"), "alt V");
 	assertEquals(activeKeybind("session-tree"), "");
 });
 
@@ -108,4 +109,20 @@ test("keybind aria reflects the effective chord", () => {
 	setActiveKeybinds({ "new-chat": "ctrl N" });
 	assertEquals(keybindAria("new-chat"), "Control+N Meta+N");
 	assertEquals(keybindAria("focus-prompt"), "Alt+P");
+});
+
+test("voice-input is a modal-guarded alt chord, like focus-prompt", () => {
+	assertStringIncludes(
+		keybindAction("voice-input", "action();"),
+		"document.querySelector(':modal')",
+	);
+	const expression = keybindAction("voice-input", "action();");
+	assertEquals(execute(expression, { altKey: true, code: "KeyV" }), {
+		called: 1,
+		prevented: 1,
+	});
+	assertEquals(execute(expression, { altKey: false, code: "KeyV" }), {
+		called: 0,
+		prevented: 0,
+	});
 });

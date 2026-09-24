@@ -366,6 +366,10 @@
 				"focus-workspace-editor": {
 					"type": "string",
 					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"voice-input": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
 				}
 			},
 			"description": "Keyboard shortcut overrides by action id, for example ctrl O, ctrl alt O, or alt shift T.",

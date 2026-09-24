@@ -288,13 +288,21 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 							data-attr:data-voice-blocked="$_voiceBlocked"
 							data-attr:aria-disabled="$_voiceBlocked ? 'true' : 'false'"
 							data-on:click="window.piUi.voice.toggle()"
+							data-on:keydown__window={keybindAction(
+								"voice-input",
+								"window.piUi.voice.toggle();",
+							)}
 							data-tooltip="Voice input"
 							data-tooltip-delay
 							data-align="center"
 							aria-label="Voice input"
+							aria-keyshortcuts={keybindAria("voice-input")}
 						>
 							<Icon icon={Mic} />
-							<ShortcutTooltip label="Voice input" shortcut="alt V" />
+							<ShortcutTooltip
+								label="Voice input"
+								shortcut={activeKeybind("voice-input")}
+							/>
 						</button>
 						<button
 							id="prompt-voice-cancel"

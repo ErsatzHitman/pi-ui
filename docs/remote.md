@@ -60,6 +60,18 @@ tailscale serve --bg 31415
 configuration needed beyond `--host 127.0.0.1` (the default) with an `--auth-token` (see
 "Installing"); Tailscale is the network gate, the token is the second layer.
 
+#### Voice input needs HTTPS
+
+Browsers only expose the microphone (`getUserMedia`) on a secure context: `https://`, or
+`localhost`/`127.0.0.1`. A plain `http://192.168.x.x:31415` LAN address — which is exactly
+what you get without one of the setups on this page — leaves the voice-input mic button
+visibly disabled with an explanation, in every standards-compliant browser. The
+`https://<host>.<tailnet>.ts.net` address from `tailscale serve` above (or Cloudflare
+Tunnel/Access, or Caddy+TLS, below) already satisfies this — no extra configuration is
+needed for voice input once pi-ui itself is reachable over HTTPS. See
+[`docs/voice.md`](voice.md#https-and-remote-access) for the full requirement, the
+dev-only insecure-origin Chrome flag, and per-browser notes.
+
 ### Cloudflare Tunnel + Access
 
 A public URL behind an identity check (Google/GitHub/email OTP) in front of pi-ui's own

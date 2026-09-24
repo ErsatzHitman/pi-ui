@@ -130,6 +130,7 @@ const focusShortcutDescriptions: Record<FocusKeybindId, string> = {
 	"focus-workspace-files": "Focus the workspace file tree",
 	"focus-workspace-changes": "Focus the workspace Git changes list",
 	"focus-workspace-editor": "Focus the workspace file editor",
+	"voice-input": "Start or finish voice input",
 };
 
 export function renderHotkeysDialog(state: AppStateSnapshot): string {
