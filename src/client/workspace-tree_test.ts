@@ -4,7 +4,7 @@ import { FileTree } from "@pierre/trees";
 
 import { assertEquals } from "#testing/assertions";
 
-import { syncWorkspaceTreePaths } from "./workspace-tree.ts";
+import { revealTreePath, syncWorkspaceTreePaths } from "./workspace-tree.ts";
 
 function directory(tree: FileTree, path: string) {
 	const item = tree.getItem(path);
@@ -74,6 +74,29 @@ test("workspace refresh preserves explicitly listed empty folders", () => {
 		assertEquals(tree.getItem("docs/nested/a.md"), null);
 		assertEquals(directory(tree, "docs/nested/").getPath(), "docs/nested/");
 		assertEquals(directory(tree, "docs/").getPath(), "docs/");
+	} finally {
+		tree.cleanUp();
+	}
+});
+
+test("revealing a tree path expands its collapsed ancestor and returns the canonical path", () => {
+	const paths = ["src/nested/a.ts", "src/b.ts"];
+	const tree = new FileTree({ paths, initialExpansion: "closed" });
+	try {
+		// A bare directory path ("src/nested"), as a linked-folder URI resolves to, must
+		// still be found and canonicalized to the trailing-slash form `scrollToPath` needs.
+		assertEquals(revealTreePath(tree, "src/nested"), "src/nested/");
+		assertEquals(directory(tree, "src/nested/").isExpanded(), true);
+		assertEquals(revealTreePath(tree, "src/b.ts"), "src/b.ts");
+	} finally {
+		tree.cleanUp();
+	}
+});
+
+test("revealing a path outside the tree (e.g. outside the workspace) reports nothing found", () => {
+	const tree = new FileTree({ paths: ["src/a.ts"] });
+	try {
+		assertEquals(revealTreePath(tree, "/etc/outside"), undefined);
 	} finally {
 		tree.cleanUp();
 	}

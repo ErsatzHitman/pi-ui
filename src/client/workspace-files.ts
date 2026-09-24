@@ -22,7 +22,7 @@ import {
 	type WorkspaceFileData,
 	type WorkspaceFilePreviewData,
 } from "./workspace-files-api.ts";
-import { syncWorkspaceTreePaths } from "./workspace-tree.ts";
+import { revealTreePath, syncWorkspaceTreePaths } from "./workspace-tree.ts";
 
 type WorkspaceFilesOptions = {
 	endpoint: string;
@@ -361,13 +361,8 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 	async function revealPath(path: string): Promise<boolean> {
 		visible = true;
 		await loadFiles();
-		const item = tree.getItem(path);
-		if (!item) return false;
-		if ("expand" in item) item.expand();
-		// `getItem` accepts a bare directory path ("notes"), but `scrollToPath`
-		// expects the canonical one ("notes/") — read it back off the resolved
-		// item so a bare lookup path can't land the scroll/focus on the wrong row.
-		const canonicalPath = item.getPath();
+		const canonicalPath = revealTreePath(tree, path);
+		if (canonicalPath === undefined) return false;
 		tree.scrollToPath(canonicalPath, { focus: true });
 		// `scrollToPath`'s `focus` option only moves the tree's internal roving
 		// tabindex; when another row (e.g. the file `loadFiles` opens by default)
