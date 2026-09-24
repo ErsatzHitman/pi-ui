@@ -1906,3 +1906,37 @@ test("RuntimeController keeps extension UI live after an in-place session switch
 	assertEquals(state.extensionStatuses, [{ key: "resumed", text: "still live" }]);
 	await controller.dispose();
 });
+
+test("RuntimeController renders same-millisecond custom messages of one type with their own content", async () => {
+	const state = new AppStore();
+	const fake = fakeRuntime("/sessions/a.jsonl");
+	const controller = await activate(state, [fake]);
+	fake.runtime.session.extensionRunner.getMessageRenderer = (customType) =>
+		customType === "memory-info"
+			? (message) => ({
+					render: () => [`body:${String(message.content)}`],
+					invalidate: () => {},
+				})
+			: undefined;
+	const timestamp = 1_700_000_000_000;
+	for (const content of ["first", "second"]) {
+		fake.emit(
+			agentSessionEventStub({
+				type: "message_start",
+				message: {
+					role: "custom",
+					customType: "memory-info",
+					content,
+					display: true,
+					timestamp,
+				},
+			}),
+		);
+	}
+
+	assertEquals(
+		state.messages.map((message) => message.customRenderHtml),
+		[["body:first"], ["body:second"]],
+	);
+	await controller.dispose();
+});

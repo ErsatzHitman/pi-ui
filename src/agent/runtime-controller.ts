@@ -191,6 +191,24 @@ function latestChangelogEntry(
 	return shown.join("\n");
 }
 
+/**
+ * A short hash of what a message renderer reads (`content` and `details`), part of
+ * the custom-render cache key. Unserializable input (a circular `details`) falls back
+ * to the text content alone, which still tells same-millisecond messages apart.
+ */
+function customMessageFingerprint(message: {
+	content: unknown;
+	details?: unknown;
+}): string {
+	let source: string;
+	try {
+		source = JSON.stringify([message.content, message.details ?? null]) ?? "";
+	} catch {
+		source = String(message.content);
+	}
+	return Bun.hash(source).toString(36);
+}
+
 type BackgroundSession = {
 	runtime: AgentSessionRuntime;
 	state: TranscriptState;
@@ -2209,11 +2227,13 @@ export class RuntimeController {
 				const renderer = extensionRunner.getMessageRenderer(message.customType);
 				if (!renderer) return undefined;
 				// A live-streamed message carries no persisted entry id yet (that's
-				// assigned when the session file is written, after the event fires);
-				// `customType` + the message's own millisecond timestamp is unique
-				// enough for a chat transcript's cache key either way.
+				// assigned when the session file is written, after the event fires), so
+				// the key is `customType` + the message's millisecond timestamp + a hash
+				// of what the renderer reads. The hash matters: one command handler
+				// commonly sends several same-type messages within one millisecond, and
+				// without it every one after the first reused the first one's render.
 				return this.customRenderers.render(
-					`msg:${message.customType}:${message.timestamp}`,
+					`msg:${message.customType}:${message.timestamp}:${customMessageFingerprint(message)}`,
 					renderOptions,
 					() => renderer(message, { expanded: true, outputPad }, theme),
 				);
