@@ -166,6 +166,26 @@ test("every sheet gets one header close control instead of a footer Close fallba
 	assertStringExcludes(html, ">Close</button>");
 });
 
+test("a sheet whose element declares its own 'close' action does not duplicate the header close control (fix pass, pi-mcp-adapter's mcp-setup-panel)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				ns: "mcp",
+				actions: [
+					{ id: "run-setup", label: "Run setup" },
+					{ id: "close", label: "Close" },
+				],
+			}),
+		],
+	});
+	// Exactly one close control — the header icon button. The extension's own declared
+	// `close` action must not also render as a redundant footer "Close" text button.
+	assertStringIncludes(html, 'aria-label="Close"');
+	assertStringExcludes(html, ">Close</button>");
+	// Its other declared actions still render in the footer as usual.
+	assertStringIncludes(html, ">Run setup</button>");
+});
+
 test("a sheet with no declared actions renders no footer at all (btw-compact)", () => {
 	const html = renderPiUiSheets({
 		extensionElements: [

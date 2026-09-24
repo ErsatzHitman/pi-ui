@@ -277,8 +277,10 @@ function renderPiUiSheetDialog(element: PiUiElement): string {
 					</button>
 				</header>
 				{body || renderPiUiSheetEmptyState()}
-				{renderPiUiActions(element) && (
-					<footer>{renderPiUiActions(element)}</footer>
+				{renderPiUiActions(element, { suppressCloseAction: true }) && (
+					<footer>
+						{renderPiUiActions(element, { suppressCloseAction: true })}
+					</footer>
 				)}
 			</div>
 		</dialog>,
@@ -713,15 +715,25 @@ function submitOnEnterScript(): string {
 	}`;
 }
 
-function renderPiUiActions(element: PiUiElement): string {
+function renderPiUiActions(
+	element: PiUiElement,
+	options?: { suppressCloseAction?: boolean },
+): string {
 	const fields = normalizeFields(element.data.fields);
 	const declared = element.actions ?? [];
 	// Bridge forms such as ask-user.ts's sheet send `fields` without any `actions` and wait
 	// for a `submit` action carrying the field values; give them the button that sends it.
-	const actions: readonly PiUiAction[] =
+	const withSubmit: readonly PiUiAction[] =
 		fields.length > 0 && !declared.some((action) => action.id === submitActionId)
 			? [{ id: submitActionId, label: "Submit", variant: "primary" }, ...declared]
 			: declared;
+	// A sheet's header already carries the one close control (see `renderPiUiSheetDialog`),
+	// which posts the same `close` action id — so an extension's own declared `close` action
+	// (e.g. pi-mcp-adapter's mcp-setup-panel, which keeps one for non-sheet placements) would
+	// otherwise duplicate it as a redundant footer "Close" button.
+	const actions = options?.suppressCloseAction
+		? withSubmit.filter((action) => action.id !== closeActionId)
+		: withSubmit;
 	if (actions.length === 0) return "";
 	return syncHtml(
 		<div class="piui-actions">
