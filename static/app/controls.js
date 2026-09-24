@@ -2,6 +2,8 @@ const commandSelector = ".command";
 const menuPopoverSelector = "[popover][role='menu']";
 const movementKeys = new Set(["ArrowDown", "ArrowUp", "Home", "End"]);
 const verticalMovementKeys = new Set(["ArrowDown", "ArrowUp"]);
+/** `.command[data-multi-pane]` panes, e.g. the model picker's providers/models panes. */
+const paneSelector = "[data-pane]";
 
 export function bindControls() {
 	document.addEventListener("keydown", handleKeydown);
@@ -22,10 +24,37 @@ function controlsIn(root, selector) {
 	return controls;
 }
 
+/** A `.command` with `data-multi-pane="true"` has several `[data-pane]` menus (e.g. the
+ * model picker's providers pane and models pane) instead of one; `data-active-pane` on
+ * the `.command` says which one currently owns keyboard movement/Enter/`.active`. */
+function isMultiPane(command) {
+	return command.dataset.multiPane === "true";
+}
+
+/** Left/Right switch panes only when the caret already sits at that edge of the search
+ * text with nothing selected, so they still move the caret while editing a query. */
+export function caretAtEdge(input, key) {
+	const { selectionStart, selectionEnd, value } = input;
+	if (selectionStart === null || selectionStart !== selectionEnd) return false;
+	return key === "ArrowLeft" ? selectionStart === 0 : selectionEnd === value.length;
+}
+
+function commandPanes(command) {
+	return [...command.querySelectorAll(paneSelector)];
+}
+
+function activeMenu(command) {
+	if (!isMultiPane(command)) return command.querySelector('[role="menu"]');
+	const panes = commandPanes(command);
+	return (
+		panes.find((pane) => pane.dataset.pane === command.dataset.activePane) ?? panes[0]
+	);
+}
+
 function commandParts(command) {
 	return {
 		input: command.querySelector("header input"),
-		menu: command.querySelector('[role="menu"]'),
+		menu: activeMenu(command),
 	};
 }
 
@@ -51,7 +80,9 @@ function refreshCommand(command) {
 export function activateCommandItem(command, active) {
 	const { input, menu } = commandParts(command);
 	if (!(input instanceof HTMLInputElement) || !(menu instanceof HTMLElement)) return;
-	for (const item of menu.querySelectorAll('[role="menuitem"].active')) {
+	// Every pane's `.active` is cleared, not just the current pane's: entering a pane
+	// (arrow key or a provider click) always starts from a single, unambiguous item.
+	for (const item of command.querySelectorAll('[role="menuitem"].active')) {
 		item.classList.remove("active");
 	}
 	if (active instanceof HTMLElement) {
@@ -115,6 +146,32 @@ function handleKeydown(event) {
 			event.preventDefault();
 			moveCommand(command, event.key);
 			return;
+		}
+		if (
+			isMultiPane(command) &&
+			(event.key === "ArrowRight" || event.key === "ArrowLeft") &&
+			caretAtEdge(event.target, event.key)
+		) {
+			// A pane switch is expressed as a click, so it runs through the exact same
+			// handler as the mouse/Enter path: `window.piUi.modelPicker.selectProvider`
+			// drills right into a provider's models, and the `[data-pane-back]` button
+			// (rendered only when there's more than one pane) backs left out of them.
+			const panes = commandPanes(command);
+			const index = panes.findIndex(
+				(pane) => pane.dataset.pane === command.dataset.activePane,
+			);
+			if (event.key === "ArrowRight" && index >= 0 && index < panes.length - 1) {
+				event.preventDefault();
+				visibleCommandItems(command)
+					.find((item) => item.classList.contains("active"))
+					?.click();
+				return;
+			}
+			if (event.key === "ArrowLeft" && index > 0) {
+				event.preventDefault();
+				command.querySelector("[data-pane-back]")?.click();
+				return;
+			}
 		}
 	}
 

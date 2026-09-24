@@ -22,6 +22,7 @@ import {
 	scrollBottom,
 	trimOldMessages,
 } from "./message-scroll.js";
+import * as modelPicker from "./model-picker.js";
 import { filterModelSearch } from "./model-search.js";
 import { bindNotifications } from "./notifications.js";
 import {
@@ -67,6 +68,11 @@ window.piUi = {
 		restoreAnchor,
 		scrollBottom,
 		trimOldMessages,
+	},
+	modelPicker: {
+		selectProvider: modelPicker.selectProvider,
+		back: modelPicker.back,
+		reset: modelPicker.reset,
 	},
 	modelSearch: { filter: filterModelSearch },
 	notifications: bindNotifications(),

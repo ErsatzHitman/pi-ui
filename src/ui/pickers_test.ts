@@ -333,6 +333,157 @@ test("model picker distinguishes missing auth from an unselected model", () => {
 	assertStringIncludes(withoutSelection, "Claude Sonnet");
 });
 
+test("model picker refreshes keyboard state when it opens, not when it closes", () => {
+	// Regression: the popover used to reset `.active`/aria-activedescendant only on
+	// `evt.newState === 'closed'`, so a freshly-opened picker had no active row and a
+	// bare Enter (before ever pressing an arrow key) silently did nothing — the user had
+	// to reach for the mouse. `/model` with no argument (and Enter on the slash picker's
+	// `/model` row) must let arrow keys + Enter select immediately on open.
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "claude-sonnet",
+					provider: "anthropic",
+					name: "Claude Sonnet",
+					configured: true,
+					scoped: false,
+				},
+			],
+			currentModel: "anthropic/claude-sonnet",
+		}),
+	);
+	assertStringIncludes(html, "evt.newState === 'open'");
+	assertStringIncludes(html, "window.piUi.modelPicker.reset(el)");
+	assertFalse(html.includes("evt.newState === 'closed'"));
+});
+
+test("model picker is a dual-pane provider -> model picker", () => {
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "claude-sonnet",
+					provider: "anthropic",
+					name: "Claude Sonnet",
+					configured: true,
+					scoped: false,
+				},
+				{
+					id: "claude-haiku",
+					provider: "anthropic",
+					name: "Claude Haiku",
+					configured: true,
+					scoped: false,
+				},
+				{
+					id: "gpt-5.6",
+					provider: "openai-codex",
+					name: "GPT 5.6",
+					configured: false,
+					scoped: false,
+				},
+			],
+			currentModel: "anthropic/claude-sonnet",
+		}),
+	);
+
+	// Provider pane: one row per provider, with a model count and current-provider marker.
+	assertStringIncludes(html, 'id="model-provider-menu"');
+	assertStringIncludes(html, 'aria-label="Providers"');
+	assertStringIncludes(html, 'id="model-provider-anthropic"');
+	assertStringIncludes(html, 'id="model-provider-openai-codex"');
+	assertStringIncludes(html, 'data-provider="anthropic"');
+	assertStringIncludes(html, 'aria-current="true"');
+	assertStringIncludes(html, "2 models");
+	assertStringIncludes(html, "1 model");
+	assertStringIncludes(html, "no auth");
+
+	// Model pane: grouped by provider, one group per provider.
+	assertStringIncludes(html, 'id="model-select-menu"');
+	assertStringIncludes(html, 'data-provider-group="anthropic"');
+	assertStringIncludes(html, 'data-provider-group="openai-codex"');
+	assertStringIncludes(html, "Claude Sonnet");
+	assertStringIncludes(html, "Claude Haiku");
+	assertStringIncludes(html, "GPT 5.6");
+
+	// The current model is pre-selected: its provider is the initial active provider/pane.
+	assertStringIncludes(html, 'data-active-provider="anthropic"');
+	assertStringIncludes(html, 'data-active-pane="models"');
+	assertStringIncludes(html, 'data-multi-pane="true"');
+
+	// Mobile drill-down needs a way back to the provider list.
+	assertStringIncludes(html, "data-pane-back");
+});
+
+test("model picker protects client-owned narrowing state from server re-renders", () => {
+	// Regression (verifier fix pass): `applyActiveProvider()` (static/app/model-picker.js)
+	// narrows the models pane by setting `hidden` on every non-active
+	// `[data-provider-group]`, and `data-active-pane`/`data-active-provider`/
+	// `data-searching` on the `.command` root track which pane/provider/search state is
+	// live. None of this is server-rendered (the SSR markup below never sets `hidden` on
+	// a provider group, nor `data-searching` at all), so without `data-preserve-attr`
+	// Datastar's morph strips it back out on the next unrelated re-render of this dirty
+	// region (e.g. another connected client changing the model, or this client toggling a
+	// model's star) while the popover is still open — every provider's models reappear at
+	// once and the active pane/provider/search flags silently reset. `.model-option` rows
+	// a few lines below already guard themselves this way (`data-preserve-attr="class
+	// hidden"`); the provider-group wrapper and the command root need the same guard.
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "claude-sonnet",
+					provider: "anthropic",
+					name: "Claude Sonnet",
+					configured: true,
+					scoped: false,
+				},
+				{
+					id: "gpt-5.6",
+					provider: "openai-codex",
+					name: "GPT 5.6",
+					configured: false,
+					scoped: false,
+				},
+			],
+			currentModel: "anthropic/claude-sonnet",
+		}),
+	);
+
+	assertStringIncludes(
+		html,
+		'data-provider-group="anthropic" data-preserve-attr="hidden"',
+	);
+	assertStringIncludes(
+		html,
+		'data-provider-group="openai-codex" data-preserve-attr="hidden"',
+	);
+	assertStringIncludes(
+		html,
+		'data-preserve-attr="data-active-pane data-active-provider data-searching"',
+	);
+});
+
+test("model picker falls back to the providers pane with no model selected yet", () => {
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "claude-sonnet",
+					provider: "anthropic",
+					name: "Claude Sonnet",
+					configured: true,
+					scoped: false,
+				},
+			],
+			currentModel: undefined,
+		}),
+	);
+	assertStringIncludes(html, 'data-active-pane="providers"');
+	assertStringIncludes(html, 'data-active-provider="anthropic"');
+});
+
 test("model picker shows only the final model name in its trigger", () => {
 	const html = renderModelPicker(
 		appRenderSnapshot({
