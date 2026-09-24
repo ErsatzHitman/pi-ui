@@ -911,6 +911,14 @@ function computeBlockedReason() {
 /** Binds voice input once, at page load. Called from main.js's DOMContentLoaded. */
 export function bindVoice() {
 	blocked = computeBlockedReason();
+	// Datastar's own initial DOM scan (which binds #prompt-box's `data-on:pi-ui-voice-state`
+	// handler) runs on a macrotask scheduled when its built-in plugins register, so it can land
+	// after this DOMContentLoaded handler — losing the dispatch below and leaving
+	// `data-voice-blocked`/`aria-disabled` at their defaults forever (verifier finding). Dispatch
+	// now in case Datastar has already bound (e.g. a slow-parsing document), and dispatch again,
+	// once, when Datastar announces `datastar-ready`, so the initial blocked/idle state is never
+	// lost to that race either way.
+	document.addEventListener("datastar-ready", dispatchVoiceState, { once: true });
 	dispatchVoiceState();
 	window.addEventListener("keydown", onWindowKeydown, true);
 	window.addEventListener("pagehide", () => {
