@@ -207,12 +207,6 @@ export function renderPage(
 							filterSignals: { include: /^workspaceReviewPreferences\\./ },
 						});
 					`}
-					data-on:pi-ui-workspace-review-submit={`
-						$workspaceReviewComments = evt.detail;
-						@post('${endpoints.workspaceReviewSubmit}', {
-							filterSignals: { include: /^workspaceReviewComments\\./ },
-						});
-					`}
 					data-on:pi-ui-live-workspace-preferences={`
 						$liveWorkspacePreferences = {
 							...$liveWorkspacePreferences,
@@ -226,7 +220,6 @@ export function renderPage(
 						_isDraggingFile: false,
 						_sessionLoading: false,
 						_newSessionPending: false,
-						workspaceReviewComments: { comments: [] },
 						workspaceReviewPreferences: state.workspaceReviewPreferences,
 						liveWorkspacePreferences: state.liveWorkspacePreferences,
 						sessionDeletePath: "",

@@ -135,6 +135,69 @@ test("git graph honours a bounded page size and reports more history", async () 
 	}
 });
 
+test("git graph reports a detached HEAD as its own ref and branch label", async () => {
+	const repository = await makeGitRepository();
+	try {
+		await Bun.write(`${repository}/file.txt`, "base\n");
+		await git(repository, "add", ".");
+		await git(repository, "commit", "-m", "base");
+		await Bun.write(`${repository}/file.txt`, "second\n");
+		await git(repository, "add", ".");
+		await git(repository, "commit", "-m", "second");
+		const headOutput = await outputCommand("git", {
+			args: ["-C", repository, "rev-parse", "HEAD"],
+		});
+		const head = new TextDecoder().decode(headOutput.stdout).trim();
+		await git(repository, "checkout", "--detach", "HEAD");
+
+		const snapshot = await readWorkspaceGitGraph(repository);
+		assertEquals(snapshot.isGitRepository, true);
+		assertEquals(snapshot.branch, `detached@${head.slice(0, 7)}`);
+		assertEquals(
+			snapshot.rows.map((row) => row.subject),
+			["second", "base"],
+		);
+		const detached = snapshot.rows[0]!;
+		assertEquals(
+			detached.refs.some(
+				(ref) => ref.kind === "head" && ref.current && ref.name === "HEAD",
+			),
+			true,
+		);
+	} finally {
+		await rm(repository, { recursive: true });
+	}
+});
+
+test("git graph lays out a shallow clone's grafted boundary commit like a root", async () => {
+	const origin = await makeGitRepository();
+	const clone = await makeTempDir();
+	try {
+		for (let index = 0; index < 4; index++) {
+			await Bun.write(`${origin}/file.txt`, `${index}\n`);
+			await git(origin, "add", ".");
+			await git(origin, "commit", "-m", `commit ${index}`);
+		}
+		await rm(clone, { recursive: true });
+		await git(".", "clone", "--quiet", "--depth", "2", "--no-local", origin, clone);
+
+		const snapshot = await readWorkspaceGitGraph(clone);
+		assertEquals(snapshot.isGitRepository, true);
+		assertEquals(
+			snapshot.rows.map((row) => row.subject),
+			["commit 3", "commit 2"],
+		);
+		// The shallow boundary commit ("commit 2") is grafted: Git reports it
+		// with no parents, same as a genuine root commit, and the graph must
+		// lay it out (and stop) without treating the missing parent as an error.
+		assertEquals(snapshot.rows.at(-1)!.parents, []);
+		assertEquals(snapshot.laneCount, 1);
+	} finally {
+		await rm(origin, { recursive: true });
+		await rm(clone, { recursive: true, force: true });
+	}
+});
+
 test("main branch detection falls back from origin/HEAD to a local main or master", async () => {
 	const repository = await makeGitRepository();
 	try {

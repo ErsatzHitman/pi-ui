@@ -19,6 +19,10 @@ const lanePaletteSize = 8; // Matches the `--graph-lane-N` tokens; lanes beyond 
 // branches (lanes) a repo has, so a busy history (or a narrow 390px pane)
 // never squeezes the commit subject out entirely — lanes just pack tighter.
 const maxLaneAreaWidth = 120;
+// Matches the CSS `@media (width <= 30rem)` breakpoint (workspace-review.css)
+// that hides the hash/author/time columns — below it, a row has only the
+// lane, subject, and ref badges left to fit, so refs collapse harder too.
+const narrowRowWidth = 480;
 
 function renderRefBadge(ref: GitGraphRef): HTMLElement {
 	const badge = document.createElement("span");
@@ -28,7 +32,15 @@ function renderRefBadge(ref: GitGraphRef): HTMLElement {
 	badge.dataset.kind = ref.kind;
 	if (ref.main) badge.dataset.main = "";
 	if (ref.current) badge.dataset.current = "";
-	badge.textContent = ref.name;
+	// Flexbox doesn't run `text-overflow: ellipsis` on a bare text node inside
+	// a flex container (the badge itself is `display: inline-flex`, from
+	// `.badge`) — it just hard-clips, cutting a ref name mid-word with no "…".
+	// A nested, non-flex label carries the truncation instead, and needs its
+	// own `min-width: 0` since it is now the badge's sole flex item.
+	const label = document.createElement("span");
+	label.className = "review-graph-ref-label";
+	label.textContent = ref.name;
+	badge.append(label);
 	return badge;
 }
 
@@ -113,6 +125,12 @@ export function createWorkspaceGitGraph(
 		moreButton.hidden = !snapshot.hasMore;
 	}
 
+	/** Fewer ref badges fit before a "+N" overflow badge at a narrower width. */
+	function maxVisibleRefsForWidth(): number {
+		const available = rowsHost.clientWidth || narrowRowWidth;
+		return available <= narrowRowWidth ? 1 : 3;
+	}
+
 	function laneGap(): number {
 		const lanes = (snapshot?.laneCount ?? 1) + 1;
 		// The lane area may take a share of the row's *actual* rendered width
@@ -167,8 +185,9 @@ export function createWorkspaceGitGraph(
 		// A commit can carry many refs at once (several local branches sharing a
 		// tip, plus remotes and tags). Showing them all crowds out the subject
 		// text entirely, so the most identifying ones (current branch, main)
-		// sort first and the rest collapse into a "+N" badge.
-		const maxVisibleRefs = 3;
+		// sort first and the rest collapse into a "+N" badge — harder at a
+		// narrow width, where the row has less room per badge to begin with.
+		const maxVisibleRefs = maxVisibleRefsForWidth();
 		const sortedRefs = [...row.refs].sort((a, b) => refPriority(a) - refPriority(b));
 		for (const ref of sortedRefs.slice(0, maxVisibleRefs)) {
 			button.append(renderRefBadge(ref));

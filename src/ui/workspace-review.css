@@ -84,13 +84,6 @@
 		font-size: var(--text-3xs);
 		font-variant-numeric: tabular-nums;
 	}
-	.review-change-totals {
-		display: flex;
-		gap: 0.25rem;
-		margin-inline-start: auto;
-		font: var(--text-3xs)/1 var(--font-mono);
-		font-variant-numeric: tabular-nums;
-	}
 	.review-additions {
 		color: var(--status-success);
 	}
@@ -390,7 +383,12 @@
 	.review-graph-subject {
 		overflow: hidden;
 		flex-shrink: 1;
-		min-inline-size: 4rem;
+
+		/* No floor: at the narrowest widths the lane and ref badges already
+		   claim most of the row, and the subject must give up the rest rather
+		   than push the row wider than its container (it keeps its own
+		   ellipsis however small it gets). */
+		min-inline-size: 0;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		font-size: var(--text-xs);
@@ -405,7 +403,13 @@
 	   the dot, subject, hash, author and time. */
 	.review-graph-ref {
 		overflow: hidden;
-		flex-shrink: 0;
+
+		/* Shrinkable (not fixed) at every width: a row's ref count and name
+		   lengths vary per commit, so a badge that only ever shrank below
+		   30rem could still overflow a row at a wider width — e.g. three
+		   octopus-merge branch badges in a 768px pane. */
+		flex-shrink: 1;
+		min-inline-size: 2rem;
 		max-inline-size: 9rem;
 		height: auto;
 		padding: 0.0625rem 0.375rem;
@@ -413,7 +417,18 @@
 		background: var(--surface-muted);
 		font-size: var(--text-3xs);
 		font-family: var(--font-mono);
+	}
+
+	/* `.review-graph-ref` is `display: inline-flex` (from `.badge`), and a flex
+	   container never runs `text-overflow` on a bare text node — it just
+	   hard-clips, cutting a ref name mid-word with no "…". This nested,
+	   non-flex label is the badge's sole flex item, so it needs its own
+	   `min-width: 0` to shrink past its text's natural width at all. */
+	.review-graph-ref-label {
+		overflow: hidden;
+		min-width: 0;
 		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.review-graph-ref[data-kind="tag"] {
 		border-radius: var(--radius-sm);
@@ -496,8 +511,6 @@
 			display: none;
 		}
 		.review-graph-ref {
-			flex-shrink: 1;
-			min-inline-size: 2rem;
 			max-inline-size: 4rem;
 		}
 	}

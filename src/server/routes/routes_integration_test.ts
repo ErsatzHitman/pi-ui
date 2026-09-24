@@ -520,50 +520,6 @@ test("sessions can be forked to another workspace", async () => {
 	}
 });
 
-test("workspace review comments are sent to the current agent session", async () => {
-	let prompt = "";
-	const context = fakeContext({
-		host: fakeHost({
-			prompt: (value: string) => {
-				prompt = value;
-				return Promise.resolve(true);
-			},
-		}),
-	});
-	const response = await createRouter(context).fetch(
-		signalRequest("/workspace/review/submit", {
-			workspaceReviewComments: {
-				comments: [
-					{
-						body: "handle this case",
-						endLine: 14,
-						endSide: "additions",
-						path: "src/example.ts",
-						startLine: 12,
-						startSide: "additions",
-					},
-				],
-			},
-		}),
-	);
-	assertEquals(response.status, 200);
-	assertStringIncludes(await response.text(), "pi-ui-workspace-review-submitted");
-	assertEquals(
-		prompt,
-		"address the following review comments:\n\n" +
-			"1. src/example.ts:12–14\nhandle this case",
-	);
-});
-
-test("workspace review comments reject malformed input", async () => {
-	const response = await createRouter(fakeContext()).fetch(
-		signalRequest("/workspace/review/submit", {
-			workspaceReviewComments: { comments: [] },
-		}),
-	);
-	assertEquals(response.status, 400);
-});
-
 test("malformed actions return 400 without mutating the transcript", async () => {
 	const context = fakeContext();
 	const response = await createRouter(context).fetch(
