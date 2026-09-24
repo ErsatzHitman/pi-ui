@@ -31,6 +31,14 @@ function isMultiPane(command) {
 	return command.dataset.multiPane === "true";
 }
 
+/** Left/Right switch panes only when the caret already sits at that edge of the search
+ * text with nothing selected, so they still move the caret while editing a query. */
+export function caretAtEdge(input, key) {
+	const { selectionStart, selectionEnd, value } = input;
+	if (selectionStart === null || selectionStart !== selectionEnd) return false;
+	return key === "ArrowLeft" ? selectionStart === 0 : selectionEnd === value.length;
+}
+
 function commandPanes(command) {
 	return [...command.querySelectorAll(paneSelector)];
 }
@@ -141,7 +149,8 @@ function handleKeydown(event) {
 		}
 		if (
 			isMultiPane(command) &&
-			(event.key === "ArrowRight" || event.key === "ArrowLeft")
+			(event.key === "ArrowRight" || event.key === "ArrowLeft") &&
+			caretAtEdge(event.target, event.key)
 		) {
 			// A pane switch is expressed as a click, so it runs through the exact same
 			// handler as the mouse/Enter path: `window.piUi.modelPicker.selectProvider`
