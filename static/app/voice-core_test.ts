@@ -3,6 +3,7 @@ import { test } from "bun:test";
 import { assert, assertEquals, assertFalse } from "#testing/assertions";
 
 import {
+	armingIsReady,
 	BarHistory,
 	blockedReason,
 	canTransition,
@@ -71,6 +72,34 @@ test("blockedReason detects insecure context, missing MediaRecorder, and no-key"
 	assertEquals(blockedReason({ ...base, hasMediaRecorder: false }), "unsupported");
 	assertEquals(blockedReason({ ...base, voiceStatus: "no-key" }), "no-key");
 	assertEquals(blockedReason({ ...base, voiceStatus: "ready" }), "");
+});
+
+test("armingIsReady: a live signal, the recorder starting, or the fallback timeout is enough alone", () => {
+	const base = {
+		hasSignal: false,
+		recorderStarted: false,
+		armingElapsedMs: 0,
+		fallbackMs: 1500,
+	};
+	assertFalse(armingIsReady(base));
+	assert(armingIsReady({ ...base, hasSignal: true }));
+	assert(armingIsReady({ ...base, recorderStarted: true }));
+	assert(armingIsReady({ ...base, armingElapsedMs: 1500 }));
+	assert(armingIsReady({ ...base, armingElapsedMs: 2000 }));
+});
+
+test("armingIsReady: the recorder's start event alone ends arming even with no analyser signal", () => {
+	// A missing/failed AudioContext means the analyser never reports a signal at all
+	// (hasSignal stays false forever); recorderStarted must still get arming out on its
+	// own, well before the fallback timeout, so the UI never gets stuck in arming.
+	assert(
+		armingIsReady({
+			hasSignal: false,
+			recorderStarted: true,
+			armingElapsedMs: 50,
+			fallbackMs: 1500,
+		}),
+	);
 });
 
 test("isRetryableUploadFailure lets a voice error code decide, else any 5xx", () => {

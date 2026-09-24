@@ -260,6 +260,27 @@ test("429 twice reports rate-limited with the retry-after seconds", async () => 
 	assertEquals(server.requests.length, 2);
 });
 
+test("a retry-after of 0 reports a message consistent with retryAfterSeconds: 0, not '1s'", async () => {
+	server = startFakeGroqServer();
+	server.respond(() => ({ status: 429, headers: { "retry-after": "0" } }));
+	const transcriber = createGroqTranscriber({ delay: async () => {} });
+	const result = await transcriber.transcribe({
+		audio: audioFile(),
+		apiKey: "k",
+		model: "m",
+		baseUrl: server.url,
+		signal: new AbortController().signal,
+	});
+	assertEquals(result, {
+		ok: false,
+		status: 429,
+		code: "rate-limited",
+		message: "Groq rate limit reached. Try again in a moment.",
+		retryAfterSeconds: 0,
+	});
+	assertEquals(server.requests.length, 2);
+});
+
 test("503 then 200 succeeds after one retry with the default delay", async () => {
 	server = startFakeGroqServer();
 	let calls = 0;

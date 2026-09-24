@@ -33,6 +33,9 @@ export function createWaveformRenderer(canvas) {
 	let cssWidth = 1;
 	let cssHeight = 1;
 	let color = "currentColor";
+	// The arming pulse draws in --text-muted, not the recording bars' --text (§1.7), so it
+	// needs its own resolved color alongside the canvas's own computed `color`.
+	let mutedColor = "currentColor";
 
 	function resize() {
 		const rect = canvas.getBoundingClientRect();
@@ -46,7 +49,10 @@ export function createWaveformRenderer(canvas) {
 	}
 
 	function readColor() {
-		color = (ctx && getComputedStyle(canvas).color) || "currentColor";
+		if (!ctx) return;
+		const computed = getComputedStyle(canvas);
+		color = computed.color || "currentColor";
+		mutedColor = computed.getPropertyValue("--text-muted").trim() || color;
 	}
 
 	/** How many bars fit across the canvas, plus a couple extra so the scroll never gaps. */
@@ -93,26 +99,42 @@ export function createWaveformRenderer(canvas) {
 		ctx.restore();
 	}
 
-	/** Muted travelling bump across the floor, shown before real audio is flowing. */
-	function drawArming(elapsedMs) {
+	/** Shared arming-canvas setup: muted floor dots, one bar height per index from `barHeight`. */
+	function drawArmingBars(barHeight) {
 		beginFrame();
+		ctx.fillStyle = mutedColor;
 		const capacity = barCapacity();
-		const phase =
-			((elapsedMs % ARM_SWEEP_PERIOD_MS) / ARM_SWEEP_PERIOD_MS) * capacity;
 		for (let i = 0; i < capacity; i += 1) {
 			const x = cssWidth - PITCH * (i + 1);
 			if (x + BAR_WIDTH < 0) break;
+			drawBar(x, barHeight(i, capacity), 0.5);
+		}
+		ctx.restore();
+	}
+
+	/** Muted travelling bump across the floor, shown before real audio is flowing. */
+	function drawArming(elapsedMs) {
+		const capacity = barCapacity();
+		const phase =
+			((elapsedMs % ARM_SWEEP_PERIOD_MS) / ARM_SWEEP_PERIOD_MS) * capacity;
+		drawArmingBars((i) => {
 			const distance = Math.min(
 				Math.abs(i - phase),
 				Math.abs(i - phase + capacity),
 				Math.abs(i - phase - capacity),
 			);
-			const bump =
+			return (
+				ARM_FLOOR +
 				ARM_AMPLITUDE *
-				Math.exp(-(distance * distance) / (2 * ARM_SIGMA_BARS ** 2));
-			drawBar(x, ARM_FLOOR + bump, 0.5);
-		}
-		ctx.restore();
+					Math.exp(-(distance * distance) / (2 * ARM_SIGMA_BARS ** 2))
+			);
+		});
+	}
+
+	/** Static muted floor dots, no travelling bump: arming under reduced motion (never an
+	 * empty canvas — same "never dead" rule as the recording waveform). */
+	function drawArmingFloor() {
+		drawArmingBars(() => ARM_FLOOR);
 	}
 
 	function clear() {
@@ -120,5 +142,13 @@ export function createWaveformRenderer(canvas) {
 		ctx.restore();
 	}
 
-	return { barCapacity, clear, draw, drawArming, readColor, resize };
+	return {
+		barCapacity,
+		clear,
+		draw,
+		drawArming,
+		drawArmingFloor,
+		readColor,
+		resize,
+	};
 }

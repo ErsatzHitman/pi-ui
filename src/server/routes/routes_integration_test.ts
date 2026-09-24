@@ -2005,6 +2005,66 @@ test("a valid recording is transcribed and returned as {text}", async () => {
 	assertEquals(await response.json(), { text: "transcribed text" });
 });
 
+test("a same-origin browser upload is accepted (Sec-Fetch-Site)", async () => {
+	const response = await createRouter(fakeContext()).fetch(
+		voiceUploadRequest({ headers: { "sec-fetch-site": "same-origin" } }),
+	);
+	assertEquals(response.status, 200);
+});
+
+test("a same-origin browser upload is accepted (matching Origin/Host, no auth token)", async () => {
+	const response = await createRouter(fakeContext()).fetch(
+		voiceUploadRequest({
+			headers: { origin: "http://localhost", host: "localhost" },
+		}),
+	);
+	assertEquals(response.status, 200);
+});
+
+test("a direct API call with no Origin or Sec-Fetch-Site header still works", async () => {
+	// No auth token configured (the no-auth localhost default) means no credential rides
+	// along automatically either, so a caller with neither header is a script/curl/CLI, not
+	// a browser tab on another site — the same baseline exposure every other unauthenticated
+	// route already has (AUDIT-voice.md remaining #2).
+	const response = await createRouter(fakeContext()).fetch(voiceUploadRequest());
+	assertEquals(response.status, 200);
+});
+
+test("a cross-site upload is rejected with 403 (Sec-Fetch-Site: cross-site)", async () => {
+	let transcribeCalled = false;
+	const context = fakeContext({
+		voice: {
+			status: () => ({ status: "ready", maxSeconds: 300 }),
+			transcribe: async () => {
+				transcribeCalled = true;
+				return { ok: true, text: "should not run" };
+			},
+		},
+	});
+	const response = await createRouter(context).fetch(
+		voiceUploadRequest({ headers: { "sec-fetch-site": "cross-site" } }),
+	);
+	assertEquals(response.status, 403);
+	assertEquals((await response.json()).error, "forbidden");
+	assertEquals(transcribeCalled, false);
+});
+
+test("a cross-site upload is rejected with 403 (Origin doesn't match Host)", async () => {
+	const context = fakeContext({
+		voice: {
+			status: () => ({ status: "ready", maxSeconds: 300 }),
+			transcribe: async () => ({ ok: true, text: "should not run" }),
+		},
+	});
+	const response = await createRouter(context).fetch(
+		voiceUploadRequest({
+			headers: { origin: "https://evil.example", host: "localhost" },
+		}),
+	);
+	assertEquals(response.status, 403);
+	assertEquals((await response.json()).error, "forbidden");
+});
+
 test("a missing or empty audio field is a 400 invalid-audio", async () => {
 	const context = fakeContext();
 	const missing = await createRouter(context).fetch(

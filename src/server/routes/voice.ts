@@ -1,3 +1,4 @@
+import { isCrossSiteBrowserRequest } from "../request-auth.ts";
 import type { RouteMap } from "../route.ts";
 import { ALLOWED_AUDIO_BASE_MIME_TYPES, baseMimeType } from "../voice/audio-mime.ts";
 import type { VoiceErrorCode } from "../voice/voice-service.ts";
@@ -24,6 +25,21 @@ async function transcribeVoice(
 	request: Request,
 	context: RouteContext,
 ): Promise<Response> {
+	// Spend protection (audit remaining #2): without this, another site's page open in the
+	// same browser could POST straight to this route and spend Groq credit — in every auth
+	// mode, including the no-auth localhost default, where there is no cookie/token gate at
+	// all to ride along on. Checked before the status lookup so a cross-site probe also
+	// can't learn whether voice is configured.
+	if (isCrossSiteBrowserRequest(request)) {
+		return Response.json(
+			{
+				error: "forbidden",
+				message: "Cross-site requests to voice input are not allowed.",
+			},
+			{ status: 403 },
+		);
+	}
+
 	const status = context.voice.status();
 	if (status.status === "disabled") {
 		return voiceErrorResponse(404, "disabled", "Voice input is disabled.");

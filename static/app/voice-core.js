@@ -58,6 +58,23 @@ export function blockedReason({
 	return "";
 }
 
+/**
+ * Whether arming should transition to recording (§2.1.9): a real audio signal from the
+ * analyser, the `MediaRecorder` itself firing its `start` event (proof audio is flowing
+ * even when the analyser never will — no `AudioContext` constructor, or one that silently
+ * failed to produce data), or the fallback timeout elapsing. Any one of the three is
+ * enough, so a missing/failed `AudioContext` can never leave the UI stuck in arming
+ * forever: the recorder's own `start` still fires.
+ */
+export function armingIsReady({
+	hasSignal,
+	recorderStarted,
+	armingElapsedMs,
+	fallbackMs,
+}) {
+	return hasSignal || recorderStarted || armingElapsedMs >= fallbackMs;
+}
+
 /** Every `error` code `POST /voice/transcribe` answers with (DESIGN-voice.md §7.1). */
 const VOICE_ERROR_CODES = new Set([
 	"disabled",

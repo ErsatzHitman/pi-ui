@@ -5,8 +5,9 @@
 // canvas drawing lives in voice-waveform.js.
 
 import { isString } from "../../src/utils/type-guards.ts";
-import { promptInput } from "./prompt.js";
+import { placeNoticeAbovePromptRow, promptInput } from "./prompt.js";
 import {
+	armingIsReady,
 	BarHistory,
 	blockedReason,
 	canTransition,
@@ -68,6 +69,7 @@ let rafId;
 let lastFrameTs;
 let armingElapsedMs = 0;
 let armingHintTimer;
+let recorderStarted = false;
 let firstZeroFrameAt;
 let noAudioHintShown = false;
 let decayEnv = 0;
@@ -78,6 +80,7 @@ let activeStartedAt = 0;
 let isActiveInterval = false;
 
 let savedSelection;
+let savedInputValue;
 let cameFromMicButton = false;
 let retainedBlob;
 let retainedMimeType = "";
@@ -190,9 +193,7 @@ function showError(message, { retryable = false } = {}) {
 		el.id = "prompt-voice-error";
 		el.className = "file-transfer-error prompt-voice-error";
 		el.setAttribute("role", "alert");
-		// Above the whole editor row (a flex row: panel, textarea, actions), so the notice spans
-		// the prompt surface instead of becoming a flex column that squeezes the textarea.
-		(input.closest(".prompt-editor-row") ?? input).before(el);
+		placeNoticeAbovePromptRow(el, input);
 	}
 	el.replaceChildren();
 	const text = document.createElement("span");
@@ -319,6 +320,7 @@ function teardown() {
 	reducedMotionAccMs = 0;
 	noAudioHintShown = false;
 	firstZeroFrameAt = undefined;
+	recorderStarted = false;
 }
 
 // --- getUserMedia / MediaRecorder plumbing. ---
@@ -390,6 +392,7 @@ async function start() {
 
 	cameFromMicButton = document.activeElement === micButtonEl();
 	savedSelection = captureCaret();
+	savedInputValue = promptInput()?.value;
 	armingElapsedMs = 0;
 	setState("arming");
 	updateLabel("Starting microphone…");
@@ -452,6 +455,14 @@ async function start() {
 		recorder = new MediaRecorder(stream);
 	}
 	chunks = [];
+	recorderStarted = false;
+	// A second, independent readiness signal (armingIsReady, voice-core.js): the recorder
+	// firing `start` proves audio is flowing even if the analyser never will (no
+	// AudioContext constructor, or one that silently produced no data), so a missing/failed
+	// AudioContext can't leave arming stuck forever.
+	recorder.addEventListener("start", () => {
+		recorderStarted = true;
+	});
 	recorder.addEventListener("dataavailable", (event) => {
 		if (event.data && event.data.size > 0) chunks.push(event.data);
 	});
@@ -562,6 +573,7 @@ async function complete() {
 		mimeType: finalMimeType,
 		activeMs,
 		session: mySession,
+		caret: savedSelection,
 	});
 }
 
@@ -639,7 +651,7 @@ function handleUploadFailure(result) {
 	}
 }
 
-async function uploadAndInsert({ blob, mimeType, activeMs, session }) {
+async function uploadAndInsert({ blob, mimeType, activeMs, session, caret }) {
 	setState("transcribing");
 	updateLabel("Transcribing…");
 
@@ -656,7 +668,7 @@ async function uploadAndInsert({ blob, mimeType, activeMs, session }) {
 			restoreFocusToInput();
 			return;
 		}
-		finishWithTranscript(result.text);
+		finishWithTranscript(result.text, caret);
 	} catch (error) {
 		if (session !== generation) return;
 		if (error?.name === "AbortError" && controller.signal.aborted) {
@@ -671,7 +683,7 @@ async function uploadAndInsert({ blob, mimeType, activeMs, session }) {
 	}
 }
 
-function finishWithTranscript(text) {
+function finishWithTranscript(text, caret) {
 	const trimmed = (text ?? "").trim();
 	if (trimmed === "") {
 		showNotice("Didn't catch any speech. Try again closer to the microphone.");
@@ -680,15 +692,15 @@ function finishWithTranscript(text) {
 		return;
 	}
 	const input = promptInput();
-	const caret = savedSelection ?? {
+	const resolvedCaret = caret ?? {
 		start: input?.value.length ?? 0,
 		end: input?.value.length ?? 0,
 	};
 	if (input) {
 		const { value, caret: newCaret } = insertTranscript(
 			input.value,
-			caret.start,
-			caret.end,
+			resolvedCaret.start,
+			resolvedCaret.end,
 			trimmed,
 		);
 		input.value = value;
@@ -717,14 +729,34 @@ function cancel() {
 	else restoreFocusToInput();
 }
 
+/**
+ * Retry's caret (audit remaining #5): the caret saved when recording started, unless the
+ * user has since moved it — without typing, which would have already cleared the Retry
+ * button via the input listener in bindVoice() — in which case the current caret wins.
+ * Comparing the input's value against what it was at that moment is how "without typing"
+ * is verified, since a caret read alone can't tell a moved caret from one that only looks
+ * unchanged because the same edit happened to leave it in the same place.
+ */
+function retryCaret() {
+	const input = promptInput();
+	if (!input || savedSelection === undefined) return savedSelection;
+	if (input.value !== savedInputValue) return savedSelection;
+	const current = captureCaret();
+	if (current.start === savedSelection.start && current.end === savedSelection.end) {
+		return savedSelection;
+	}
+	return current;
+}
+
 async function retry() {
 	if (!retainedBlob || state !== "idle") return;
 	const blob = retainedBlob;
 	const mimeType = retainedMimeType;
 	const activeMs = retainedActiveMs;
+	const caret = retryCaret();
 	generation += 1;
 	const mySession = generation;
-	await uploadAndInsert({ blob, mimeType, activeMs, session: mySession });
+	await uploadAndInsert({ blob, mimeType, activeMs, session: mySession, caret });
 }
 
 /** The server config turned voice input off (`voice.enabled: false`); the mic button is hidden
@@ -803,10 +835,14 @@ function pushBar(value, dtMs) {
 function render(liveValue) {
 	if (!waveform) return;
 	if (state === "arming") {
-		if (reducedMotion()) waveform.clear();
+		if (reducedMotion()) waveform.drawArmingFloor();
 		else waveform.drawArming(armingElapsedMs);
 		return;
 	}
+	// A stale animation frame can still be in flight the instant teardown() clears
+	// barHistory (it only cancels the *next* one) — same guard style as pushBar() above;
+	// skipping one visual frame is harmless, unlike throwing out of a rAF callback.
+	if (!barHistory) return;
 	if (state === "recording") {
 		waveform.draw(
 			barHistory.bars,
@@ -827,9 +863,9 @@ function loopFrame(now) {
 	let liveValue = 0;
 	if (state === "arming" || state === "recording") {
 		armingElapsedMs += dt;
+		let hasSignal = false;
 		if (analyser) {
 			analyser.getFloatTimeDomainData(frameBuffer);
-			let hasSignal = false;
 			for (let i = 0; i < frameBuffer.length; i += 1) {
 				if (frameBuffer[i] !== 0) {
 					hasSignal = true;
@@ -838,17 +874,28 @@ function loopFrame(now) {
 			}
 			const result = levelMeter.update(frameBuffer, dt);
 			liveValue = result.env;
-			if (
-				state === "arming" &&
-				(hasSignal || armingElapsedMs >= ARMING_READY_FALLBACK_MS)
-			) {
-				enterRecording();
-			} else if (state === "recording") {
+			if (state === "recording") {
 				checkNoAudioHint(hasSignal, now);
 				speechGate.pushFrame(result.voiced, dt);
 				pushBar(liveValue, dt);
-				checkMaxDuration();
 			}
+		}
+		// Not gated on `analyser`: recorderStarted and the fallback timeout must still be
+		// able to end arming, and the max-duration guard must still be able to end
+		// recording, even without one (see armingIsReady, voice-core.js).
+		if (state === "arming") {
+			if (
+				armingIsReady({
+					hasSignal,
+					recorderStarted,
+					armingElapsedMs,
+					fallbackMs: ARMING_READY_FALLBACK_MS,
+				})
+			) {
+				enterRecording();
+			}
+		} else {
+			checkMaxDuration();
 		}
 	} else if (state === "paused") {
 		decayEnv = updateEnvelope(decayEnv, 0, dt);

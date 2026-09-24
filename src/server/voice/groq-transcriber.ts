@@ -271,11 +271,19 @@ function classifyErrorResponse(response: Response): AttemptOutcome {
 	return providerErrorOutcome();
 }
 
+/** Kept consistent with the `retryAfterSeconds` reported alongside it: a `Retry-After: 0`
+ * (or sub-second) header must not turn into a message that claims a 1s wait the reported
+ * number doesn't back up — "a moment" (the same wording the header-less case already
+ * uses) covers a rounded-to-zero wait honestly instead. */
 function rateLimitedMessage(retryAfterSeconds: number | undefined): string {
 	if (retryAfterSeconds === undefined) {
 		return "Groq rate limit reached. Try again in a moment.";
 	}
-	return `Groq rate limit reached. Try again in ${Math.max(1, Math.round(retryAfterSeconds))}s.`;
+	const rounded = Math.round(retryAfterSeconds);
+	if (rounded <= 0) {
+		return "Groq rate limit reached. Try again in a moment.";
+	}
+	return `Groq rate limit reached. Try again in ${rounded}s.`;
 }
 
 function retryDelayMs(retryAfterSeconds: number | undefined): number {

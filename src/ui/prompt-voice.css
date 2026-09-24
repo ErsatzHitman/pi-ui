@@ -222,6 +222,12 @@
 			inset: -0.375rem -0.125rem;
 			content: "";
 		}
+	}
+
+	/* Label text hides under 420px (§1.7); "Transcribing…" and "Paused" stay visible since the
+	 * waveform area shrinks to make room for them instead. Kept separate from the 639px
+	 * touch-target breakpoint above — a narrower phone, not "mobile" in general. */
+	@media (width <= 420px) {
 		.prompt-voice-label {
 			display: none;
 		}
