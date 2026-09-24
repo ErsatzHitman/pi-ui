@@ -1,4 +1,5 @@
-import { chmod, mkdir } from "node:fs/promises";
+import type { MakeDirectoryOptions } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 
@@ -229,6 +230,14 @@ async function disableSystemdService(
  * holding `PI_UI_HOST`/`PI_UI_PORT`/`PI_UI_REMOTE`/`PI_UI_AUTH_TOKEN` — never the
  * `ExecStart` line, which any local user can read via `ps`. Exported so a caller (or a
  * test) can persist it without going through `systemctl`.
+ *
+ * The file is created with mode 0600 from the start (`Bun.write`'s `mode` option, applied
+ * at `open()` time) rather than written world/group-readable and `chmod`ed afterward — that
+ * write-then-chmod sequence leaves a brief window where a file containing
+ * `PI_UI_AUTH_TOKEN=<token>` sits on disk with default (umask-controlled, typically
+ * world/group-readable) permissions, readable by another local user on a shared host. Its
+ * containing directory is likewise created 0700 on first use, so a freshly created
+ * `~/.config/pi-ui/` isn't traversable by other local users either.
  */
 export async function writeSystemdServiceEnvironment(
 	config: ServerAutostartConfig,
@@ -238,8 +247,11 @@ export async function writeSystemdServiceEnvironment(
 		await writeConfig(
 			path,
 			systemdEnvironmentFileContents(config.serviceEnvironment),
+			{
+				mode: 0o600,
+				dirMode: 0o700,
+			},
 		);
-		await chmod(path, 0o600);
 	} else {
 		await removeIfPresent(path);
 	}
@@ -383,9 +395,19 @@ function launchDomain(config: ServerAutostartConfig): string {
 	return `gui/${config.uid}`;
 }
 
-async function writeConfig(path: string, contents: string): Promise<void> {
-	await mkdir(dirname(path), { recursive: true });
-	await Bun.write(path, contents);
+async function writeConfig(
+	path: string,
+	contents: string,
+	options: { mode?: number; dirMode?: number } = {},
+): Promise<void> {
+	const mkdirOptions: MakeDirectoryOptions = { recursive: true };
+	if (options.dirMode !== undefined) mkdirOptions.mode = options.dirMode;
+	await mkdir(dirname(path), mkdirOptions);
+	await Bun.write(
+		path,
+		contents,
+		options.mode !== undefined ? { mode: options.mode } : undefined,
+	);
 }
 
 async function removeIfPresent(path: string): Promise<void> {

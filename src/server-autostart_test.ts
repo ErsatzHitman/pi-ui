@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import { stat } from "node:fs/promises";
+import { dirname } from "node:path";
 
 import {
 	assertEquals,
@@ -212,6 +213,8 @@ test("writeSystemdServiceEnvironment writes a 0600 file with the persisted optio
 	if (process.platform !== "win32") {
 		const mode = (await stat(path)).mode & 0o777;
 		assertEquals(mode, 0o600);
+		const dirMode = (await stat(dirname(path))).mode & 0o777;
+		assertEquals(dirMode, 0o700);
 	}
 });
 
