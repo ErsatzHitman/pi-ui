@@ -1780,6 +1780,46 @@ test("HTML previews render outside the workspace with relative assets", async ()
 	}
 });
 
+// RM2 persistence item 1: `/sessions/image?id=` used to 404 for every id from a
+// previous process, since `SessionImageStore` was purely in-memory. It now persists
+// to disk (`session-image-store.ts`), so a second, unrelated `SessionImageStore`
+// pointed at the same directory — standing in for the server having restarted —
+// must still be able to serve an id the first one registered.
+test("a session image survives a simulated server restart", async () => {
+	const directory = await makeTempDir();
+	try {
+		const store = new SessionImageStore({ directory });
+		const url = store.register({ data: "aW1hZ2U=", mimeType: "image/png" });
+		await store.flush();
+
+		const restartedContext = fakeContext();
+		restartedContext.resources.sessionImages = new SessionImageStore({ directory });
+		const response = await createRouter(restartedContext).fetch(
+			new Request(`http://localhost${url}`),
+		);
+		assertEquals(response.status, 200);
+		assertEquals(response.headers.get("content-type"), "image/png");
+		assertEquals(
+			new Uint8Array(await response.arrayBuffer()),
+			Uint8Array.fromBase64("aW1hZ2U="),
+		);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test("an unknown or malformed session image id is a 404, not a crash", async () => {
+	const context = fakeContext();
+	for (const id of ["", "not-a-real-id", "../../etc/passwd"]) {
+		const response = await createRouter(context).fetch(
+			new Request(
+				`http://localhost${endpoints.sessionsImage}?id=${encodeURIComponent(id)}`,
+			),
+		);
+		assertEquals(response.status, 404);
+	}
+});
+
 function createRouter(context: RouteContext) {
 	return {
 		fetch(request: Request): Promise<Response> {

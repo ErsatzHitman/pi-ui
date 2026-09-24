@@ -44,8 +44,8 @@ export const sessionRoutes = {
 		},
 	},
 	[endpoints.sessionsImage]: {
-		GET: (_request, context, url) => {
-			const image = context.resources.sessionImages.get(
+		GET: async (_request, context, url) => {
+			const image = await context.resources.sessionImages.get(
 				url.searchParams.get("id") ?? "",
 			);
 			if (!image) throw new RouteError(404, "Session image not found.");

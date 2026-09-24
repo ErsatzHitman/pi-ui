@@ -30,10 +30,26 @@ function cacheDirectoryOverride(): string | undefined {
 	return process.env.PI_UI_CACHE_DIR?.trim() || undefined;
 }
 
+/**
+ * RM2 persistence: `bun test` must never touch the real data directory either —
+ * `session-image-store.ts` now persists pasted/attached images there, and a route
+ * test or e2e test that spins up a real app (`fakeContext()`'s bare
+ * `new SessionImageStore()`, or `createApp()` itself) would otherwise write into
+ * the developer's real `%LOCALAPPDATA%\pi-ui` (or the XDG/macOS equivalent).
+ * Mirrors `cacheDirectoryOverride` exactly; see `scripts/test-env.ts`.
+ */
+function dataDirectoryOverride(): string | undefined {
+	return process.env.PI_UI_DATA_DIR?.trim() || undefined;
+}
+
 /** Platform directory that holds this app's cache, config, or data files. */
 function appDirectory(kind: AppDirectory): string {
 	if (kind === "cache") {
 		const override = cacheDirectoryOverride();
+		if (override) return override;
+	}
+	if (kind === "data") {
+		const override = dataDirectoryOverride();
 		if (override) return override;
 	}
 	const home = os.homedir();
