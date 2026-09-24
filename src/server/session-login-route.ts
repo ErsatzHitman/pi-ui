@@ -34,13 +34,14 @@ export function createSessionLoginRoute(
 			const candidate = stringField(form, "token") ?? "";
 			const ip = clientIp(request, server);
 
-			// Checked in this order — like checkAuthToken (request-auth.ts) — so a
-			// correct token always gets in, even from an IP currently blocked for
-			// wrong guesses; the block only ever slows down guessing itself.
-			if (!candidate || !timingSafeEqualStrings(candidate, expectedToken)) {
-				const blocked = rateLimiter.isBlocked(ip);
-				if (blocked.blocked)
-					return tooManyRequestsResponse(blocked.retryAfterSeconds);
+			if (!candidate) return loginPageResponse(next, "Enter the auth token.");
+			// Like checkAuthToken (request-auth.ts): a blocked IP gets 429 even for the
+			// correct token, or the block would be a success oracle that slows no guesser
+			// down. An empty submission is not a guess and never counts.
+			const blocked = rateLimiter.isBlocked(ip);
+			if (blocked.blocked)
+				return tooManyRequestsResponse(blocked.retryAfterSeconds);
+			if (!timingSafeEqualStrings(candidate, expectedToken)) {
 				rateLimiter.recordFailure(ip);
 				return loginPageResponse(next, "That token isn't correct.");
 			}

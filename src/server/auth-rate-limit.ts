@@ -1,8 +1,8 @@
 // Bounds brute-force guessing of the auth token (see request-auth.ts): each wrong
 // attempt from a client IP is recorded, and once maxFailures land within windowMs that
-// IP is refused with 429 until the oldest of them ages out of the window. A correct
-// token always succeeds — it clears that IP's count instead of being blocked by it — so
-// this only slows down guessing, never a legitimate holder who mistyped it earlier.
+// IP is refused with 429 — for every credential it presents, the correct one included, so
+// the block is no success oracle — until the oldest of them ages out of the window. A
+// correct token presented while not blocked clears that IP's count.
 
 export interface RateLimitStatus {
 	blocked: boolean;

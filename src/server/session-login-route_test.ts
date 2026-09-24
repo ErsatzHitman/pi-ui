@@ -72,11 +72,22 @@ test("repeated wrong tokens from one IP get rate-limited", async () => {
 	assertEquals(response.headers.has("retry-after"), true);
 });
 
-test("a correct token succeeds even while that IP is blocked from wrong guesses", async () => {
+test("while an IP is blocked even the correct token gets 429, so the block is no success oracle", async () => {
 	const rateLimiter = new AuthRateLimiter({ maxFailures: 1 });
 	const route = createSessionLoginRoute(token, rateLimiter);
 	const server = serverFor("3.3.3.3");
 	await route.POST(loginRequest({ token: "wrong" }), server);
+	const response = await route.POST(loginRequest({ token }), server);
+	assertEquals(response.status, 429);
+	assertEquals(response.headers.get("set-cookie"), null);
+});
+
+test("an empty submission is not counted as a failed guess", async () => {
+	const rateLimiter = new AuthRateLimiter({ maxFailures: 1 });
+	const route = createSessionLoginRoute(token, rateLimiter);
+	const server = serverFor("4.4.4.4");
+	await route.POST(loginRequest({ token: "" }), server);
+	await route.POST(loginRequest({ token: "" }), server);
 	const response = await route.POST(loginRequest({ token }), server);
 	assertEquals(response.status, 303);
 });

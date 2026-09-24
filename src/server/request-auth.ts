@@ -194,28 +194,40 @@ export function checkAuthToken(
 	const query = url.searchParams.get("token") ?? undefined;
 	const cookie = cookieToken(request);
 	const provided = bearer ?? query ?? cookie;
-	const valid = !!provided && timingSafeEqualStrings(provided, expectedToken);
 
 	const ip = clientIp(request, deps.server);
 	const limiter = deps.rateLimiter;
 
-	if (!valid) {
-		if (limiter) {
-			const status = limiter.isBlocked(ip);
-			if (status.blocked) {
-				return {
-					ok: false,
-					response: tooManyRequestsResponse(status.retryAfterSeconds),
-				};
-			}
-			limiter.recordFailure(ip);
+	// A blocked IP gets 429 for every credential it presents, the correct one included:
+	// if the right token still got through, a guesser would simply keep going and watch
+	// for the first non-429, so the block would slow nothing down. Requests carrying no
+	// credential at all are not guesses — they neither count nor get blocked.
+	if (provided && limiter) {
+		const status = limiter.isBlocked(ip);
+		if (status.blocked) {
+			return {
+				ok: false,
+				response: tooManyRequestsResponse(status.retryAfterSeconds),
+			};
 		}
-		return {
-			ok: false,
-			response: isBrowserNavigation(request)
-				? loginPageResponse(sanitizeNextPath(url.pathname + url.search))
-				: unauthorizedResponse(),
-		};
+	}
+	const valid = !!provided && timingSafeEqualStrings(provided, expectedToken);
+
+	if (!valid) {
+		if (provided) limiter?.recordFailure(ip);
+		const response = isBrowserNavigation(request)
+			? loginPageResponse(sanitizeNextPath(url.pathname + url.search))
+			: unauthorizedResponse();
+		// A stale cookie (e.g. from before the token was rotated) would otherwise ride
+		// along on every request — each one a failed guess — until it rate-limits its own
+		// browser out of the login form.
+		if (!bearer && !query && cookie) {
+			response.headers.append(
+				"set-cookie",
+				buildClearedAuthCookie(isHttpsRequest(request)),
+			);
+		}
+		return { ok: false, response };
 	}
 	limiter?.recordSuccess(ip);
 

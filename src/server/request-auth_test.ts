@@ -311,7 +311,7 @@ test("repeated wrong tokens from one IP are rate-limited, but other IPs are unaf
 	if (!otherIp.ok) assertEquals(otherIp.response.status, 401);
 });
 
-test("a correct token succeeds even while that IP is currently blocked from wrong guesses", () => {
+test("while an IP is blocked even the correct token gets 429, so the block is no success oracle", () => {
 	const rateLimiter = new AuthRateLimiter({ maxFailures: 1 });
 	const server = serverFor("9.9.9.9");
 	checkAuthToken(
@@ -319,12 +319,64 @@ test("a correct token succeeds even while that IP is currently blocked from wron
 		token,
 		{ server, rateLimiter },
 	);
-	const result = checkAuthToken(
+	for (const headers of [
+		{ authorization: `Bearer ${token}` },
+		{ cookie: `pi_ui_token=${token}` },
+	]) {
+		const result = checkAuthToken(
+			new Request("http://localhost/", { headers }),
+			token,
+			{
+				server,
+				rateLimiter,
+			},
+		);
+		assertEquals(result.ok, false);
+		if (!result.ok) assertEquals(result.response.status, 429);
+	}
+	const viaQuery = checkAuthToken(
+		new Request(`http://localhost/stream?token=${token}`),
+		token,
+		{ server, rateLimiter },
+	);
+	assertEquals(viaQuery.ok, false);
+	if (!viaQuery.ok) assertEquals(viaQuery.response.status, 429);
+});
+
+test("requests that present no credential at all never count as failed guesses", () => {
+	const rateLimiter = new AuthRateLimiter({ maxFailures: 1 });
+	const server = serverFor("8.8.8.8");
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		const result = checkAuthToken(navigationRequest("http://localhost/"), token, {
+			server,
+			rateLimiter,
+		});
+		assertEquals(result.ok, false);
+		if (!result.ok) assertEquals(result.response.status, 401);
+	}
+	const correct = checkAuthToken(
 		new Request("http://localhost/", {
 			headers: { authorization: `Bearer ${token}` },
 		}),
 		token,
 		{ server, rateLimiter },
 	);
-	assertEquals(result.ok, true);
+	assertEquals(correct.ok, true);
+});
+
+test("a rejected stale cookie is cleared so the browser stops re-sending it", () => {
+	const result = checkAuthToken(
+		navigationRequest("https://pi.example/", {
+			headers: { cookie: "pi_ui_token=rotated-away" },
+		}),
+		token,
+	);
+	assertEquals(result.ok, false);
+	if (!result.ok) {
+		assertEquals(result.response.status, 401);
+		assertStringIncludes(
+			result.response.headers.get("set-cookie") ?? "",
+			"pi_ui_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure",
+		);
+	}
 });
