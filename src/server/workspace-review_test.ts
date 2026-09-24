@@ -1,25 +1,17 @@
 import { test } from "bun:test";
-import { mkdir, rm, stat } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 
-import { parsePatchFiles } from "@pierre/diffs";
-
-import { assertEquals, assertRejects, assertStringIncludes } from "#testing/assertions";
+import { assertEquals } from "#testing/assertions";
 import { makeTempDir } from "#testing/temp";
 
 import { outputCommand } from "../utils/command.ts";
 import {
 	areWorkspacePathsIgnored,
-	discardWorkspaceChange,
 	findGitRoot,
 	findGitWatchPaths,
 	parseCommitLog,
 	parseNameStatus,
 	parsePorcelainStatus,
-	readWorkspaceCommit,
-	readWorkspaceDiff,
-	maximumWorkspaceDiffBytes,
-	WorkspaceReviewError,
-	readWorkspaceHistory,
 	readWorkspaceReview,
 	type WorkspaceReviewMetadataCache,
 } from "./workspace-review.ts";
@@ -144,14 +136,6 @@ test("workspace review combines repository files with tracked and untracked chan
 		assertEquals(Boolean(snapshot.branch), true);
 		assertEquals(snapshot.commits[0].subject, "initial");
 		assertEquals(snapshot.commits[0].pushed, null);
-		assertEquals((await readWorkspaceHistory(repository, 0)).length, 1);
-		const commit = await readWorkspaceCommit(repository, snapshot.commits[0].hash);
-		assertEquals(commit?.commit.subject, "initial");
-		assertEquals(
-			commit?.changes.map(({ path }) => path),
-			["README.md", "src/old.ts"],
-		);
-		assertStringIncludes(commit?.patch ?? "", "diff --git a/README.md b/README.md");
 		assertEquals(snapshot.changes, [
 			{
 				additions: 0,
@@ -173,74 +157,22 @@ test("workspace review combines repository files with tracked and untracked chan
 			},
 		]);
 		assertEquals("patch" in snapshot, false);
-		const patch = await readWorkspaceDiff(nestedWorkspace);
-		assertStringIncludes(patch, "diff --git a/README.md b/README.md");
-		assertStringIncludes(patch, "diff --git a/src/old.ts b/src/new.ts");
-		assertStringIncludes(patch, "diff --git a/notes.txt b/notes.txt");
-		const renamed = parsePatchFiles(
-			await readWorkspaceDiff(repository, "src/new.ts"),
-		).flatMap((patch) => patch.files);
-		assertEquals(
-			renamed.map((file) => file.name),
-			["src/new.ts"],
-		);
-		assertEquals(renamed[0]?.type, "rename-pure");
 		assertEquals(snapshot.revision.length, 64);
 
 		await Bun.write(`${repository}/notes.txt`, "changed again\n");
 		const updated = await readWorkspaceReview(repository);
 		assertEquals(updated.revision, snapshot.revision);
-		assertStringIncludes(
-			await readWorkspaceDiff(repository, "notes.txt"),
-			"+changed again",
-		);
 	} finally {
 		await rm(repository, { recursive: true });
 	}
 });
 
-for (const committed of [false, true]) {
-	test(`${committed ? "commit" : "working-tree"} patches preserve blank context and whitespace`, async () => {
-		const repository = await makeGitRepository();
-		try {
-			await Bun.write(`${repository}/tracked.txt`, "before\n\t \n\n");
-			await git(repository, "add", ".");
-			await git(repository, "commit", "--quiet", "-m", "initial");
-			await Bun.write(`${repository}/tracked.txt`, "after\n\t \n\n");
-			await Bun.write(`${repository}/added.txt`, "added\n  \n\t\n");
-			if (committed) {
-				await git(repository, "add", ".");
-				await git(repository, "commit", "--quiet", "-m", "update");
-			}
-			const snapshot = await readWorkspaceReview(repository);
-			const review = committed
-				? await readWorkspaceCommit(repository, snapshot.commits[0].hash)
-				: { patch: await readWorkspaceDiff(repository) };
-			const files = parsePatchFiles(review?.patch ?? "", undefined, true).flatMap(
-				(patch) => patch.files,
-			);
-			assertEquals(files.length, 2);
-			assertEquals(
-				files.find((file) => file.name === "tracked.txt")?.additionLines,
-				["after\n", "\t \n", "\n"],
-			);
-			assertEquals(files.find((file) => file.name === "added.txt")?.additionLines, [
-				"added\n",
-				"  \n",
-				"\t\n",
-			]);
-		} finally {
-			await rm(repository, { recursive: true });
-		}
-	});
-}
-
-test("large untracked trees stay metadata-only; explicit diffs are bounded and cancellable", async () => {
+test("large untracked trees stay metadata-only", async () => {
 	const repository = await makeGitRepository();
 	try {
 		await Bun.write(
 			`${repository}/node_modules/large.js`,
-			"x".repeat(maximumWorkspaceDiffBytes * 2),
+			"x".repeat(4 * 1024 * 1024),
 		);
 		await Promise.all(
 			Array.from({ length: 120 }, (_, index) =>
@@ -258,39 +190,6 @@ test("large untracked trees stay metadata-only; explicit diffs are bounded and c
 		assertEquals(snapshot.changes.length, 122);
 		assertEquals(snapshot.changeCount, 2);
 		assertEquals("patch" in snapshot, false);
-		assertStringIncludes(
-			await readWorkspaceDiff(repository, "[new] café file.txt"),
-			"+visible new file",
-		);
-		assertStringIncludes(
-			await readWorkspaceDiff(repository, "node_modules/0.js"),
-			"+export const n = 0;",
-		);
-		await assertRejects(
-			() => readWorkspaceDiff(repository),
-			WorkspaceReviewError,
-			"Too many changes",
-		);
-		await assertRejects(
-			() => readWorkspaceDiff(repository, "node_modules/large.js"),
-			WorkspaceReviewError,
-			"Diff too large",
-		);
-		await assertRejects(
-			() => readWorkspaceDiff(repository, "missing"),
-			WorkspaceReviewError,
-			"not found",
-		);
-		await assertRejects(
-			() =>
-				readWorkspaceDiff(
-					repository,
-					"node_modules/0.js",
-					AbortSignal.abort(new Error("cancelled")),
-				),
-			Error,
-			"cancelled",
-		);
 		await Bun.write(`${repository}/.gitignore`, "node_modules/\n");
 		await git(repository, "add", "-f", "node_modules/0.js");
 		assertEquals(
@@ -299,36 +198,6 @@ test("large untracked trees stay metadata-only; explicit diffs are bounded and c
 				.sort(),
 			[".gitignore", "[new] café file.txt", "node_modules/0.js"],
 		);
-	} finally {
-		await rm(repository, { recursive: true });
-	}
-});
-
-test("workspace review discards one tracked or untracked file at a time", async () => {
-	const repository = await makeGitRepository();
-	try {
-		await Bun.write(`${repository}/keep.txt`, "before\n");
-		await Bun.write(`${repository}/old.txt`, "rename me\n");
-		await git(repository, "add", ".");
-		await git(repository, "commit", "--quiet", "-m", "initial");
-
-		await Bun.write(`${repository}/keep.txt`, "after\n");
-		await Bun.write(`${repository}/untracked.txt`, "temporary\n");
-		await git(repository, "mv", "old.txt", "new.txt");
-
-		await discardWorkspaceChange(repository, "new.txt");
-		assertEquals(await Bun.file(`${repository}/old.txt`).text(), "rename me\n");
-		await assertRejects(() => stat(`${repository}/new.txt`));
-		assertEquals(
-			(await readWorkspaceReview(repository)).changes.map(({ path }) => path),
-			["keep.txt", "untracked.txt"],
-		);
-
-		await discardWorkspaceChange(repository, "untracked.txt");
-		await assertRejects(() => stat(`${repository}/untracked.txt`));
-		await discardWorkspaceChange(repository, "keep.txt");
-		assertEquals(await Bun.file(`${repository}/keep.txt`).text(), "before\n");
-		assertEquals((await readWorkspaceReview(repository)).changes, []);
 	} finally {
 		await rm(repository, { recursive: true });
 	}
@@ -354,10 +223,9 @@ async function makeGitRepository(): Promise<string> {
 	await git(repository, "config", "user.email", "pi-ui@example.invalid");
 	await git(repository, "config", "user.name", "pi-ui test");
 	// Pin line-ending behavior for this repo regardless of the machine's global
-	// git config: `discardWorkspaceChange` materializes file content straight
-	// from Git (checkout), and a global `core.autocrlf=true` (common on
-	// Windows) would silently convert the `\n` fixtures below to `\r\n` on
-	// write-back, which is a machine setting, not something this suite tests.
+	// git config: a global `core.autocrlf=true` (common on Windows) would
+	// silently convert the `\n` fixtures below to `\r\n`, which is a machine
+	// setting, not something this suite tests.
 	await git(repository, "config", "core.autocrlf", "false");
 	return repository;
 }

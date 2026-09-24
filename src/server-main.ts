@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { importLoginShellEnvironment } from "./login-shell-environment.ts";
+import { isPiCliPassthrough, runPiCli } from "./pi-cli-passthrough.ts";
 import { isRemoteMode, resolveRemoteMode, setRemoteMode } from "./remote-mode.ts";
 import {
 	disableServerAutostart,
@@ -35,7 +36,12 @@ import { isVersionRequest, version } from "./version.ts";
 // this runs and neither can hit this. Detected by this file living directly in a "src"
 // directory next to a tsconfig.json, true only for the raw-source entry point, never the
 // built outputs — so re-exec with the right --cwd only in that one narrow, unsupported case.
-if (basename(import.meta.dir) === "src") {
+//
+// Never for pi CLI passthrough argv (pi-cli-passthrough.ts): that runs the prebuilt pi
+// CLI, which needs none of this JSX, and `--cwd` would move a sub-agent child out of the
+// directory its parent extension spawned it in (`spawn(..., { cwd })`) into this repo,
+// so it would read and edit the wrong project.
+if (basename(import.meta.dir) === "src" && !isPiCliPassthrough(process.argv.slice(2))) {
 	const projectRoot = join(import.meta.dir, "..");
 	if (existsSync(join(projectRoot, "tsconfig.json")) && process.cwd() !== projectRoot) {
 		const child = Bun.spawn({
@@ -193,6 +199,8 @@ async function main(): Promise<void> {
 
 	if (isVersionRequest(args)) {
 		console.log(version);
+	} else if (isPiCliPassthrough(args)) {
+		await runPiCli(args);
 	} else if (args[0] === "service" || args[0] === "autostart") {
 		const installAction = args[0] === "service" ? "install" : "enable";
 		const uninstallAction = args[0] === "service" ? "uninstall" : "disable";

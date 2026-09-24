@@ -187,6 +187,11 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 		);
 	}
 	const currentLabel = current ? modelTriggerLabel(current) : "choose model";
+	const providers = modelPickerProviders(state.models);
+	const activeProvider = current?.provider ?? providers[0]?.provider ?? "";
+	// Pre-select the current provider + model (spec); with nothing chosen yet there is no
+	// model to land on, so open on the providers pane instead of an empty models pane.
+	const activePane = current ? "models" : "providers";
 	return syncHtml(
 		<div id="model-picker" class="prompt-context-picker model-picker">
 			<label class="sr-only" for="model-select-trigger">
@@ -237,9 +242,35 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 					data-align="end"
 					class="model-popover"
 					aria-label="Models"
-					data-on:beforetoggle="if (evt.newState === 'closed') window.piUi.controls.refresh(el)"
+					// Reset keyboard/pane state as the picker OPENS (not closes): the popover
+					// starts with nothing marked `.active`, so a picker refreshed only on close
+					// left a bare Enter with no active row to click — the user had to reach for
+					// an arrow key or the mouse first. Mirrors `resetCommandDialogOnOpen`
+					// (command-menu.tsx) and `selectTreeEntryAction` (tree-picker.tsx).
+					data-on:beforetoggle="if (evt.newState === 'open') window.piUi.modelPicker.reset(el)"
 				>
-					<div class="command">
+					<div
+						class="command model-command"
+						data-multi-pane={providers.length > 1 ? "true" : undefined}
+						data-active-pane={activePane}
+						data-active-provider={activeProvider}
+						data-searching="false"
+						// `data-active-pane`/`data-active-provider`/`data-searching` are the
+						// picker's live pane/provider/search state — set by this render, then
+						// mutated client-side by `window.piUi.modelPicker`/`modelSearch`
+						// (static/app/model-picker.js, model-search.js) as the user browses or
+						// types, all *while this same popover stays open*. Any other dirty-region
+						// re-render (another client changing the model, this client toggling a
+						// model's star, a thinking-level change, …) re-renders this whole picker
+						// from scratch and would otherwise morph these three attributes back to
+						// this render's values, silently discarding which pane/provider the user
+						// had drilled into (or that they were mid-search) even though the popover
+						// never closed. `reset()` (called on open, via `data-on:beforetoggle`
+						// above) is the one place meant to resync them, deriving the truth from
+						// the fresh `aria-current` markers this render always keeps up to date
+						// rather than trusting these three attributes.
+						data-preserve-attr="data-active-pane data-active-provider data-searching"
+					>
 						<header>
 							<input
 								id="model-select-input"
@@ -258,14 +289,86 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 								data-effect="window.piUi.modelSearch.filter(el, $_modelQuery)"
 							/>
 						</header>
-						<div
-							role="menu"
-							id="model-select-menu"
-							class="model-menu"
-							aria-labelledby="model-select-trigger"
-							data-empty="No models found."
-						>
-							<div role="group" aria-labelledby="model-select-heading">
+						{providers.length > 1 && (
+							<button
+								type="button"
+								class="btn model-back-button"
+								data-variant="ghost"
+								data-size="sm"
+								data-pane-back
+								aria-label="Back to providers"
+								data-on:click="window.piUi.modelPicker.back(el)"
+							>
+								<span aria-hidden="true">←</span> Providers
+							</button>
+						)}
+						<div class="model-picker-body">
+							{providers.length > 1 && (
+								<div
+									role="menu"
+									id="model-provider-menu"
+									class="model-pane model-provider-pane"
+									data-pane="providers"
+									aria-label="Providers"
+								>
+									<div
+										role="group"
+										aria-labelledby="model-provider-heading"
+									>
+										<div
+											role="heading"
+											id="model-provider-heading"
+											class="picker-heading"
+										>
+											<span>Providers</span>
+										</div>
+										{providers.map((provider) => (
+											<div
+												id={`model-provider-${encodeURIComponent(provider.provider)}`}
+												role="menuitem"
+												class="model-option model-provider-option"
+												data-preserve-attr="class"
+												data-provider={provider.provider}
+												aria-current={
+													provider.provider === activeProvider
+														? "true"
+														: "false"
+												}
+												data-on:click={`window.piUi.modelPicker.selectProvider(el, ${JSON.stringify(provider.provider)})`}
+											>
+												<span class="picker-option-text">
+													<span
+														class="picker-option-title"
+														safe
+													>
+														{provider.provider}
+													</span>
+													<span
+														class="picker-option-description"
+														safe
+													>
+														{provider.count}{" "}
+														{provider.count === 1
+															? "model"
+															: "models"}
+														{provider.configured
+															? ""
+															: " • no auth"}
+													</span>
+												</span>
+											</div>
+										))}
+									</div>
+								</div>
+							)}
+							<div
+								role="menu"
+								id="model-select-menu"
+								class="model-pane model-model-pane"
+								data-pane="models"
+								aria-labelledby="model-select-trigger"
+								data-empty="No models found."
+							>
 								<div
 									role="heading"
 									id="model-select-heading"
@@ -276,27 +379,65 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 										shortcut={activeKeybind("switch-model")}
 									/>
 								</div>
-								{state.models.map((model, index) => {
-									const value = `${model.provider}/${model.id}`;
-									const configured = model.configured
-										? ""
-										: " • no auth";
-									return (
-										<div
-											id={`model-option-${encodeURIComponent(value)}`}
-											role="menuitem"
-											class="model-option"
-											data-preserve-attr="class hidden"
-											aria-current={
-												value === state.currentModel
-													? "true"
-													: "false"
-											}
-											data-model-id={model.id}
-											data-model-provider={model.provider}
-											data-model-name={model.name}
-											data-model-search-order={index}
-											data-on:click={`
+								{providers.map((provider) => (
+									<div
+										// `modelPickerProviders` orders providers by each provider's
+										// first-appearing model, and `enabledModels`/scoping toggles
+										// re-sort `state.models` scoped/current-first — so a scope
+										// toggle can reorder these groups between renders. A stable,
+										// globally-unique id lets the morph engine (idiomorph-style
+										// `getElementById` reuse in static/vendor/datastar.js) track
+										// each provider's own group NODE across that reorder instead
+										// of positionally reassigning fresh content onto whichever
+										// node happens to sit in a given slot — without it, the
+										// `data-preserve-attr="hidden"` below could end up preserved
+										// on the wrong provider's node after a reorder.
+										id={`model-group-body-${encodeURIComponent(provider.provider)}`}
+										role="group"
+										data-provider-group={provider.provider}
+										// Client-owned narrowing (`applyActiveProvider()` in
+										// static/app/model-picker.js sets `hidden` here to show only
+										// the active provider's group): this render never sets
+										// `hidden` itself, so without this guard a later re-render's
+										// morph would strip it back out from under the open popover.
+										// Same reasoning as the `.model-option` rows below.
+										data-preserve-attr="hidden"
+										aria-labelledby={
+											providers.length > 1
+												? `model-group-${encodeURIComponent(provider.provider)}`
+												: "model-select-heading"
+										}
+									>
+										{providers.length > 1 && (
+											<div
+												role="heading"
+												id={`model-group-${encodeURIComponent(provider.provider)}`}
+												class="picker-heading model-group-heading"
+											>
+												<span safe>{provider.provider}</span>
+											</div>
+										)}
+										{provider.models.map(({ model, index }) => {
+											const value = `${model.provider}/${model.id}`;
+											const configured = model.configured
+												? ""
+												: " • no auth";
+											return (
+												<div
+													id={`model-option-${encodeURIComponent(value)}`}
+													role="menuitem"
+													class="model-option"
+													data-preserve-attr="class hidden"
+													aria-current={
+														value === state.currentModel
+															? "true"
+															: "false"
+													}
+													data-model-id={model.id}
+													data-model-provider={model.provider}
+													data-model-name={model.name}
+													data-model-search-order={index}
+													data-on:click={`
 												$_modelQuery = '';
 												document.getElementById('model-select-trigger')?.click();
 												@post('${endpoints.model}', {
@@ -304,56 +445,67 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 											});
 												requestAnimationFrame(() => document.getElementById('prompt-input')?.focus());
 											`}
-										>
-											<span class="picker-option-text">
-												<span class="picker-option-title" safe>
-													{model.id}
-												</span>
-												<span
-													class="picker-option-description"
-													safe
 												>
-													{model.provider}
-													{configured}
-												</span>
-											</span>
-											<span
-												class="selection-dot model-current-indicator"
-												hidden={value !== state.currentModel}
-												aria-hidden="true"
-											/>
-											<button
-												type="button"
-												class={[
-													"btn model-scope-button",
-													model.scoped
-														? "model-scope-button-active"
-														: "",
-												]}
-												data-variant={
-													model.scoped ? "secondary" : "ghost"
-												}
-												data-size="icon-sm"
-												aria-pressed={
-													model.scoped ? "true" : "false"
-												}
-												aria-label="Toggle scoped model"
-												data-on:click__stop={`@post('${endpoints.modelsScopeToggle}', {
+													<span class="picker-option-text">
+														<span
+															class="picker-option-title"
+															safe
+														>
+															{model.id}
+														</span>
+														<span
+															class="picker-option-description"
+															safe
+														>
+															{model.provider}
+															{configured}
+														</span>
+													</span>
+													<span
+														class="selection-dot model-current-indicator"
+														hidden={
+															value !== state.currentModel
+														}
+														aria-hidden="true"
+													/>
+													<button
+														type="button"
+														class={[
+															"btn model-scope-button",
+															model.scoped
+																? "model-scope-button-active"
+																: "",
+														]}
+														data-variant={
+															model.scoped
+																? "secondary"
+																: "ghost"
+														}
+														data-size="icon-sm"
+														aria-pressed={
+															model.scoped
+																? "true"
+																: "false"
+														}
+														aria-label="Toggle scoped model"
+														data-on:click__stop={`@post('${endpoints.modelsScopeToggle}', {
 												payload: { model: ${JSON.stringify(value)} },
 												});`}
-											>
-												<Icon
-													icon={Star}
-													class={
-														model.scoped
-															? "model-scope-icon-active"
-															: undefined
-													}
-												/>
-											</button>
-										</div>
-									);
-								})}
+													>
+														<Icon
+															icon={Star}
+															class={
+																model.scoped
+																	? "model-scope-icon-active"
+																	: undefined
+															}
+														/>
+													</button>
+												</div>
+											);
+										})}
+									</div>
+								))}
 							</div>
 						</div>
 					</div>
@@ -361,6 +513,37 @@ export function renderModelPicker(state: AppStateSnapshot): string {
 			</div>
 		</div>,
 	);
+}
+
+type ModelPickerProvider = {
+	provider: string;
+	count: number;
+	configured: boolean;
+	models: { model: AppStateSnapshot["models"][number]; index: number }[];
+};
+
+/**
+ * Groups `state.models` (already sorted scoped/current-first, then provider, then id —
+ * see `compareModelPickerOrder`) into providers for the picker's left pane, preserving
+ * each provider's first-appearance order and each provider's own model order.
+ */
+function modelPickerProviders(models: AppStateSnapshot["models"]): ModelPickerProvider[] {
+	const byProvider = new Map<string, ModelPickerProvider>();
+	models.forEach((model, index) => {
+		let entry = byProvider.get(model.provider);
+		if (!entry) {
+			entry = {
+				provider: model.provider,
+				count: 0,
+				configured: model.configured,
+				models: [],
+			};
+			byProvider.set(model.provider, entry);
+		}
+		entry.count += 1;
+		entry.models.push({ model, index });
+	});
+	return [...byProvider.values()];
 }
 
 function modelTriggerLabel(model: AppStateSnapshot["models"][number]): string {

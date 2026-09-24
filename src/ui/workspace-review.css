@@ -10,12 +10,6 @@
 	initial-value: 272px;
 }
 
-@property --review-changes-ratio {
-	syntax: "<number>";
-	inherits: false;
-	initial-value: 0.5;
-}
-
 @layer theme {
 	:root {
 		--review-toolbar-height: 1.875rem;
@@ -50,22 +44,6 @@
 		min-width: 0;
 		min-height: 0;
 		flex-direction: column;
-	}
-	#review-git-sidebar {
-		display: grid;
-		grid-template-rows:
-			auto
-			minmax(
-				6rem,
-				calc(
-					(100% - 2rem - var(--workspace-gap)) *
-						clamp(0.3, var(--review-changes-ratio, 0.5), 0.7)
-				)
-			)
-			var(--workspace-gap) minmax(6rem, 1fr);
-	}
-	#review-git-sidebar:has(#review-changes-section[hidden]) {
-		grid-template-rows: auto minmax(0, 1fr);
 	}
 	.review-sidebar-panel {
 		display: flex;
@@ -106,13 +84,6 @@
 		font-size: var(--text-3xs);
 		font-variant-numeric: tabular-nums;
 	}
-	.review-change-totals {
-		display: flex;
-		gap: 0.25rem;
-		margin-inline-start: auto;
-		font: var(--text-3xs)/1 var(--font-mono);
-		font-variant-numeric: tabular-nums;
-	}
 	.review-additions {
 		color: var(--status-success);
 	}
@@ -121,18 +92,6 @@
 	}
 	.review-tree-empty {
 		padding: 0 0.75rem 0.5rem;
-		color: var(--text-muted);
-		font-size: var(--text-xs);
-	}
-	.review-history {
-		min-height: 0;
-		flex: 1;
-		overflow-y: auto;
-		overscroll-behavior: contain;
-		padding: 0 0.25rem 0.25rem;
-	}
-	.review-loading {
-		padding: 0.25rem 0.5rem;
 		color: var(--text-muted);
 		font-size: var(--text-xs);
 	}
@@ -153,6 +112,15 @@
 		margin-inline: var(--workspace-gap);
 		margin-block-end: var(--workspace-gap);
 		padding-inline: 0.25rem;
+	}
+
+	/* Grow with styles/controls.css's 44px coarse-pointer button floor instead of
+	   letting "Load more"/close hang out of a 30px bar under the graph. */
+	@media (pointer: coarse) {
+		.review-toolbar {
+			height: auto;
+			min-height: var(--review-toolbar-height);
+		}
 	}
 	.review-file-heading {
 		display: flex;
@@ -215,7 +183,7 @@
 		background: var(--surface-canvas);
 		clip-path: inset(0 round var(--radius-sm));
 	}
-	#review-diff-view {
+	#review-graph {
 		border-radius: inherit;
 
 		/* Round the top while allowing side shadows below the corners. */
@@ -236,9 +204,12 @@
 		overscroll-behavior: contain;
 		outline: 0;
 	}
-	.review-diff-view {
+	.review-graph {
+		display: flex;
 		overflow-x: clip;
 		overflow-y: auto;
+		flex-direction: column;
+		padding-block-end: var(--workspace-inset);
 	}
 	.review-empty {
 		pointer-events: none;
@@ -301,31 +272,6 @@
 		opacity: 0;
 	}
 
-	.review-history-message {
-		padding: 0.25rem 0.5rem;
-		color: var(--text-muted);
-		font-size: var(--text-xs);
-	}
-	.review-commit {
-		display: flex;
-		width: 100%;
-		min-width: 0;
-		flex-direction: column;
-		gap: 0.125rem;
-		border-radius: var(--radius-md);
-		padding: 0.375rem 0.5rem;
-		color: var(--text-muted);
-		text-align: start;
-	}
-	.review-commit:hover,
-	.review-commit[aria-pressed="true"],
-	.review-commit-file:hover,
-	.review-commit-file[aria-pressed="true"] {
-		background: var(--surface-control);
-		color: var(--text);
-	}
-	.review-commit-subject,
-	.review-commit-author,
 	.review-detail-subject,
 	.review-detail-author,
 	.review-commit-file-path {
@@ -333,27 +279,9 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.review-commit-subject {
-		width: 100%;
-		font-size: var(--text-xs);
-	}
-	.review-commit-meta {
-		display: flex;
-		width: 100%;
-		min-width: 0;
-		align-items: baseline;
-		gap: 0.375rem;
-		font-size: var(--text-2xs);
-	}
-	.review-commit-hash {
-		flex-shrink: 0;
-		font-family: var(--font-mono);
-	}
-	.review-commit-author,
 	.review-detail-author {
 		min-width: 0;
 	}
-	.review-commit-meta .formatted-date,
 	.review-detail-meta .formatted-date {
 		margin-inline-start: auto;
 	}
@@ -369,7 +297,6 @@
 	}
 	.review-detail-heading,
 	.review-detail-meta,
-	.review-push-group,
 	.review-commit-file {
 		display: flex;
 		min-width: 0;
@@ -399,16 +326,6 @@
 	.review-detail-hash {
 		font-family: var(--font-mono);
 	}
-	.review-push-group {
-		gap: 0.5rem;
-		padding: 0.25rem 0.5rem;
-		font-size: var(--text-3xs);
-		font-weight: 500;
-	}
-	.review-push-rule {
-		flex: 1;
-		border-top: 1px solid var(--border);
-	}
 	.review-commit-files {
 		margin-inline-start: 0.75rem;
 		border-inline-start: 1px solid var(--border);
@@ -429,48 +346,219 @@
 		font-family: var(--font-mono);
 	}
 
-	.review-comment-wrapper {
-		width: 100%;
-		overflow: hidden;
-	}
-	.review-comment-card {
-		max-width: 42rem;
-		margin: 0.5rem 0.75rem;
-		border: 1px solid var(--border);
-		border-radius: var(--radius-lg);
-		background: var(--surface-raised);
-		padding: 0.75rem;
-		color: var(--text);
-		font-family: var(--font-sans);
-		white-space: normal;
-		box-shadow: var(--shadow-sm);
-	}
-	.review-comment-label {
-		margin-block-end: 0.5rem;
-		color: var(--text-muted);
-		font-size: var(--text-xs);
-		font-weight: 500;
-	}
-	.review-comment-input {
-		width: 100%;
-		min-height: 5rem;
-		resize: vertical;
-		font-size: var(--text-base);
-	}
-	.review-comment-actions {
+	.review-graph-row {
 		display: flex;
+		width: 100%;
+		min-width: 0;
+		flex-shrink: 0;
 		align-items: center;
 		gap: 0.5rem;
-		margin-block-start: 0.5rem;
+		border-radius: var(--radius-sm);
+		padding-inline: 0.5rem;
+		block-size: 1.75rem;
+		color: var(--text-muted);
+		text-align: start;
 	}
-	.review-comment-body {
-		font-size: var(--text-base);
-		line-height: 1.625;
+	.review-graph-row:hover,
+	.review-graph-row[aria-pressed="true"] {
+		background: var(--surface-control);
+		color: var(--text);
+	}
+	.review-graph-working {
+		color: var(--status-warning);
+	}
+	.review-graph-lane {
+		flex-shrink: 0;
+		block-size: 100%;
+		overflow: visible;
+	}
+	.review-graph-segment {
+		fill: none;
+		stroke: var(--lane-color, var(--border));
+		stroke-width: 1.5px;
+	}
+	.review-graph-dot {
+		fill: var(--surface-canvas);
+		stroke: var(--lane-color, var(--text-muted));
+		stroke-width: 1.5px;
+	}
+	.review-graph-dot-head {
+		fill: var(--lane-color, var(--text));
+	}
+	.review-graph-dot-working {
+		fill: var(--status-warning);
+		stroke: var(--status-warning);
+	}
+	.review-graph-subject {
+		overflow: hidden;
+		flex-shrink: 1;
+
+		/* No floor: at the narrowest widths the lane and ref badges already
+		   claim most of the row, and the subject must give up the rest rather
+		   than push the row wider than its container (it keeps its own
+		   ellipsis however small it gets). */
+		min-inline-size: 0;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: var(--text-xs);
+		color: var(--text);
+	}
+	.review-graph-working .review-graph-subject {
+		color: inherit;
+	}
+
+	/* A denser `.badge` variant for a commit row: same pill shape and colors
+	   from the shared primitive, sized down to fit a 28px graph row alongside
+	   the dot, subject, hash, author and time. */
+	.review-graph-ref {
+		overflow: hidden;
+
+		/* Shrinkable (not fixed) at every width: a row's ref count and name
+		   lengths vary per commit, so a badge that only ever shrank below
+		   30rem could still overflow a row at a wider width — e.g. three
+		   octopus-merge branch badges in a 768px pane. */
+		flex-shrink: 1;
+		min-inline-size: 2rem;
+		max-inline-size: 9rem;
+		height: auto;
+		padding: 0.0625rem 0.375rem;
+		color: var(--text-muted);
+		background: var(--surface-muted);
+		font-size: var(--text-3xs);
+		font-family: var(--font-mono);
+	}
+
+	/* `.review-graph-ref` is `display: inline-flex` (from `.badge`), and a flex
+	   container never runs `text-overflow` on a bare text node — it just
+	   hard-clips, cutting a ref name mid-word with no "…". This nested,
+	   non-flex label is the badge's sole flex item, so it needs its own
+	   `min-width: 0` to shrink past its text's natural width at all. */
+	.review-graph-ref-label {
+		overflow: hidden;
+		min-width: 0;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.review-graph-ref[data-kind="tag"] {
+		border-radius: var(--radius-sm);
+	}
+	.review-graph-ref[data-main] {
+		color: var(--action-primary-text);
+		background: var(--action-primary);
+	}
+	.review-graph-ref[data-current] {
+		outline: 1px solid var(--lane-color, var(--text-muted));
+		outline-offset: -1px;
+	}
+
+	/* Fixed-width trailing columns, pushed right by the hash's auto margin only, so
+	   hash/author/time line up from row to row whatever each subject and ref set
+	   leaves free (an auto margin on all three split that space unevenly per row). */
+	.review-graph-hash,
+	.review-graph-author,
+	.review-graph-time {
+		flex-shrink: 0;
+		font-size: var(--text-2xs);
+	}
+	.review-graph-hash {
+		inline-size: 7ch;
+		margin-inline-start: auto;
+		font-family: var(--font-mono);
+	}
+	.review-graph-author {
+		overflow: hidden;
+		inline-size: 7rem;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.review-graph-time {
+		inline-size: 4.5rem;
+		text-align: end;
+		white-space: nowrap;
+	}
+	.review-graph-detail {
+		position: absolute;
+		inset-block-end: 0;
+		inset-inline: 0;
+		max-block-size: 60%;
+		overflow-y: auto;
+		border-block-start: 1px solid var(--border);
+		border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+		background: var(--surface-raised);
+		box-shadow: var(--shadow-lg);
+	}
+
+	/* The detail shows the whole message: the subject wraps instead of truncating
+	   like a row does, and the body keeps its own line breaks. */
+	.review-graph-detail .review-detail-subject {
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+	.review-graph-body {
+		margin-block-start: 0.375rem;
+		color: var(--text-muted);
+		font-size: var(--text-2xs);
 		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+	.review-graph-parents {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		margin-block-start: 0.25rem;
+		color: var(--text-muted);
+		font-size: var(--text-2xs);
+	}
+	.review-graph-parent-link {
+		border-radius: var(--radius-sm);
+		padding: 0 0.25rem;
+		color: var(--text);
+		font-family: var(--font-mono);
+	}
+	.review-graph-parent-link:hover:not(:disabled) {
+		background: var(--surface-control);
+	}
+	.review-graph-parent-link:disabled {
+		color: var(--text-muted);
+		cursor: default;
 	}
 
 	@media (width <= 48rem) {
 		#review-branch {
+			display: none;
+		}
+	}
+
+	@media (width <= 30rem) {
+		.review-graph-author,
+		.review-graph-time {
+			display: none;
+		}
+
+		/* At this width the sidebar's 14rem floor (`.review-body`) leaves the
+		   graph column too narrow for hash + full-size ref badges alongside
+		   the lane graph and subject; let them shrink instead of overflowing
+		   so the row stays within the pane. The full hash is still one click
+		   away in the commit detail. */
+		.review-graph-hash {
+			display: none;
+		}
+		.review-graph-ref {
+			max-inline-size: 4rem;
+		}
+
+		/* The Git sidebar only carries the Files | Git switch and the change count
+		   (which the graph's own "uncommitted changes" row repeats), yet its 14rem
+		   floor left the graph about 150px at phone width. Stack it above the graph
+		   as a slim header instead, so the graph and subjects get the full width. */
+		.review-body[data-review-tab="git"] {
+			grid-template-columns: minmax(0, 1fr);
+			grid-template-rows: auto var(--workspace-gap) minmax(0, 1fr);
+		}
+		.review-body[data-review-tab="git"] > #review-sidebar-separator {
+			visibility: hidden;
+		}
+		.review-body[data-review-tab="git"] .review-changes {
 			display: none;
 		}
 	}

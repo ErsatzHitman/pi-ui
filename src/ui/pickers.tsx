@@ -70,7 +70,11 @@ function slashCommandName(item: AppSlashCommand): string {
 function renderSlashRow(item: AppSlashCommand, index: number): string {
 	const label = `/${item.name}`;
 	const name = slashCommandName(item);
-	const runsImmediately = item.source === "system" && !item.argumentHint;
+	// `/model`'s argument is optional, and run bare it opens the model picker: choosing
+	// its row (Enter or click) opens that picker straight away instead of completing to
+	// "/model " and waiting for an argument. Typing "/model " still offers completions.
+	const runsImmediately =
+		item.source === "system" && (!item.argumentHint || name === "model");
 	// "/copy" is a browser-only action (clipboard access) — never post it to the
 	// server on success; when there is nothing to copy, fall through to the
 	// server so it can show a notice instead of silently doing nothing.

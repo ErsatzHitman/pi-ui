@@ -17,7 +17,6 @@ export const changesRatioMax = 0.7;
 export type WorkspaceFileStatus = WorkspaceFileChange["status"];
 export type WorkspaceFileChange = Static<typeof workspaceFileChangeSchema>;
 export type WorkspaceCommit = Static<typeof workspaceCommitSchema>;
-export type WorkspaceCommitDetail = Static<typeof workspaceCommitDetailSchema>;
 
 export function hasTrackedWorkspaceChanges(
 	changes: readonly WorkspaceFileChange[],
@@ -129,14 +128,6 @@ const workspaceCommitSchema = Type.ReadonlyObject(
 	}),
 );
 
-const workspaceCommitDetailSchema = Type.ReadonlyObject(
-	Type.Object({
-		changes: Type.ReadonlyObject(Type.Array(workspaceFileChangeSchema)),
-		commit: workspaceCommitSchema,
-		patch: Type.String(),
-	}),
-);
-
 const workspaceReviewSnapshotSchema = Type.ReadonlyObject(
 	Type.Object({
 		branch: Type.Union([Type.String(), Type.Null()]),
@@ -148,21 +139,7 @@ const workspaceReviewSnapshotSchema = Type.ReadonlyObject(
 	}),
 );
 
-const workspaceCommitDetailValidator = Compile(workspaceCommitDetailSchema);
-const workspaceCommitHistoryValidator = Compile(Type.Array(workspaceCommitSchema));
 const workspaceReviewSnapshotValidator = Compile(workspaceReviewSnapshotSchema);
-
-export function isWorkspaceCommitDetail<Value>(
-	value: Value,
-): value is Value & WorkspaceCommitDetail {
-	return workspaceCommitDetailValidator.Check(value);
-}
-
-export function isWorkspaceCommitHistory<Value>(
-	value: Value,
-): value is Value & WorkspaceCommit[] {
-	return workspaceCommitHistoryValidator.Check(value);
-}
 
 export function isWorkspaceReviewSnapshot<Value>(
 	value: Value,

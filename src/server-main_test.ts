@@ -1,18 +1,82 @@
 import { test } from "bun:test";
 
 import {
+	assert,
 	assertEquals,
 	assertFalse,
 	assertStringIncludes,
 	assertThrows,
 } from "#testing/assertions";
 
+import { isPiCliPassthrough } from "./pi-cli-passthrough.ts";
 import { serverAutostartConfig, systemdService } from "./server-autostart.ts";
 import {
 	buildServiceInstallAutostartConfig,
 	createShutdown,
 	formatCliError,
 } from "./server-main.ts";
+
+// subagents stream: reproduces "sub-agents don't work under pi-ui" (PLAN-ux.md §subagents).
+// `~/.pi/agent/extensions/subagents.ts` `piInvocation()` re-invokes "the running pi" —
+// under pi-ui that is this same executable/entry point — with plain pi CLI arguments
+// (`--mode json -p --no-session ...`). Before the fix, those never reached
+// `parseServerOptions` as anything but an unrecognized server flag, so every sub-agent
+// child died immediately with "unknown option: --mode" instead of running a turn.
+test("isPiCliPassthrough: a bare `pi-ui` (no args) is the server, not passthrough", () => {
+	assertFalse(isPiCliPassthrough([]));
+});
+
+test("isPiCliPassthrough: pi-ui's own flags stay the server, not passthrough", () => {
+	assertFalse(isPiCliPassthrough(["--host", "0.0.0.0", "--port", "8080"]));
+	assertFalse(isPiCliPassthrough(["--host=0.0.0.0"]));
+	assertFalse(isPiCliPassthrough(["--port=8080"]));
+	assertFalse(isPiCliPassthrough(["--remote"]));
+	assertFalse(isPiCliPassthrough(["--insecure-no-auth"]));
+	assertFalse(isPiCliPassthrough(["--auth-token", "secret"]));
+	assertFalse(isPiCliPassthrough(["--auth-token=secret"]));
+	assertFalse(isPiCliPassthrough(["--workspace", "/srv/ws"]));
+	assertFalse(isPiCliPassthrough(["--workspace=/srv/ws"]));
+	assertFalse(isPiCliPassthrough(["--help"]));
+	assertFalse(isPiCliPassthrough(["-h"]));
+	assertFalse(isPiCliPassthrough(["--version"]));
+});
+
+test("isPiCliPassthrough: `service`/`autostart` stay pi-ui subcommands, not passthrough", () => {
+	assertFalse(isPiCliPassthrough(["service", "install"]));
+	assertFalse(isPiCliPassthrough(["service", "uninstall"]));
+	assertFalse(isPiCliPassthrough(["autostart", "enable"]));
+	assertFalse(isPiCliPassthrough(["autostart", "disable"]));
+});
+
+test("isPiCliPassthrough: exactly the argv piInvocation() builds for a sub-agent is passthrough", () => {
+	assert(
+		isPiCliPassthrough([
+			"--mode",
+			"json",
+			"-p",
+			"--no-session",
+			"--no-extensions",
+			"--no-skills",
+			"--no-tools",
+			"--append-system-prompt",
+			"C:\\temp\\pi-subagents-xyz\\prompt-scout.md",
+			"do the thing",
+		]),
+	);
+});
+
+test('isPiCliPassthrough: a bare positional prompt (`pi "task"`) is passthrough', () => {
+	assert(isPiCliPassthrough(["do the thing"]));
+});
+
+test("isPiCliPassthrough: an unrecognized flag is passthrough, not a pi-ui usage error", () => {
+	// pi-ui only special-cases its own small, closed set of top-level forms; anything else
+	// (including a mistyped one) falls through to the bundled pi CLI, which has its own
+	// "unknown option" handling — this is what makes an unmodified extension's re-invocation
+	// (any pi CLI flag pi-ui itself has never heard of) work without pi-ui special-casing
+	// every pi CLI flag individually.
+	assert(isPiCliPassthrough(["--models", "sonnet,haiku"]));
+});
 
 // These tests exercise the exact function `main()`'s `pi-ui service install` branch calls
 // (`buildServiceInstallAutostartConfig`), not a hand-built `serverAutostartConfig` /

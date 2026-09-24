@@ -132,11 +132,17 @@ function closeArgumentPicker() {
 
 function applyArgumentCompletion(value) {
 	const input = promptInput();
-	if (!input || !activeArgumentQuery) return;
+	if (!input) return;
 	const cursor = input.selectionStart;
 	const match = /^(\/\S+[ \t])([^\n]*)$/.exec(input.value.slice(0, cursor));
 	if (!match) return;
 	const before = input.value.slice(0, match[1].length) + value;
+	// A debounced completions request can still land, and open the picker, after the
+	// query that started it was closed (`activeArgumentQuery` already cleared). An open
+	// picker swallows Enter, so bailing out here left the prompt stuck with Enter doing
+	// nothing; take the query back from the prompt instead, so the close below runs too.
+	activeArgumentQuery ??= extractArgumentQuery(input.value, cursor);
+	if (!activeArgumentQuery) return;
 	const command = activeArgumentQuery.command;
 	closeArgumentPicker();
 	// Record the chosen value as the current query so the input event below does not
@@ -214,9 +220,12 @@ function applyFileCompletion(value) {
 }
 
 export function completeSlashCommand(name) {
+	// Close first: the input event `setPromptValue` fires opens the argument picker for
+	// the completed command, and closing after it forgot that query while its debounced
+	// completions request still reopened the picker (see `applyArgumentCompletion`).
+	closePickers();
 	setPromptValue(`/${name} `);
 	focusPromptEnd();
-	closePickers();
 }
 
 // Native `/copy` handling: the SDK's built-in copies the last assistant message to the

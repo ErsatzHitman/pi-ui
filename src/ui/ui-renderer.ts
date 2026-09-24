@@ -319,6 +319,7 @@ export class UiRenderer implements AppStorePresentation {
 					snapshot.workspaceTreeRevision,
 					snapshot.workspaceReview,
 					snapshot.workspaceReviewPreferences,
+					snapshot.workspaceGitGraph,
 				),
 				"{}",
 				[],
@@ -575,6 +576,7 @@ export class UiRenderer implements AppStorePresentation {
 					snapshot.workspaceTreeRevision,
 					snapshot.workspaceReview,
 					snapshot.workspaceReviewPreferences,
+					snapshot.workspaceGitGraph,
 				) +
 				renderLiveWorkspaceData(
 					snapshot.liveWorkspace,
