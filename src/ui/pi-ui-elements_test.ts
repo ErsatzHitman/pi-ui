@@ -355,6 +355,47 @@ test("a searchable select field renders option descriptions and a filter box, as
 	assertStringExcludes(html, "<select");
 });
 
+// ask-user.ts titles its sheet with the question and labels the options field with the
+// same question; showing it twice read as bloat (ux merge). The label stays for
+// assistive tech, visually hidden; a label that differs from the title stays visible.
+test("a field label that repeats the sheet title is visually hidden, not dropped", () => {
+	const question = "Where should we focus next?";
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				title: `${question} (1/2)`,
+				data: {
+					fields: [
+						{
+							id: "selection",
+							kind: "select",
+							label: question,
+							searchable: true,
+							options: [
+								{
+									value: "health",
+									label: "Health",
+									description: "Sleep",
+								},
+							],
+						},
+						{
+							id: "picks",
+							kind: "multiselect",
+							label: question,
+							options: [{ value: "a", label: "A", description: "first" }],
+						},
+						{ id: "freeform", kind: "text", label: "Custom answer" },
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, `<label class="sr-only">${question}</label>`);
+	assertStringIncludes(html, `<legend class="sr-only">${question}</legend>`);
+	assertStringIncludes(html, "<label>Custom answer</label>");
+});
+
 test("a select field with no description and not marked searchable stays a plain select (no filter box, no regression for other bridge callers)", () => {
 	const html = renderPiUiSheets({
 		extensionElements: [

@@ -646,12 +646,28 @@ function renderFields(element: PiUiElement, fields: PiUiFieldSpec[]): string {
 	);
 }
 
+/**
+ * A field label that just repeats the sheet title (ask-user.ts titles its sheet with the
+ * question and labels the options field with it too, optionally suffixed " (1/2)") stays
+ * for assistive tech but is visually hidden, so the question is not shown twice.
+ */
+function fieldLabelClass(element: PiUiElement, field: PiUiFieldSpec): string | undefined {
+	const label = field.label?.trim();
+	const title = element.title?.trim();
+	if (!label || !title) return undefined;
+	return title === label || title.startsWith(`${label} (`) ? "sr-only" : undefined;
+}
+
 function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 	const signal = fieldSignal(element, field);
 	if (field.kind === "textarea") {
 		return syncHtml(
 			<div class="field">
-				{field.label && <label safe>{field.label}</label>}
+				{field.label && (
+					<label class={fieldLabelClass(element, field)} safe>
+						{field.label}
+					</label>
+				)}
 				<textarea
 					class="dialog-editor"
 					placeholder={field.placeholder}
@@ -671,7 +687,11 @@ function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 		if (!useOptionRows) {
 			return syncHtml(
 				<div class="field">
-					{field.label && <label safe>{field.label}</label>}
+					{field.label && (
+						<label class={fieldLabelClass(element, field)} safe>
+							{field.label}
+						</label>
+					)}
 					<select data-signals={`{${signal}: ''}`} data-bind={signal}>
 						{field.options.map((option) => (
 							<option value={option.id} safe>
@@ -686,7 +706,11 @@ function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 		const filterSig = optionsFilterSignal(signal);
 		return syncHtml(
 			<div class="field">
-				{field.label && <label safe>{field.label}</label>}
+				{field.label && (
+					<label class={fieldLabelClass(element, field)} safe>
+						{field.label}
+					</label>
+				)}
 				{field.searchable && renderOptionFilter(field, filterSig)}
 				<div class="piui-option-rows" data-signals={`{${signal}: ''}`}>
 					{field.options.map((option) => (
@@ -724,7 +748,11 @@ function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 		const filterSig = optionsFilterSignal(signal);
 		return syncHtml(
 			<fieldset class="field piui-multiselect">
-				{field.label && <legend safe>{field.label}</legend>}
+				{field.label && (
+					<legend class={fieldLabelClass(element, field)} safe>
+						{field.label}
+					</legend>
+				)}
 				{field.searchable && renderOptionFilter(field, filterSig)}
 				<div data-signals={`{${signal}: []}`}>
 					{field.options.map((option) => (
@@ -758,7 +786,11 @@ function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 	}
 	return syncHtml(
 		<div class="field">
-			{field.label && <label safe>{field.label}</label>}
+			{field.label && (
+				<label class={fieldLabelClass(element, field)} safe>
+					{field.label}
+				</label>
+			)}
 			<input
 				type="text"
 				placeholder={field.placeholder}
