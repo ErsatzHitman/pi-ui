@@ -37,13 +37,27 @@ test("drops every other pi-ui offline cache on activate and claims clients", () 
 	assertStringIncludes(script, "self.clients.claim()");
 });
 
+type ShownOptions = {
+	body?: string;
+	tag?: string;
+	icon?: string;
+	data?: { sessionPath?: string };
+};
+
+/** The subset of push/notificationclick/fetch events the worker reads. */
+type WorkerEvent = {
+	data?: { json: () => unknown } | null;
+	notification?: { close: () => void };
+	request?: { mode: string };
+};
+
 /** Runs the rendered worker against a fake `self`, collecting its listeners. */
 function loadWorker(
 	network: (request: unknown) => Promise<Response> = () =>
 		Promise.reject(new TypeError("offline")),
 ) {
 	const listeners = new Map<string, (event: unknown) => void>();
-	const shown: Array<{ title: string; options: Record<string, unknown> }> = [];
+	const shown: Array<{ title: string; options: ShownOptions }> = [];
 	const opened: string[] = [];
 	const focused: string[] = [];
 	const windows: Array<{
@@ -58,7 +72,7 @@ function loadWorker(
 			listeners.set(type, listener);
 		},
 		registration: {
-			showNotification: (title: string, options: Record<string, unknown>) => {
+			showNotification: (title: string, options: ShownOptions) => {
 				shown.push({ title, options });
 				return Promise.resolve();
 			},
@@ -71,15 +85,15 @@ function loadWorker(
 			},
 		},
 	};
-	// eslint-disable-next-line no-new-func
 	const offlinePage = new Response("offline page", { status: 200 });
 	const caches = { match: () => Promise.resolve(offlinePage) };
+	// eslint-disable-next-line no-new-func
 	new Function("self", "caches", "fetch", renderServiceWorkerScript("abc123"))(
 		self,
 		caches,
 		network,
 	);
-	async function dispatch(type: string, event: Record<string, unknown>) {
+	async function dispatch(type: string, event: WorkerEvent) {
 		let pending: Promise<unknown> = Promise.resolve();
 		listeners.get(type)?.({
 			...event,

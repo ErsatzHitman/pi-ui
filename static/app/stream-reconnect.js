@@ -104,7 +104,7 @@ export function createStreamEventIdTracker() {
 	function wrapFetch(fetchImpl) {
 		return async (input, init) => {
 			const response = await fetchImpl(input, init);
-			const url = typeof input === "string" ? input : input.url;
+			const url = input instanceof Request ? input.url : String(input);
 			const isStream =
 				new URL(url, "http://localhost").pathname === "/stream" &&
 				response.body &&
