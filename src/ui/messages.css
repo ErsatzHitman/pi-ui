@@ -517,6 +517,29 @@
 		color: var(--text-muted);
 		font-size: var(--text-base);
 	}
+
+	/* `pi.registerMessageRenderer`/`registerEntryRenderer` output (R7-A), already
+	   converted to safe HTML by `CustomRendererHost` through the same ANSI→HTML
+	   pipeline `.terminal-surface-body` uses — styled like `.tool-pre` (the other
+	   place pre-rendered monospace extension output shows up in the transcript)
+	   so it reads as a native block, not a foreign terminal pane. */
+	.message-custom-render {
+		max-height: 20rem;
+		padding: 0.75rem;
+		overflow: auto;
+		color: var(--text);
+		font-family: var(--font-mono);
+		font-size: var(--text-base);
+		line-height: 1.625;
+		overflow-wrap: anywhere;
+		white-space: pre-wrap;
+	}
+	.message-custom-render-error {
+		margin: 0;
+		padding: 0.75rem;
+		color: var(--status-error);
+		font-size: var(--text-sm);
+	}
 	.context-details-nested {
 		margin-block-start: 0.5rem;
 	}
