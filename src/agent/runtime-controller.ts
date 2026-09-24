@@ -280,6 +280,13 @@ export class RuntimeController {
 	private foregroundObservedRunning: boolean;
 	private sharing = false;
 	private resetChatOnInvalidation = false;
+	// Set for the duration of a `RuntimeController`-driven in-place SDK call (e.g.
+	// `runtime.newSession()`) whose caller is going to bind extensions itself
+	// afterward. Without this, the SDK's own `finishSessionReplacement()` already
+	// triggers the rebind callback below mid-call — against the generation about to
+	// be replaced — so the caller's own bind would be a second, redundant one and
+	// extensions would see two `session_start` events. See `createNewSession()`.
+	private suppressNextRebind = false;
 	private disposal: Promise<void> | undefined;
 	private initialCatalogLoad: Promise<void> | undefined;
 	private lastForcedModelRefreshAt: number | undefined;
@@ -970,11 +977,21 @@ export class RuntimeController {
 			);
 		} else {
 			this.resetChatOnInvalidation = true;
+			// `runtime.newSession()` (SDK, in-place) calls `finishSessionReplacement()`
+			// internally, which runs the rebind callback we last set and would bind
+			// extensions — emitting `session_start` — before `adoptRuntime` below moves
+			// the foreground to the new session's generation. Suppress that one
+			// mid-flight rebind so extensions are bound, and `session_start`
+			// delivered, exactly once: by `bindSession()` below, against the new
+			// session's final generation (compare the in-place session switch, which
+			// keeps the SDK's own rebind as its one bind instead).
+			this.suppressNextRebind = true;
 			let result: { cancelled: boolean };
 			try {
 				result = await this.runtime.newSession();
 			} finally {
 				this.resetChatOnInvalidation = false;
+				this.suppressNextRebind = false;
 			}
 			if (result.cancelled) {
 				return false;
@@ -1767,6 +1784,13 @@ export class RuntimeController {
 		});
 		runtime.setRebindSession(async () => {
 			if (!ownsForeground()) return;
+			if (this.suppressNextRebind) {
+				// This transition's own caller (still on the stack below the SDK call
+				// that triggered this rebind) will bind extensions and state itself,
+				// against the generation this in-place transition is about to become.
+				this.suppressNextRebind = false;
+				return;
+			}
 			await sessionPerformance.measure("runtimeRebind", async () => {
 				if (!ownsForeground()) return;
 				await this.bindSessionExtensions();
