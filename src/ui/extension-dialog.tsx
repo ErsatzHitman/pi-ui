@@ -171,7 +171,21 @@ function cancelFooter(): string {
 }
 
 function cancelCurrentAction(): string {
-	return postResponse("$extensionRequestId", "''", true);
+	// A native `<dialog>` fires its own "close" event both for a user closing
+	// it (Escape, `closedby="any"`, the Cancel button's `command="close"`) AND
+	// for the server's own `dialog.close()` script that closes this dialog on
+	// every OTHER client once one of them answers (`ui-renderer.ts`'s
+	// `pickerEffectScripts`). That broadcast patches signals before its
+	// scripts run, and the event itself is queued, so by the time it fires:
+	// - with a next dialog queued, the server already ran `close()` then
+	//   `showModal()` and `extensionRequestId` names the NEXT dialog — the
+	//   dialog is open again, and cancelling would kill a dialog nobody
+	//   touched;
+	// - with nothing queued, `AppStore.setExtensionDialog(undefined)` has
+	//   cleared `extensionRequestId`, so there is nothing to cancel.
+	// A user's close (Escape, backdrop, Cancel) leaves it closed with the id
+	// it was showing (round RM2 multi-client).
+	return `if (!el.open && $extensionRequestId) { ${postResponse("$extensionRequestId", "''", true)} }`;
 }
 
 function responseAction(id: string, value: string, expression = false): string {
@@ -183,9 +197,16 @@ function responseAction(id: string, value: string, expression = false): string {
 }
 
 function postResponse(id: string, value: string, cancelled: boolean): string {
+	// `document.body?.dataset?.displayClientId` — same runtime read as
+	// `terminal-keys.js`'s resize report — so the server can tell other
+	// clients "answered elsewhere" without confusing this one (round RM1
+	// multi-client #1). A raw expression, not a literal: unlike `page.tsx`'s
+	// embedded ids, this dialog is patched independently of the page's own
+	// per-render template.
 	return `@post('${endpoints.extensionUiResponse}', { payload: {
 		extensionRequestId: ${id},
 		extensionResponse: ${value},
 		extensionCancelled: ${cancelled},
+		clientId: document.body?.dataset?.displayClientId,
 	} })`;
 }

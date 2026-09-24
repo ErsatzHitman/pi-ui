@@ -3,9 +3,29 @@ import { test } from "bun:test";
 import { assertEquals, assertExists } from "#testing/assertions";
 
 import { piUiMarker } from "../extension-surface-types.ts";
-import { AppStore } from "../state/app-store.ts";
+import {
+	AppStore,
+	type AppStorePresentation,
+	type UiCommitEffect,
+} from "../state/app-store.ts";
 import { ExtensionUiController } from "./extension-ui-controller.ts";
 import { agentSessionRuntimeStub } from "./test-fixtures.ts";
+
+/** Records every `requestCommit` effect for assertions, like
+ * `app-store_terminal-surfaces_test.ts`'s presentation double. */
+function presentationRecordingEffects(effects: UiCommitEffect[]): AppStorePresentation {
+	return new Proxy(
+		{},
+		{
+			get: (_target, name) =>
+				name === "requestCommit"
+					? (effect: UiCommitEffect | undefined) => {
+							if (effect) effects.push(effect);
+						}
+					: () => {},
+		},
+	) as AppStorePresentation;
+}
 
 /** A distinct, opaque per-runtime identity for `context()` in tests that don't exercise A#23's per-runtime distinction. */
 function fakeRuntimeKey() {
@@ -29,6 +49,99 @@ test("extension UI resolves queued web dialogs in order", async () => {
 	assertEquals(controller.respond(confirmId, "confirm", false), true);
 	assertEquals(await confirmed, true);
 	assertEquals(store.extensionDialog, undefined);
+});
+
+test("answering a dialog notifies other clients so they can close it (RM1 multi-client #1)", async () => {
+	const store = new AppStore();
+	const effects: UiCommitEffect[] = [];
+	store.attachPresentation(presentationRecordingEffects(effects));
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	const selected = ui.select("Choose", ["one", "two"]);
+	const id = store.extensionDialog?.id ?? "";
+	assertEquals(controller.respond(id, "two", false, "client-a"), true);
+	await selected;
+
+	const toast = effects.find((effect) => effect.type === "toast");
+	assertExists(toast);
+	assertEquals(
+		toast.type === "toast" ? toast.message : undefined,
+		"Answered on another device",
+	);
+	assertEquals(toast.type === "toast" ? toast.excludeClientId : undefined, "client-a");
+});
+
+test("answering a dialog without a client id still notifies (older client, shown to everyone)", async () => {
+	const store = new AppStore();
+	const effects: UiCommitEffect[] = [];
+	store.attachPresentation(presentationRecordingEffects(effects));
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	const confirmed = ui.confirm("Continue?", "message");
+	const id = store.extensionDialog?.id ?? "";
+	assertEquals(controller.respond(id, "confirm", false), true);
+	await confirmed;
+
+	const toast = effects.find((effect) => effect.type === "toast");
+	assertExists(toast);
+	assertEquals(toast.type === "toast" ? toast.excludeClientId : "unset", undefined);
+});
+
+test("a losing respond() for an already-answered dialog id returns false without notifying (must not error visibly)", async () => {
+	const store = new AppStore();
+	const effects: UiCommitEffect[] = [];
+	store.attachPresentation(presentationRecordingEffects(effects));
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	const selected = ui.select("Choose", ["one", "two"]);
+	const id = store.extensionDialog?.id ?? "";
+	assertEquals(controller.respond(id, "one", false, "client-a"), true);
+	await selected;
+	effects.length = 0;
+
+	// Client B's POST for the same (now-stale) request id arrives after A already
+	// answered it — it must lose quietly, not throw or emit a second toast.
+	assertEquals(controller.respond(id, "two", false, "client-b"), false);
+	assertEquals(
+		effects.some((effect) => effect.type === "toast"),
+		false,
+	);
+});
+
+test("answering the last dialog clears extensionRequestId; a queued one takes it over (RM2 multi-client)", async () => {
+	const store = new AppStore();
+	const effects: UiCommitEffect[] = [];
+	store.attachPresentation(presentationRecordingEffects(effects));
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+	const requestIdAfterCommit = () => {
+		let id: unknown;
+		for (const effect of effects) {
+			if (
+				effect.type === "signal-overrides" &&
+				"extensionRequestId" in effect.values
+			)
+				id = effect.values.extensionRequestId;
+		}
+		return id;
+	};
+
+	const first = ui.select("First", ["one"]);
+	const second = ui.confirm("Second?", "message");
+	const firstId = store.extensionDialog?.id ?? "";
+	effects.length = 0;
+	controller.respond(firstId, "one", false, "client-a");
+	await first;
+	const secondId = store.extensionDialog?.id ?? "";
+	assertEquals(requestIdAfterCommit(), secondId);
+
+	effects.length = 0;
+	controller.respond(secondId, "confirm", false, "client-a");
+	await second;
+	assertEquals(requestIdAfterCommit(), "");
 });
 
 test("select() marks hasOwnCancel when an option is already a cancel row, and not otherwise (m8)", async () => {

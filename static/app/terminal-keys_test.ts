@@ -9,6 +9,7 @@ import {
 	measurePromptColumnCells,
 	measureTranscriptRenderCells,
 	restoreFocusAfterSurfaceUnmount,
+	sendInput,
 } from "./terminal-keys.js";
 
 function key(
@@ -797,5 +798,128 @@ test("the transcript render width is undefined before #message-list exists", () 
 		assertEquals(measureTranscriptRenderCells(), undefined);
 	} finally {
 		restore();
+	}
+});
+
+// RM2 persistence item 2: high-RTT terminal surfaces. `sendInput`/`flushInput` batch
+// keys typed while a POST is in flight into the next one, in order (already true
+// before this round); a subtle `[data-terminal-surface-pending]` indicator now
+// appears only once a flush has been running for longer than a fast local
+// round-trip ever takes, and clears once it settles.
+
+function deferred<Value>() {
+	let resolve!: (value: Value) => void;
+	const promise = new Promise<Value>((res) => {
+		resolve = res;
+	});
+	return { promise, resolve };
+}
+
+class FakeIndicator {
+	pending = false;
+	toggleLog: boolean[] = [];
+	classList = {
+		toggle: (name: string, value: boolean) => {
+			if (name !== "is-pending") return;
+			this.pending = value;
+			this.toggleLog.push(value);
+		},
+	};
+}
+
+class FakeSurfaceGrid {
+	dataset: Record<string, string>;
+	#indicator: FakeIndicator | null;
+	constructor(surfaceId: string, indicator: FakeIndicator | null = null) {
+		this.dataset = { terminalSurfaceGrid: surfaceId };
+		this.#indicator = indicator;
+	}
+	querySelector(selector: string) {
+		return selector === "[data-terminal-surface-pending]" ? this.#indicator : null;
+	}
+}
+
+test("keys typed while a POST is in flight are batched into the next one, in order (no loss, no reordering)", async () => {
+	const calls: unknown[] = [];
+	const first = deferred<void>();
+	let callCount = 0;
+	const restoreFetch = patchGlobal(
+		"fetch",
+		async (_url: string, init: { body: string }) => {
+			calls.push(JSON.parse(init.body));
+			callCount += 1;
+			if (callCount === 1) await first.promise;
+			return new Response("");
+		},
+	);
+	const restoreDoc = patchGlobal("document", { querySelectorAll: () => [] });
+	try {
+		sendInput("s-batch", "a");
+		// The first POST is now in flight, blocked on `first` — these two arrive
+		// while it's still pending and must land concatenated, in order, as the
+		// very next POST rather than three separate ones or out of order.
+		sendInput("s-batch", "b");
+		sendInput("s-batch", "c");
+		assertEquals(
+			calls.length,
+			1,
+			"expected only one POST while the first is in flight",
+		);
+		first.resolve();
+		await waitForCondition(() => calls.length >= 2, {
+			timeoutMs: 1000,
+			message: "expected the batched keys as a single follow-up POST",
+		});
+		assertEquals(calls, [
+			{ surfaceId: "s-batch", data: "a" },
+			{ surfaceId: "s-batch", data: "bc" },
+		]);
+	} finally {
+		restoreFetch();
+		restoreDoc();
+	}
+});
+
+test("a slow flush shows the pending indicator only after 250ms, then clears it once it settles", async () => {
+	const indicator = new FakeIndicator();
+	const grid = new FakeSurfaceGrid("s-slow", indicator);
+	const restoreDoc = patchGlobal("document", { querySelectorAll: () => [grid] });
+	const restoreFetch = patchGlobal("fetch", async () => {
+		// Well past the 250ms threshold and past the plan's 300ms CDP latency
+		// emulation figure, so this is unambiguously "slow", not a timing race.
+		await new Promise((resolve) => setTimeout(resolve, 400));
+		return new Response("");
+	});
+	try {
+		sendInput("s-slow", "x");
+		assertEquals(indicator.pending, false);
+		await waitForCondition(() => indicator.pending === true, {
+			timeoutMs: 1000,
+			message: "expected the pending indicator to appear once the flush ran long",
+		});
+		await waitForCondition(() => indicator.pending === false, {
+			timeoutMs: 1000,
+			message: "expected the pending indicator to clear once the flush settled",
+		});
+	} finally {
+		restoreFetch();
+		restoreDoc();
+	}
+});
+
+test("a fast flush never shows the pending indicator — local latency behaviour is unchanged", async () => {
+	const indicator = new FakeIndicator();
+	const grid = new FakeSurfaceGrid("s-fast", indicator);
+	const restoreDoc = patchGlobal("document", { querySelectorAll: () => [grid] });
+	const restoreFetch = patchGlobal("fetch", async () => new Response(""));
+	try {
+		sendInput("s-fast", "y");
+		// Outlive the 250ms threshold comfortably; the indicator must never have
+		// toggled on during that whole window for an already-settled fast flush.
+		await new Promise((resolve) => setTimeout(resolve, 400));
+		assertEquals(indicator.toggleLog.includes(true), false);
+	} finally {
+		restoreFetch();
+		restoreDoc();
 	}
 });

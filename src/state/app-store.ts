@@ -245,7 +245,31 @@ export type UiCommitEffect =
 	  }
 	| { type: "document-title"; title: string }
 	| { type: "scroll-transcript-bottom" }
-	| { type: "signal-overrides"; values: JsonObject };
+	| { type: "signal-overrides"; values: JsonObject }
+	| {
+			/**
+			 * A brief, native-looking notice broadcast to every connected client —
+			 * currently only "Answered on another device" (round RM1 multi-client
+			 * #1). `excludeClientId`, when set, is the display client id
+			 * (`page.tsx`'s `displayClientId`) that should NOT show it: every
+			 * client still receives the same broadcast script (there is no
+			 * per-client wire), so the script itself compares
+			 * `document.body.dataset.displayClientId` against this id and skips
+			 * showing the toast when they match — see `UiRenderer`'s "toast"
+			 * effect handling.
+			 */
+			type: "toast";
+			message: string;
+			excludeClientId?: string;
+	  }
+	| {
+			type: "session-finished";
+			workspace: string;
+			sessionPath: string | undefined;
+			/** Monotonically increasing per server process; lets a client dedupe a
+			 * notification it has already shown for this event (round RM1 "notifications"). */
+			id: number;
+	  };
 
 export interface AppStorePresentation {
 	beginUpdate(): void;
@@ -401,6 +425,7 @@ export class AppStore {
 	readonly debugUi = debugUiEnabled();
 	readonly datastarInspector = datastarInspectorEnabled();
 	documentTitle = "pi-ui";
+	private sessionFinishedSequence = 0;
 	updateAvailable: AvailableUpdate | undefined;
 	promptEditorText = "";
 	models: AppModel[] = [];
@@ -909,18 +934,35 @@ export class AppStore {
 			id: "extension-dialog",
 			open: Boolean(dialog),
 		});
-		if (dialog) {
-			this.presentation?.requestCommit({
-				type: "signal-overrides",
-				values: {
-					extensionRequestId: dialog.id,
-					extensionResponse:
-						dialog.kind === "input" || dialog.kind === "editor"
-							? (dialog.prefill ?? "")
-							: "",
-				},
-			});
-		}
+		// Cleared on close too: `extension-dialog.tsx`'s `data-on:close` only
+		// auto-cancels while an id is live, so a server-side close with nothing
+		// queued never posts a stale cancellation (round RM2 multi-client).
+		this.presentation?.requestCommit({
+			type: "signal-overrides",
+			values: dialog
+				? {
+						extensionRequestId: dialog.id,
+						extensionResponse:
+							dialog.kind === "input" || dialog.kind === "editor"
+								? (dialog.prefill ?? "")
+								: "",
+					}
+				: { extensionRequestId: "" },
+		});
+	}
+	/**
+	 * Broadcasts a brief informational toast to every connected client, except
+	 * `originClientId`'s own tab when one is given — see the `UiCommitEffect`
+	 * "toast" variant's doc comment. Purely presentational: it touches no
+	 * `AppStore` field, so it has nothing to add to `snapshot()` and nothing a
+	 * fresh connection needs to replay.
+	 */
+	notifyOtherClients(message: string, originClientId: string | undefined): void {
+		this.presentation?.requestCommit({
+			type: "toast",
+			message,
+			excludeClientId: originClientId,
+		});
 	}
 	setExtensionStatuses(statuses: AppExtensionStatus[]): void {
 		this.extensionStatuses = statuses.map((status) => ({ ...status }));
@@ -1106,6 +1148,22 @@ export class AppStore {
 	setDocumentTitle(title: string): void {
 		this.documentTitle = title;
 		this.presentation?.requestCommit({ type: "document-title", title });
+	}
+	/**
+	 * Broadcasts a "session finished" effect to every connected client over the existing
+	 * SSE stream (`UiRenderer.mainEffectScripts` turns it into a script executed on each
+	 * client — see `static/app/notifications.js`). Unlike the host-side `notifySessionDone`
+	 * (Linux `notify-send`, local mode only), this always fires: each browser tab decides
+	 * for itself, from `document.hidden`/`hasFocus()`, whether to show a Web Notification.
+	 */
+	notifySessionFinished(details: { workspace: string; sessionPath?: string }): void {
+		this.sessionFinishedSequence += 1;
+		this.presentation?.requestCommit({
+			type: "session-finished",
+			workspace: details.workspace,
+			sessionPath: details.sessionPath,
+			id: this.sessionFinishedSequence,
+		});
 	}
 	setPromptEditorText(text: string, options: { broadcast?: boolean } = {}): void {
 		this.promptEditorText = text;

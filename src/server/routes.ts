@@ -13,6 +13,9 @@ import { liveWorkspaceRoutes } from "./routes/live-workspace.ts";
 import { llamaRoutes } from "./routes/llama.ts";
 import { modelRoutes } from "./routes/models.ts";
 import { promptRoutes } from "./routes/prompt.ts";
+import { pushRoutes } from "./routes/push.ts";
+import { serviceWorkerRoutes } from "./routes/service-worker.ts";
+import { sessionAuthRoutes } from "./routes/session-auth.ts";
 import { sessionPerformanceRoutes } from "./routes/session-performance.ts";
 import { sessionSidebarRoutes } from "./routes/session-sidebar.ts";
 import { sessionRoutes } from "./routes/sessions.ts";
@@ -38,8 +41,11 @@ export const appRoutes: RouteMap<RouteContext> = {
 	...displayPreferenceRoutes,
 	...modelRoutes,
 	...authRoutes,
+	...sessionAuthRoutes,
 	...llamaRoutes,
 	...treeRoutes,
 	...fileRoutes,
 	...commandRoutes,
+	...pushRoutes,
+	...serviceWorkerRoutes,
 };

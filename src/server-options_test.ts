@@ -5,6 +5,7 @@ import { assertEquals, assertStringIncludes, assertThrows } from "#testing/asser
 import {
 	defaultServerHostname,
 	defaultServerPort,
+	explicitServerOptions,
 	isLoopbackHostname,
 	parseServerOptions,
 	serverUsage,
@@ -57,6 +58,8 @@ test("server options reject invalid input", () => {
 	assertThrows(() => parseServerOptions(["--unknown"]), Error, "unknown option");
 	assertThrows(() => parseServerOptions(["--auth-token"]), Error, "non-empty token");
 	assertThrows(() => parseServerOptions(["--auth-token="]), Error, "non-empty token");
+	assertThrows(() => parseServerOptions(["--workspace"]), Error, "non-empty path");
+	assertThrows(() => parseServerOptions(["--workspace="]), Error, "non-empty path");
 });
 
 test("server options accept an opt-in auth token from a flag or the environment", () => {
@@ -92,6 +95,80 @@ test("server options omit authToken entirely when not set, unlike an empty strin
 	assertEquals("authToken" in options, false);
 });
 
+test("server options accept an opt-in workspace override from a flag or the environment (RM1 audit open issue 8)", () => {
+	assertEquals(parseServerOptions(["--workspace", "/srv/pi-ui-workspace"]), {
+		hostname: defaultServerHostname,
+		port: defaultServerPort,
+		help: false,
+		workspace: "/srv/pi-ui-workspace",
+	});
+	assertEquals(parseServerOptions(["--workspace=/srv/pi-ui-workspace"]), {
+		hostname: defaultServerHostname,
+		port: defaultServerPort,
+		help: false,
+		workspace: "/srv/pi-ui-workspace",
+	});
+	assertEquals(parseServerOptions([], { workspace: "/srv/from-env" }), {
+		hostname: defaultServerHostname,
+		port: defaultServerPort,
+		help: false,
+		workspace: "/srv/from-env",
+	});
+	// A flag overrides the environment, same as --host/--port/--auth-token.
+	assertEquals(
+		parseServerOptions(["--workspace", "/srv/flag"], { workspace: "/srv/env" }),
+		{
+			hostname: defaultServerHostname,
+			port: defaultServerPort,
+			help: false,
+			workspace: "/srv/flag",
+		},
+	);
+});
+
+test("server options omit workspace entirely when not set, unlike an empty string", () => {
+	const options = parseServerOptions([], { workspace: "  " });
+	assertEquals("workspace" in options, false);
+});
+
+test("explicitServerOptions reports false for both when nothing was passed", () => {
+	assertEquals(explicitServerOptions([]), { hostname: false, port: false });
+	assertEquals(explicitServerOptions([], {}), { hostname: false, port: false });
+});
+
+test("explicitServerOptions is true for a flag, an environment variable, or both", () => {
+	assertEquals(explicitServerOptions(["--host", "0.0.0.0"]), {
+		hostname: true,
+		port: false,
+	});
+	assertEquals(explicitServerOptions(["--port=9000"]), {
+		hostname: false,
+		port: true,
+	});
+	assertEquals(explicitServerOptions([], { host: "0.0.0.0" }), {
+		hostname: true,
+		port: false,
+	});
+	assertEquals(explicitServerOptions([], { port: "8080" }), {
+		hostname: false,
+		port: true,
+	});
+	assertEquals(
+		explicitServerOptions(["--host", "0.0.0.0", "--port", "9000"], {
+			host: "1.2.3.4",
+			port: "1234",
+		}),
+		{ hostname: true, port: true },
+	);
+});
+
+test("explicitServerOptions is unaffected by --remote/--auth-token", () => {
+	assertEquals(explicitServerOptions(["--remote", "--auth-token", "tok"]), {
+		hostname: false,
+		port: false,
+	});
+});
+
 test("isLoopbackHostname recognizes loopback addresses only", () => {
 	assertEquals(isLoopbackHostname("127.0.0.1"), true);
 	assertEquals(isLoopbackHostname("::1"), true);
@@ -99,4 +176,37 @@ test("isLoopbackHostname recognizes loopback addresses only", () => {
 	assertEquals(isLoopbackHostname("LOCALHOST"), true);
 	assertEquals(isLoopbackHostname("0.0.0.0"), false);
 	assertEquals(isLoopbackHostname("192.168.1.5"), false);
+});
+
+test("server options enable remote mode from the flag or the environment", () => {
+	assertEquals(parseServerOptions(["--remote"]).remote, true);
+	assertEquals(parseServerOptions([], { remote: "1" }).remote, true);
+	assertEquals(parseServerOptions([], { remote: "true" }).remote, true);
+	assertEquals(parseServerOptions([], { remote: "0" }).remote, undefined);
+	assertEquals(parseServerOptions([]).remote, undefined);
+});
+
+test("server options accept the insecure-no-auth escape hatch from a flag or the environment", () => {
+	assertEquals(parseServerOptions(["--insecure-no-auth"]).insecureNoAuth, true);
+	assertEquals(parseServerOptions([], { insecureNoAuth: "1" }).insecureNoAuth, true);
+	assertEquals(parseServerOptions([], { insecureNoAuth: "true" }).insecureNoAuth, true);
+	assertEquals(
+		parseServerOptions([], { insecureNoAuth: "0" }).insecureNoAuth,
+		undefined,
+	);
+	assertEquals(parseServerOptions([]).insecureNoAuth, undefined);
+});
+
+test("serverUsage documents the service install --headless flag (RM1 audit open issue 5)", () => {
+	assertStringIncludes(serverUsage, "--headless");
+});
+
+test("serverUsage documents the --workspace override (RM1 audit open issue 8)", () => {
+	assertStringIncludes(serverUsage, "--workspace");
+	assertStringIncludes(serverUsage, "PI_UI_WORKSPACE");
+});
+
+test("serverUsage documents the insecure-no-auth escape hatch", () => {
+	assertStringIncludes(serverUsage, "--insecure-no-auth");
+	assertStringIncludes(serverUsage, "PI_UI_INSECURE_NO_AUTH");
 });

@@ -3,6 +3,7 @@ import { runInNewContext } from "node:vm";
 
 import { assertEquals, assertFalse, assertStringIncludes } from "#testing/assertions";
 
+import { setRemoteMode } from "../remote-mode.ts";
 import { renderPage } from "./page.tsx";
 import { appRenderSnapshot } from "./test-fixtures.ts";
 
@@ -90,4 +91,60 @@ test("configured sidebar width is applied before styles", () => {
 			custom.indexOf('rel="stylesheet"'),
 		true,
 	);
+});
+
+test("the SSE stream stays open while the tab is hidden, in local mode too", () => {
+	// Datastar's @get closes its stream on visibilitychange -> hidden by default, so a
+	// background tab would never receive the "session finished" effect its Web
+	// Notification depends on. RM1 audit open issue 4: this is a real local bug too (a
+	// hidden local tab never got its "Turn finished" notification either), so it's
+	// unconditional now, not gated on remote mode.
+	const streamAction = (page: string) =>
+		/data-init="(@get\('\/stream\?[^"]*)"/.exec(page)?.[1] ?? "";
+	const local = streamAction(renderSidebarPage());
+	assertStringIncludes(local, "retry: 'always'");
+	assertStringIncludes(local, "openWhenHidden: true");
+	// A forced reconnect (visibility/online) resumes from the last event it applied.
+	assertStringIncludes(local, "headers: window.piUi.streamResumeHeaders()");
+
+	setRemoteMode(true);
+	try {
+		assertStringIncludes(streamAction(renderSidebarPage()), "openWhenHidden: true");
+	} finally {
+		setRemoteMode(false);
+	}
+});
+
+test("exposes remote mode and the VAPID public key to static/app/push.js as body data attributes", () => {
+	const withKey = renderPage(
+		{ ...appRenderSnapshot({}), messages: [] },
+		{ pushPublicKey: "abc123" },
+	);
+	assertStringIncludes(withKey, 'data-push-public-key="abc123"');
+	assertFalse(withKey.includes("data-remote-mode"));
+
+	setRemoteMode(true);
+	try {
+		assertStringIncludes(renderSidebarPage(), "data-remote-mode");
+	} finally {
+		setRemoteMode(false);
+	}
+});
+
+test("in remote mode a tab reports its page visibility on load and on every change (Web Push presence)", () => {
+	const report = "@post('/stream/visibility'";
+	const local = renderSidebarPage();
+	assertFalse(local.includes(report));
+
+	setRemoteMode(true);
+	try {
+		const page = renderSidebarPage();
+		const init = /data-init="([^"]*)"/.exec(page)?.[1] ?? "";
+		assertStringIncludes(init, "@get('/stream?");
+		assertStringIncludes(init, report);
+		assertStringIncludes(page, `data-on:visibilitychange__window="${report}`);
+		assertStringIncludes(page, "visible: document.visibilityState === 'visible'");
+	} finally {
+		setRemoteMode(false);
+	}
 });

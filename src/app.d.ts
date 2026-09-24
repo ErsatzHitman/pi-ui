@@ -87,7 +87,22 @@ interface PiUiNamespace {
 	};
 	liveWorkspace: {
 		applyOpen(open: boolean): void;
-		requestNotificationPermission(): void;
+		requestNotificationPermission(): Promise<void>;
+		needsNotificationPermission(): boolean;
+		notificationsOptedIn(): boolean;
+	};
+	/** `Last-Event-ID` for a forced stream reconnect (`static/app/stream-reconnect.js`). */
+	streamResumeHeaders(): Record<string, string>;
+	/** Web Push opt-in (`static/app/push.js`); set once the service worker is ready. */
+	push?: {
+		covers(): boolean;
+	};
+	notifications: {
+		sessionFinished(detail: {
+			id: number;
+			workspace: string;
+			sessionPath?: string;
+		}): boolean;
 	};
 	terminal: {
 		encodeKey(event: KeyboardEvent): string | undefined;

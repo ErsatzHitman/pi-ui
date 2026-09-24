@@ -230,17 +230,32 @@ export function renderLiveWorkspace(
 							data-size="icon-xs"
 							aria-pressed="false"
 							data-attr:aria-pressed="$liveWorkspacePreferences.notifications ? 'true' : 'false'"
-							aria-label="Notify me when a turn finishes or needs input"
+							aria-label="Notify me when a turn finishes, needs input, or a background session completes"
 							data-tooltip="Notify on completion"
 							data-tooltip-delay
 							data-on:click={`
-							$liveWorkspacePreferences.notifications = !$liveWorkspacePreferences.notifications;
-							document.body.dispatchEvent(new CustomEvent(
-								'pi-ui-live-workspace-preferences',
-								{ detail: { notifications: $liveWorkspacePreferences.notifications } },
-							));
-							if ($liveWorkspacePreferences.notifications) {
-								window.piUi.liveWorkspace.requestNotificationPermission();
+							if ($liveWorkspacePreferences.notifications && window.piUi.liveWorkspace.needsNotificationPermission()) {
+								window.piUi.liveWorkspace.requestNotificationPermission().then(() => {
+									document.body.dispatchEvent(new CustomEvent(
+										'pi-ui-live-workspace-preferences',
+										{ detail: { notifications: true } },
+									));
+								});
+							} else {
+								$liveWorkspacePreferences.notifications = !$liveWorkspacePreferences.notifications;
+								if ($liveWorkspacePreferences.notifications) {
+									window.piUi.liveWorkspace.requestNotificationPermission().then(() => {
+										document.body.dispatchEvent(new CustomEvent(
+											'pi-ui-live-workspace-preferences',
+											{ detail: { notifications: $liveWorkspacePreferences.notifications } },
+										));
+									});
+								} else {
+									document.body.dispatchEvent(new CustomEvent(
+										'pi-ui-live-workspace-preferences',
+										{ detail: { notifications: $liveWorkspacePreferences.notifications } },
+									));
+								}
 							}
 						`}
 						>
@@ -302,6 +317,13 @@ export function renderLiveWorkspace(
 export function renderLiveWorkspaceNowSection(
 	snapshot: LiveWorkspaceSnapshot,
 	tab: LiveWorkspaceTab,
+	// The current session's identity, carried purely so the client
+	// (`src/client/live-workspace.ts`'s `watchTurnPhase`) can tell a real
+	// "turn finished" transition apart from the turn banner merely clearing because a
+	// *different* session became the foreground one (`/new`, switching sessions — see
+	// `LiveWorkspaceController.resetForegroundSession`, which also clears the banner).
+	// Never read server-side; a pure client-only disambiguator.
+	sessionPath?: string,
 ): string {
 	return syncHtml(
 		<section
@@ -309,6 +331,7 @@ export function renderLiveWorkspaceNowSection(
 			aria-label="Now"
 			data-show="($liveWorkspacePreferences.tab || 'now') === 'now'"
 			style={tab === "now" ? undefined : "display: none"}
+			data-live-workspace-session={sessionPath}
 		>
 			{renderNowTab(snapshot)}
 		</section>,
@@ -381,10 +404,11 @@ export function renderLiveWorkspaceData(
 	preferences: LiveWorkspacePreferences,
 	usage: AppUsage,
 	extensions: LiveWorkspaceExtensions = noExtensions,
+	sessionPath?: string,
 ): string {
 	const tab = preferences.tab ?? "now";
 	return (
-		renderLiveWorkspaceNowSection(snapshot, tab) +
+		renderLiveWorkspaceNowSection(snapshot, tab, sessionPath) +
 		renderLiveWorkspaceAgentsSection(snapshot, tab) +
 		renderLiveWorkspaceUsageSection(usage, tab) +
 		renderLiveWorkspaceActivitySection(snapshot, tab) +

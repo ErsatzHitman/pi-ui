@@ -54,6 +54,34 @@ test("an opt-in notifications toggle is rendered and reflects the saved preferen
 	);
 });
 
+test("opting in waits for the permission decision before announcing the preference (RM2 fix)", () => {
+	// Regression: the preferences event used to dispatch (and so trigger push.js's
+	// ensureSubscribed()) BEFORE requestNotificationPermission()'s prompt resolved, so the very
+	// first opt-in click always found permission still "default" and never subscribed.
+	const html = renderLiveWorkspace(snapshot(), {}, emptyUsage);
+	const button = html
+		.split('id="live-workspace-notifications-toggle"')[1]
+		?.split("</button>")[0];
+	if (!button) throw new Error("notifications toggle button not found");
+
+	const requestIndex = button.indexOf(
+		"window.piUi.liveWorkspace.requestNotificationPermission().then(",
+	);
+	const dispatchIndex = button.indexOf("document.body.dispatchEvent(new CustomEvent(");
+	if (requestIndex === -1) {
+		throw new Error(
+			"expected the click handler to await requestNotificationPermission()",
+		);
+	}
+	if (dispatchIndex === -1 || dispatchIndex < requestIndex) {
+		throw new Error(
+			"expected the preferences event to dispatch inside requestNotificationPermission()'s .then(), after the permission decision, not before",
+		);
+	}
+	// Turning notifications off must still dispatch immediately (no permission to wait for).
+	assertStringIncludes(button, "} else {");
+});
+
 test("a click-to-close backdrop is rendered alongside the pane, hidden until it opens (A#14)", () => {
 	const html = renderLiveWorkspace(snapshot(), {}, emptyUsage);
 	assertStringIncludes(html, 'id="live-workspace-backdrop"');
@@ -110,6 +138,33 @@ test("a compacting turn reports its reason and offers no abort action", () => {
 	);
 	assertStringIncludes(html, "Compacting context (threshold)");
 	assertFalse(html.includes("Abort"));
+});
+
+test("the now section carries the current session path so the client can tell a session switch from a finished turn", () => {
+	const html = renderLiveWorkspaceData(
+		snapshot({ turn: { phase: "running" } }),
+		{},
+		emptyUsage,
+		undefined,
+		"/sessions/abc.jsonl",
+	);
+	const nowIndex = html.indexOf('id="live-workspace-now"');
+	assertStringIncludes(
+		html.slice(nowIndex, nowIndex + 300),
+		'data-live-workspace-session="/sessions/abc.jsonl"',
+	);
+});
+
+test("the now section renders no session attribute when there is no current session", () => {
+	const html = renderLiveWorkspaceData(
+		snapshot({ turn: { phase: "running" } }),
+		{},
+		emptyUsage,
+	);
+	const nowIndex = html.indexOf('id="live-workspace-now"');
+	assertFalse(
+		html.slice(nowIndex, nowIndex + 300).includes("data-live-workspace-session"),
+	);
 });
 
 test("a retrying turn renders a client-tickable countdown element (A#26)", () => {
@@ -385,4 +440,23 @@ test("each tab section renders standalone, for independent patching (A#13)", () 
 test("the extensions tab reports no activity when nothing has been observed", () => {
 	const html = renderLiveWorkspaceData(snapshot(), { tab: "extensions" }, emptyUsage);
 	assertStringIncludes(html, "No extension UI or channel activity observed yet.");
+});
+
+test("clicking the bell while it is already on (from another device) asks THIS browser for permission instead of turning it off", () => {
+	// The preference is server-side and shared, so a phone opening pi-ui for the first
+	// time finds the bell on without ever having granted permission or subscribed.
+	const html = renderLiveWorkspace(snapshot(), {}, emptyUsage);
+	const button = html
+		.split('id="live-workspace-notifications-toggle"')[1]
+		?.split("</button>")[0];
+	if (!button) throw new Error("notifications toggle button not found");
+	const check = button.indexOf(
+		"$liveWorkspacePreferences.notifications && window.piUi.liveWorkspace.needsNotificationPermission()",
+	);
+	const toggle = button.indexOf(
+		"$liveWorkspacePreferences.notifications = !$liveWorkspacePreferences.notifications",
+	);
+	if (check === -1 || toggle === -1 || check > toggle) {
+		throw new Error("expected the permission check to come before the toggle");
+	}
 });

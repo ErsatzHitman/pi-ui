@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="color-scheme" content="light dark" />
+		<title>pi-ui — offline</title>
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<style>
+			:root {
+				color-scheme: light dark;
+				--bg: light-dark(oklch(1 0 0), oklch(0.141 0.005 285.823));
+				--fg: light-dark(oklch(0.178 0 0), oklch(0.967 0.001 286.375));
+				--muted: light-dark(oklch(0.51 0 0), oklch(0.705 0.015 286.067));
+			}
+			body {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				min-height: 100dvh;
+				margin: 0;
+				background: var(--bg);
+				color: var(--fg);
+				font:
+					15px/1.5 system-ui,
+					sans-serif;
+				text-align: center;
+				padding: 1.5rem;
+			}
+			main {
+				max-width: 24rem;
+			}
+			h1 {
+				font-size: 1.05rem;
+				font-weight: 600;
+				margin: 0 0 0.5rem;
+			}
+			p {
+				margin: 0;
+				color: var(--muted);
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>Can't reach your pi-ui server</h1>
+			<p>Retrying — this page will reconnect automatically once it's back.</p>
+		</main>
+		<script>
+			// This page is only ever shown by the service worker's offline fallback
+			// (see src/ui/service-worker-script.ts) for a navigation that failed
+			// outright — retry by reloading, which either succeeds or shows this
+			// same page again.
+			setTimeout(() => location.reload(), 5000);
+		</script>
+	</body>
+</html>

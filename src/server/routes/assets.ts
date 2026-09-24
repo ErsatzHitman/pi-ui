@@ -16,6 +16,7 @@ export const assetRoutes = {
 					toolOutputHidden: context.toolOutputHidden,
 					toolbarHidden: context.toolbarHidden,
 					themeLab: context.themeLab,
+					pushPublicKey: context.pushPublicKey,
 				}),
 				{
 					headers: {

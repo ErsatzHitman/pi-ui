@@ -1,0 +1,10 @@
+# Applies to `docker build -f deploy/Dockerfile .` (BuildKit prefers a
+# <dockerfile>.dockerignore next to the Dockerfile over a root .dockerignore).
+node_modules
+dist
+.git
+.pi
+.agents
+.claude
+android-app
+*.log

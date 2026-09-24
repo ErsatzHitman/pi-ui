@@ -13,6 +13,7 @@ export function filePreviewUrl(path: string): string {
 export const endpoints = {
 	root: "/",
 	stream: "/stream",
+	streamVisibility: "/stream/visibility",
 	displayRefresh: "/display-refresh",
 	codeTheme: "/code-theme",
 	fonts: "/fonts",
@@ -72,6 +73,10 @@ export const endpoints = {
 	authInput: "/auth/input",
 	authLogout: "/auth/logout",
 	authClose: "/auth/close",
+	// The pi-ui session cookie (request-auth.ts), not to be confused with the
+	// LLM-provider auth above (authLogin*/authLogout): logging in/out of *this server*.
+	sessionLogin: "/session/login",
+	sessionLogout: "/session/logout",
 	llamaOpen: "/llama/open",
 	llamaToggle: "/llama/toggle",
 	llamaClose: "/llama/close",
@@ -91,5 +96,7 @@ export const endpoints = {
 	filesImport: "/files/import",
 	filesOpen: "/files/open",
 	filesPreview: `${filesPreviewBase}*`,
+	pushSubscribe: "/push/subscribe",
+	pushUnsubscribe: "/push/unsubscribe",
 	inspector: "/vendor/datastar-inspector.min.js",
 } as const;

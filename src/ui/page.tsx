@@ -3,6 +3,7 @@ import { activeFontStacks } from "../fonts.ts";
 import { activeKeybind, keybindActions } from "../keybinds.ts";
 import { liveWorkspaceRatioDefault } from "../live-workspace-types.ts";
 import { getPierreThemes } from "../pierre-theme.ts";
+import { isRemoteMode } from "../remote-mode.ts";
 import {
 	endpoints,
 	workspaceFilesBase,
@@ -46,6 +47,10 @@ export type PageRenderOptions = {
 	toolOutputHidden?: boolean;
 	toolbarHidden?: boolean;
 	themeLab?: boolean;
+	/** Raw VAPID public key (base64url) for `static/app/push.js`'s
+	 * `PushManager.subscribe`. Omitted (rather than a magic empty string) when
+	 * a caller — a test, mainly — doesn't care about push. */
+	pushPublicKey?: string;
 };
 
 export function renderPage(
@@ -59,6 +64,7 @@ export function renderPage(
 		toolOutputHidden = false,
 		toolbarHidden = false,
 		themeLab = false,
+		pushPublicKey,
 	}: PageRenderOptions = {},
 ): string {
 	const staticBase = `/static/${appVersion}`;
@@ -69,13 +75,26 @@ export function renderPage(
 	// Shared by the initial connection and the forced-reconnect handler below, so
 	// a stale mobile connection is re-opened with the exact same options. Passing
 	// 'cleanup' aborts any still-open request under this same key before starting
-	// the new one, so re-issuing this action is always safe to call again.
+	// the new one, so re-issuing this action is always safe to call again. Datastar's
+	// @get closes the stream whenever the tab is hidden by default; kept open instead
+	// so a hidden background tab still receives the "session finished"/"Turn finished"
+	// effects those notifications depend on (static/app/notifications.js,
+	// src/client/live-workspace.ts). Unconditional (RM1 audit open issue 4): this is a
+	// real local bug too, not only a remote one.
 	const streamConnectAction = `@get('${endpoints.stream}?clientId=${displayClientId}&appVersion=${appVersion}', {
 						payload: {},
 						retry: 'always',
 						retryMaxCount: Infinity,
 						requestCancellation: 'cleanup',
+						openWhenHidden: true,
+						headers: window.piUi.streamResumeHeaders(),
 					})`;
+	// Remote mode (Web Push): the server pushes "finished" only while no connected tab
+	// is visible, since a backgrounded PWA or frozen tab keeps its stream open yet can't
+	// notify in-page (see `DatastarClientHub.visibleClientCount`).
+	const visibilityReportAction = isRemoteMode()
+		? `@post('${endpoints.streamVisibility}', { payload: { clientId: '${displayClientId}', visible: document.visibilityState === 'visible' } })`
+		: undefined;
 
 	return syncHtml(
 		"<!doctype html>" +
@@ -143,6 +162,8 @@ export function renderPage(
 					data-attr:data-code-theme-light="$_codeThemeLight"
 					data-attr:data-code-theme-dark="$_codeThemeDark"
 					data-toolbar-hidden={toolbarHidden}
+					data-remote-mode={isRemoteMode()}
+					data-push-public-key={pushPublicKey}
 					data-signals={initialSignals}
 					data-signals:_minimal-mode__ifmissing={minimalMode ? "true" : "false"}
 					data-signals:_tool-output-hidden__ifmissing={
@@ -234,6 +255,16 @@ export function renderPage(
 					{state.datastarInspector && <datastar-inspector />}
 					{themeLab && renderThemeLab()}
 					{renderDebugOverlay(state)}
+					{/* Populated purely client-side by `window.piUi.toast.show(...)` —
+					 * see `toast.js` and `ui-renderer.ts`'s "toast" commit effect
+					 * (round RM1 multi-client #1's "answered on another device"
+					 * notice). Never server-rendered content of its own. */}
+					<div
+						id="toast-region"
+						class="toast-region"
+						aria-live="polite"
+						aria-atomic="true"
+					></div>
 					<div
 						id="file-drop-overlay"
 						class="file-drop-overlay"
@@ -272,8 +303,13 @@ export function renderPage(
 							window.piUi.workspaceReview.applyOpen($_workspaceReviewOpen);
 							window.piUi.liveWorkspace.applyOpen($_liveWorkspaceOpen);
 						`}
-						data-init={streamConnectAction}
+						data-init={
+							visibilityReportAction
+								? `${streamConnectAction}; ${visibilityReportAction}`
+								: streamConnectAction
+						}
 						data-on:pi-ui-stream-reconnect__window={streamConnectAction}
+						data-on:visibilitychange__window={visibilityReportAction}
 					>
 						{renderSessionSidebar(state, {
 							open: sessionSidebarOpen,

@@ -708,6 +708,36 @@ test("headless updates initialize one current view and tolerate disconnect", asy
 	}
 });
 
+test("a client whose connection blips resumes without a full render while another tab stays connected", async () => {
+	const state = createState();
+	// A second, still-connected client keeps the resume window alive across `a`'s drop —
+	// see `DatastarClientHub`'s `epochId` doc comment.
+	connect(state);
+
+	const aController = new AbortController();
+	connections.push(aController);
+	const aReader = responseReader(state.createStream(aController.signal));
+	await readUntil(aReader, (text) => text.includes("event: datastar-patch-signals"));
+
+	state.replaceMessages([markdownMessage("**live update**")]);
+	const liveOutput = await readUntil(aReader, (text) => text.includes("live update"));
+	const lastEventId = extractLastEventId(liveOutput);
+	aController.abort();
+
+	state.replaceMessages([markdownMessage("**missed while away**")]);
+
+	const reconnectController = new AbortController();
+	connections.push(reconnectController);
+	const reconnectOutput = await readUntil(
+		responseReader(
+			state.createStream(reconnectController.signal, undefined, lastEventId),
+		),
+		(text) => text.includes("missed while away"),
+	);
+	assertNotIncludes(reconnectOutput, "live update");
+	assertEqual(count(reconnectOutput, "event: datastar-patch-elements"), 1);
+});
+
 test("message work waits for a client and continues while another tab remains", async () => {
 	const rendered: string[] = [];
 	const render = async (text: string) => {
@@ -1338,9 +1368,70 @@ test("hot app views exclude independently owned regions", () => {
 	}
 });
 
+test("reconnecting with the same display client id supersedes the stale stream (RM1 multi-client #2)", async () => {
+	const state = createState();
+	const staleController = new AbortController();
+	const stale = state.createStream(staleController.signal, "tab-1");
+	const freshController = new AbortController();
+	connections.push(freshController);
+	// The dedup happens synchronously inside this second `createStream` call
+	// (round RM1 multi-client #2), so `stale` is already force-closed by now.
+	const freshReader = responseReader(
+		state.createStream(freshController.signal, "tab-1"),
+	);
+
+	state.replaceMessages([{ role: "user", text: "hello", timestamp }]);
+	const freshBody = await readUntil(freshReader, (text) => text.includes("hello"));
+	freshController.abort();
+
+	assertIncludes(freshBody, "hello");
+	assertNotIncludes(await stale.text(), "hello");
+});
+
+test("a dialog answered on one client broadcasts a toast the others can filter themselves out of", async () => {
+	const state = createState();
+	const aController = new AbortController();
+	const bController = new AbortController();
+	connections.push(aController, bController);
+	const aReader = responseReader(state.createStream(aController.signal, "client-a"));
+	const bReader = responseReader(state.createStream(bController.signal, "client-b"));
+	await readUntil(aReader, (text) => text.includes("event: datastar-patch-signals"));
+	await readUntil(bReader, (text) => text.includes("event: datastar-patch-signals"));
+
+	state.notifyOtherClients("Answered on another device", "client-a");
+
+	const bText = await readUntil(bReader, (text) =>
+		text.includes("Answered on another device"),
+	);
+	assertIncludes(bText, "Answered on another device");
+	assertIncludes(bText, "client-a");
+});
+
+test("a tab's deduped stale stream keeps that tab's per-client reports (RM2 merge)", () => {
+	const state = createState();
+	const staleController = new AbortController();
+	state.createStream(staleController.signal, "client-a");
+	state.setClientColorScheme("light", "client-a");
+
+	// The same tab reconnects: the hub closes its stale stream, but the tab is
+	// still connected, so its reported scheme must survive (a resumed stream
+	// never re-runs the mount script that would report it again).
+	const freshController = new AbortController();
+	state.createStream(freshController.signal, "client-a");
+	assertEqual(state.clientColorScheme, "light");
+
+	// Once the tab's last connection closes, it is forgotten as before.
+	freshController.abort();
+	assertEqual(state.clientColorScheme, "dark");
+});
+
 type TestStore = AppStore & {
 	readonly renderer: UiRenderer;
-	createStream(signal: AbortSignal): Response;
+	createStream(
+		signal: AbortSignal,
+		clientId?: string,
+		lastEventId?: string | null,
+	): Response;
 };
 
 function createState(options: MessageRenderServiceOptions = {}): TestStore {
@@ -1348,7 +1439,11 @@ function createState(options: MessageRenderServiceOptions = {}): TestStore {
 	const renderer = new UiRenderer(store, new DatastarClientHub(), options);
 	return Object.assign(store, {
 		renderer,
-		createStream: (signal: AbortSignal) => renderer.createStream(signal),
+		createStream: (
+			signal: AbortSignal,
+			clientId?: string,
+			lastEventId?: string | null,
+		) => renderer.createStream(signal, clientId, undefined, lastEventId),
 	});
 }
 
@@ -1478,4 +1573,12 @@ async function collectFinalizedPatches(state: TestStore, response: Response) {
 
 function count(value: string, search: string): number {
 	return value.split(search).length - 1;
+}
+
+/** The last SSE `id:` line seen in an accumulated chunk of raw stream text. */
+function extractLastEventId(text: string): string {
+	const matches = [...text.matchAll(/^id: (.+)\r?$/gm)];
+	const last = matches.at(-1);
+	if (!last) throw new Error("No SSE 'id:' line found in the stream output.");
+	return last[1] ?? "";
 }

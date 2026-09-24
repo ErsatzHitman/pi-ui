@@ -10,7 +10,11 @@ import type {
 
 import { assertEquals, assertRejects, waitForCondition } from "#testing/assertions";
 
-import { AppStore } from "../state/app-store.ts";
+import {
+	AppStore,
+	type AppStorePresentation,
+	type UiCommitEffect,
+} from "../state/app-store.ts";
 import type { SessionDoneNotification } from "../system-notifications.ts";
 import {
 	RuntimeController,
@@ -1498,6 +1502,129 @@ test("RuntimeController always notifies for completed background work", async ()
 			sessionPath: "/sessions/background.jsonl",
 		},
 	]);
+	await controller.dispose();
+});
+
+function fakePresentation(effects: unknown[]): AppStorePresentation {
+	return new Proxy(
+		{},
+		{
+			get: (_target, name) =>
+				name === "requestCommit"
+					? (effect: unknown) => {
+							if (effect) effects.push(effect);
+						}
+					: () => {},
+		},
+	) as AppStorePresentation;
+}
+
+test("RuntimeController does not broadcast a session-finished effect for the foreground session (the Live Workspace turn banner already covers it)", async () => {
+	const effects: unknown[] = [];
+	const store = new AppStore();
+	store.attachPresentation(fakePresentation(effects));
+	const focused = fakeRuntime("/sessions/focused.jsonl");
+	const controller = await RuntimeController.prepare(store, "/workspace", {
+		dependencies: dependencies([focused]),
+		isApplicationFocused: () => true,
+		notifySessionDone: () => Promise.resolve(),
+	});
+	controller.activate();
+	focused.emit(agentSessionEventStub({ type: "agent_end" }));
+	focused.emit(agentSessionEventStub({ type: "agent_settled" }));
+
+	assertEquals(effects, []);
+	await controller.dispose();
+});
+
+test("RuntimeController broadcasts a session-finished effect for completed background work", async () => {
+	const effects: unknown[] = [];
+	const store = new AppStore();
+	store.attachPresentation(fakePresentation(effects));
+	const background = fakeRuntime("/sessions/background.jsonl");
+	const foreground = fakeRuntime("/sessions/foreground.jsonl");
+	background.setStreaming(true);
+	const controller = await RuntimeController.prepare(store, "/workspace", {
+		dependencies: dependencies([background, foreground]),
+		isApplicationFocused: () => true,
+		notifySessionDone: () => Promise.resolve(),
+	});
+	controller.activate();
+	assertEquals((await controller.newSession()).status, "success");
+	background.emit(agentSessionEventStub({ type: "agent_end" }));
+	background.emit(agentSessionEventStub({ type: "agent_settled" }));
+
+	const sessionFinishedEffects = effects.filter(
+		(effect) => (effect as UiCommitEffect | undefined)?.type === "session-finished",
+	);
+	assertEquals(sessionFinishedEffects, [
+		{
+			type: "session-finished",
+			workspace: "/workspace",
+			sessionPath: "/sessions/background.jsonl",
+			id: 1,
+		},
+	]);
+	await controller.dispose();
+});
+
+test("RuntimeController calls sendWebPush for completed foreground and background work", async () => {
+	// Foreground too: the phone case is "prompt, close the app, wait" — the run that
+	// finishes is the FOREGROUND one, and with no tab open nothing else reaches the
+	// device. `PushService` only sends while no client is connected, so this never
+	// doubles an open tab's in-page "Turn finished" notification.
+	const pushDetails: Array<[SessionDoneNotification, boolean]> = [];
+	const background = fakeRuntime("/sessions/background.jsonl");
+	const foreground = fakeRuntime("/sessions/foreground.jsonl");
+	background.setStreaming(true);
+	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
+		dependencies: dependencies([background, foreground]),
+		isApplicationFocused: () => true,
+		notifySessionDone: () => Promise.resolve(),
+		sendWebPush: (details, background) => {
+			pushDetails.push([details, background]);
+		},
+	});
+	controller.activate();
+	assertEquals((await controller.newSession()).status, "success");
+
+	foreground.emit(agentSessionEventStub({ type: "agent_end" }));
+	foreground.emit(agentSessionEventStub({ type: "agent_settled" }));
+	assertEquals(pushDetails, [
+		[{ workspace: "/workspace", sessionPath: "/sessions/foreground.jsonl" }, false],
+	]);
+
+	background.emit(agentSessionEventStub({ type: "agent_end" }));
+	background.emit(agentSessionEventStub({ type: "agent_settled" }));
+	assertEquals(pushDetails, [
+		[{ workspace: "/workspace", sessionPath: "/sessions/foreground.jsonl" }, false],
+		[{ workspace: "/workspace", sessionPath: "/sessions/background.jsonl" }, true],
+	]);
+	await controller.dispose();
+});
+
+test("a rejected sendWebPush never becomes an unhandled rejection (a push failure must never affect the session runtime)", async () => {
+	// bun:test fails a test outright on any unhandled rejection surfacing during it, so this
+	// exercises `notifyRuntimeDone`'s `void this.activationOptions.sendWebPush?.(details)` call
+	// directly: a `sendWebPush` that rejects (a real, expected shape — see
+	// `PushService.notifySessionFinished`'s `Promise.all` over per-endpoint sends) must be caught,
+	// never crash the process or fail this test.
+	const background = fakeRuntime("/sessions/background.jsonl");
+	const foreground = fakeRuntime("/sessions/foreground.jsonl");
+	background.setStreaming(true);
+	const controller = await RuntimeController.prepare(new AppStore(), "/workspace", {
+		dependencies: dependencies([background, foreground]),
+		isApplicationFocused: () => true,
+		notifySessionDone: () => Promise.resolve(),
+		sendWebPush: () => Promise.reject(new Error("simulated push failure")),
+	});
+	controller.activate();
+	assertEquals((await controller.newSession()).status, "success");
+
+	background.emit(agentSessionEventStub({ type: "agent_end" }));
+	background.emit(agentSessionEventStub({ type: "agent_settled" }));
+	// Let the rejected sendWebPush promise's microtask (and any unhandled-rejection tick) run.
+	await new Promise((resolve) => setTimeout(resolve, 0));
 	await controller.dispose();
 });
 

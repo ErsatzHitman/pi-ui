@@ -35,3 +35,23 @@ if (!process.env.PI_UI_CACHE_DIR) {
 		}
 	});
 }
+
+/**
+ * RM2 persistence: same isolation as `PI_UI_CACHE_DIR` above, for the data directory
+ * `session-image-store.ts` persists images into (`src/utils/app-dirs.ts`'s
+ * `PI_UI_DATA_DIR` override) — otherwise any test that builds a `SessionImageStore`
+ * without its own explicit `directory` (e.g. `routes_integration_test.ts`'s
+ * `fakeContext()`, or an e2e test that calls the real `createApp()`) would write
+ * into the developer's real per-user data directory.
+ */
+if (!process.env.PI_UI_DATA_DIR) {
+	const dir = mkdtempSync(join(tmpdir(), "pi-ui-test-data-"));
+	process.env.PI_UI_DATA_DIR = dir;
+	afterAll(() => {
+		try {
+			rmSync(dir, { recursive: true, force: true });
+		} catch {
+			// Best-effort: a file still open on Windows at exit isn't worth failing over.
+		}
+	});
+}

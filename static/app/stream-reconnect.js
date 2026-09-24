@@ -48,3 +48,89 @@ export function bindStreamReconnect() {
 	});
 	window.addEventListener("online", () => monitor.maybeReconnect());
 }
+
+/**
+ * Remembers the SSE `id:` of the last complete `/stream` event this page applied, so a
+ * forced reconnect (above: `visibilitychange`, `online`, a bfcache restore) can resume
+ * from it (`Last-Event-ID`, round RM2 sse-resume) instead of re-downloading the whole
+ * view. Datastar only sends `Last-Event-ID` on its own internal retries; each forced
+ * reconnect re-issues the `@get` action from scratch, which starts with no id — so the
+ * page's stream action passes `window.piUi.streamResumeHeaders()` itself.
+ *
+ * Reads the stream as it passes through (never buffers or alters it) and records an id
+ * only once its event's closing blank line arrived, as Datastar reads each chunk
+ * (pull-driven, no read-ahead): an id is never remembered for an event Datastar hasn't
+ * been handed yet.
+ */
+export function createStreamEventIdTracker() {
+	let lastEventId;
+
+	function tap(body) {
+		const reader = body.getReader();
+		const decoder = new TextDecoder();
+		let buffered = "";
+		let pendingId;
+		return new ReadableStream(
+			{
+				async pull(controller) {
+					const { value, done } = await reader.read();
+					if (done) {
+						controller.close();
+						return;
+					}
+					buffered += decoder.decode(value, { stream: true });
+					let newline = buffered.indexOf("\n");
+					while (newline !== -1) {
+						const line = buffered.slice(0, newline).replace(/\r$/, "");
+						buffered = buffered.slice(newline + 1);
+						if (line === "") {
+							if (pendingId !== undefined) lastEventId = pendingId;
+							pendingId = undefined;
+						} else if (line.startsWith("id:")) {
+							pendingId = line.slice(3).trimStart();
+						}
+						newline = buffered.indexOf("\n");
+					}
+					controller.enqueue(value);
+				},
+				cancel(reason) {
+					return reader.cancel(reason);
+				},
+			},
+			{ highWaterMark: 0 },
+		);
+	}
+
+	function wrapFetch(fetchImpl) {
+		return async (input, init) => {
+			const response = await fetchImpl(input, init);
+			const url = input instanceof Request ? input.url : String(input);
+			const isStream =
+				new URL(url, "http://localhost").pathname === "/stream" &&
+				response.body &&
+				response.headers.get("content-type")?.includes("text/event-stream");
+			if (!isStream) return response;
+			return new Response(tap(response.body), {
+				status: response.status,
+				statusText: response.statusText,
+				headers: response.headers,
+			});
+		};
+	}
+
+	/** Lower-case key on purpose: Datastar's own retries set `last-event-id` on the same
+	 * headers object, and two spellings would be sent as one comma-joined value. */
+	function resumeHeaders() {
+		return lastEventId ? { "last-event-id": lastEventId } : {};
+	}
+
+	return { wrapFetch, resumeHeaders };
+}
+
+/** Installs the tracker on `window.fetch`. Must run before Datastar opens the first
+ * stream (`main.js` top level; Datastar's module loads after it). */
+export function bindStreamEventIds() {
+	const tracker = createStreamEventIdTracker();
+	window.fetch = tracker.wrapFetch(window.fetch.bind(window));
+	return tracker;
+}

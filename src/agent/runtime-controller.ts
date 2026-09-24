@@ -25,7 +25,10 @@ import { resolveModelScopeFromModels } from "../../node_modules/@earendil-works/
 import { exportSessionToJsonl } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-export.js";
 import { resolvePath as canonicalizeSessionPath } from "../../node_modules/@earendil-works/pi-coding-agent/dist/utils/paths.js";
 import agentPackageJson from "../../node_modules/@earendil-works/pi-coding-agent/package.json" with { type: "json" };
-import type { PiUiActionRequest } from "../extension-surface-types.ts";
+import {
+	isPiUiSheetElement,
+	type PiUiActionRequest,
+} from "../extension-surface-types.ts";
 import { activeKeybind, keybindIds } from "../keybinds.ts";
 import { sessionPerformance } from "../perf/session-performance.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
@@ -253,6 +256,14 @@ export type RuntimeControllerActivationOptions = {
 	dependencies?: RuntimeControllerDependencies;
 	isApplicationFocused?: () => boolean | Promise<boolean>;
 	notifySessionDone?: (details: SessionDoneNotification) => Promise<void>;
+	/** Web Push for "session finished" (round RM2 "pwa") when no client has an
+	 * open `/stream` — see `PushService.notifySessionFinished`, wired from
+	 * `app.ts`. Fire-and-forget, like `notifySessionDone`: a push failure must
+	 * never affect the session runtime. */
+	sendWebPush?: (
+		details: SessionDoneNotification,
+		background: boolean,
+	) => void | Promise<void>;
 	autoTitle?: AutoTitleConfig;
 	/** How extensions are bound (`session.bindExtensions({ mode })`) for every
 	 * runtime this controller creates, forks, resumes, or switches to. See
@@ -1546,8 +1557,8 @@ export class RuntimeController {
 		return this.auth.startLogin(providerId, authType);
 	}
 
-	submitAuthInput(value: string): boolean {
-		return this.auth.submitInput(value);
+	submitAuthInput(value: string, clientId?: string): boolean {
+		return this.auth.submitInput(value, clientId);
 	}
 
 	logout(providerId: string): boolean {
@@ -1574,8 +1585,9 @@ export class RuntimeController {
 		requestId: string,
 		response: string | undefined,
 		cancelled: boolean,
+		clientId?: string,
 	): boolean {
-		return this.extensionUi.respond(requestId, response, cancelled);
+		return this.extensionUi.respond(requestId, response, cancelled, clientId);
 	}
 
 	/** Routes a raw terminal byte sequence to a mounted terminal surface. */
@@ -1612,8 +1624,17 @@ export class RuntimeController {
 	 * Returns `false` (rather than throwing) when no extension in the current
 	 * session registered `pi_ui_event` — e.g. the bridge-aware extension that
 	 * owned this element unloaded, or the session changed underneath the click.
+	 *
+	 * `clientId` is the acting tab's display client id. When the action closes
+	 * a PIUI sheet (an `ask_user` question answered, a form submitted), every
+	 * other client's copy of it just vanished, so they get the same "Answered
+	 * on another device" toast `respondExtensionUi`/auth input broadcast (round
+	 * RM2 multi-client). An action that leaves the sheet open is not an answer.
 	 */
-	async dispatchExtensionUiAction(request: PiUiActionRequest): Promise<boolean> {
+	async dispatchExtensionUiAction(
+		request: PiUiActionRequest,
+		clientId?: string,
+	): Promise<boolean> {
 		const session = this.runtime.session;
 		// Every bridge-aware extension may register its own `pi_ui_event`; the SDK then
 		// suffixes invocation names (`pi_ui_event:1`, `:2`, ...), so match on the base
@@ -1637,6 +1658,7 @@ export class RuntimeController {
 			elementId: this.extensionUi.resolveElementId(request.elementId, this.runtime),
 		};
 		const args = Buffer.from(JSON.stringify(resolved), "utf8").toString("base64url");
+		const sheetWasOpen = this.hasOpenPiUiSheet(resolved.elementId);
 		for (const command of commands) {
 			try {
 				await command.handler(
@@ -1647,7 +1669,19 @@ export class RuntimeController {
 				console.error("Extension pi_ui_event handler failed", error);
 			}
 		}
+		if (sheetWasOpen && !this.hasOpenPiUiSheet(resolved.elementId)) {
+			this.state.notifyOtherClients("Answered on another device", clientId);
+		}
 		return true;
+	}
+
+	/** Whether the foreground's PIUI elements include a sheet/screen `${ns}:${id}`. */
+	private hasOpenPiUiSheet(elementId: string): boolean {
+		return this.state.extensionElements.some(
+			(element) =>
+				isPiUiSheetElement(element) &&
+				`${element.ns}:${element.id}` === elementId,
+		);
 	}
 
 	async refreshModels(signal?: AbortSignal): Promise<void> {
@@ -1967,13 +2001,41 @@ export class RuntimeController {
 	}
 
 	private notifyRuntimeDone(runtime: AgentSessionRuntime, background: boolean): void {
-		void this.notifyRuntimeDoneWhenAppropriate(
-			{
-				workspace: formatHomePath(runtime.session.sessionManager.getCwd()),
-				sessionPath: runtime.session.sessionManager.getSessionFile(),
-			},
-			background,
-		);
+		const details: SessionDoneNotification = {
+			workspace: formatHomePath(runtime.session.sessionManager.getCwd()),
+			sessionPath: runtime.session.sessionManager.getSessionFile(),
+		};
+		if (background) {
+			// Broadcasts to every connected client (round RM1 "notifications"), for
+			// `static/app/notifications.js` to turn into a Web Notification where it's
+			// warranted. The foreground session already gets an equivalent "Turn finished"
+			// notification from `src/client/live-workspace.ts`'s `notifyTurnEvent` (driven by
+			// the "Now" tab's turn banner, which only ever reflects the foreground run), so
+			// this stays background-only to avoid firing both for the same completion. See
+			// `AppStore.notifySessionFinished`.
+			this.state.notifySessionFinished(details);
+		}
+		// Web Push (round RM2 "pwa"): reaches a device with no tab open at all, which
+		// neither the SSE broadcast above nor the in-page "Turn finished" notice can —
+		// so foreground runs too (prompt on the phone, close the app, wait).
+		// `PushService` itself decides whether one is actually needed (remote mode, no
+		// connected client), which also keeps it from doubling an open tab's notice.
+		// Called synchronously (not deferred), matching `notifySessionDone`'s
+		// fire-and-forget shape; the try/catch and `.catch()` below cover both a
+		// synchronous throw and a rejected Promise, so a push failure never affects
+		// the session runtime (see this option's doc comment) or surfaces as an
+		// unhandled rejection.
+		try {
+			const pushResult = this.activationOptions.sendWebPush?.(details, background);
+			if (pushResult) {
+				void pushResult.catch((error) => {
+					console.error("Web Push notification failed", error);
+				});
+			}
+		} catch (error) {
+			console.error("Web Push notification failed", error);
+		}
+		void this.notifyRuntimeDoneWhenAppropriate(details, background);
 	}
 
 	private async notifyRuntimeDoneWhenAppropriate(

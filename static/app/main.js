@@ -23,6 +23,7 @@ import {
 	trimOldMessages,
 } from "./message-scroll.js";
 import { filterModelSearch } from "./model-search.js";
+import { bindNotifications } from "./notifications.js";
 import {
 	bindPickers,
 	closePickers,
@@ -34,17 +35,23 @@ import {
 } from "./pickers.js";
 import { createPromptHistory } from "./prompt-history.js";
 import { focusPromptEnd, setPromptValue } from "./prompt.js";
+import { bindPushOptIn } from "./push.js";
+import { registerServiceWorker } from "./service-worker.js";
 import {
 	readTransitionState,
 	startSessionPerformanceMeasurement,
 } from "./session-performance.js";
-import { bindStreamReconnect } from "./stream-reconnect.js";
+import { bindStreamEventIds, bindStreamReconnect } from "./stream-reconnect.js";
 import { bindTerminalSurfaces } from "./terminal-keys.js";
+import { showToast } from "./toast.js";
 import { bindTooltips } from "./tooltips.js";
 import { bindVimScroll } from "./vim-scroll.js";
 import { windowFocus } from "./window-focus.js";
 
 const promptHistory = createPromptHistory();
+
+// Before Datastar (loaded after this module) opens the first /stream.
+const streamEventIds = bindStreamEventIds();
 
 window.piUi = {
 	controls: { refresh: refreshControls, activate: activateCommandItem },
@@ -62,6 +69,7 @@ window.piUi = {
 		trimOldMessages,
 	},
 	modelSearch: { filter: filterModelSearch },
+	notifications: bindNotifications(),
 	pickers: {
 		close: closePickers,
 		complete: completeSlashCommand,
@@ -79,6 +87,8 @@ window.piUi = {
 		observe: readTransitionState,
 		start: startSessionPerformanceMeasurement,
 	},
+	toast: { show: showToast },
+	streamResumeHeaders: streamEventIds.resumeHeaders,
 	windowFocus,
 	workspaceReview: { applyOpen: () => {} },
 	liveWorkspace: { applyOpen: () => {} },
@@ -115,6 +125,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 	bindTerminalSurfaces();
 	bindExtensionKeys();
 	bindDebugFps();
+	const serviceWorkerReady = registerServiceWorker();
 
 	await Promise.all([
 		import("../../src/client/fonts.ts"),
@@ -122,6 +133,12 @@ window.addEventListener("DOMContentLoaded", async () => {
 		import("../../src/client/workspace-review.ts"),
 		import("../../src/client/live-workspace.ts"),
 	]);
+
+	// After live-workspace.ts (above) has set `window.piUi.liveWorkspace`, whose
+	// `notificationsOptedIn()` this reads to sync a returning visitor's already-on
+	// preference, not just a fresh click of the bell toggle.
+	await serviceWorkerReady;
+	window.piUi.push = bindPushOptIn();
 });
 
 function bindDebugFps() {

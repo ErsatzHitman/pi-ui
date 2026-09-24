@@ -63,10 +63,20 @@ export const extensionUiRoutes = {
 	[endpoints.extensionUiResponse]: {
 		POST: async (request, context) => {
 			const signals = await readActionSignals(request);
+			// The answering tab's id (`page.tsx`'s `displayClientId`, same shape as
+			// `extensionUiColorScheme`/`terminalViewport` above) — lets other
+			// connected clients tell "I answered this" from "someone else did"
+			// (round RM1 multi-client #1). Optional: an older client that doesn't
+			// send one just doesn't get excluded from the broadcast toast.
+			const clientId = optionalString(signals, "clientId");
+			if (clientId !== undefined && !isDisplayClientId(clientId)) {
+				throw new ActionInputError("Invalid clientId.");
+			}
 			requireHost(context).respondExtensionUi(
 				requiredString(signals, "extensionRequestId"),
 				stringField(signals, "extensionResponse"),
 				booleanField(signals, "extensionCancelled", { optional: true }),
+				clientId,
 			);
 			return datastarResponse();
 		},
@@ -83,15 +93,25 @@ export const extensionUiRoutes = {
 			const value = jsonSizeField(signals, "value", {
 				maxBytes: maxActionValueBytes,
 			}) as JsonValue | undefined;
-			await requireHost(context).dispatchExtensionUiAction({
-				elementId: requiredString(signals, "elementId", {
-					maxLength: maxElementIdLength,
-				}),
-				actionId: requiredString(signals, "actionId", {
-					maxLength: maxActionIdLength,
-				}),
-				value,
-			});
+			// Same optional per-tab id as `extensionUiResponse` above: when this
+			// action closes a PIUI sheet (e.g. answers `ask_user`), the other
+			// clients get the "Answered on another device" toast, not this one.
+			const clientId = optionalString(signals, "clientId");
+			if (clientId !== undefined && !isDisplayClientId(clientId)) {
+				throw new ActionInputError("Invalid clientId.");
+			}
+			await requireHost(context).dispatchExtensionUiAction(
+				{
+					elementId: requiredString(signals, "elementId", {
+						maxLength: maxElementIdLength,
+					}),
+					actionId: requiredString(signals, "actionId", {
+						maxLength: maxActionIdLength,
+					}),
+					value,
+				},
+				clientId,
+			);
 			return datastarResponse();
 		},
 	},

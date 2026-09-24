@@ -24,7 +24,7 @@ export function bindFileLinks() {
 	);
 }
 
-async function followFileLink(uri) {
+export async function followFileLink(uri) {
 	const endpoint = document.body.dataset.filesOpenEndpoint;
 	if (!endpoint) return;
 
@@ -41,6 +41,12 @@ async function followFileLink(uri) {
 		}
 		const result = await response.json();
 		if (result.opened) return;
+		if (result.directory) {
+			const { openLinkedWorkspaceDirectory } =
+				await import("../../src/client/workspace-review.ts");
+			await openLinkedWorkspaceDirectory(result.path, result.workspacePath);
+			return;
+		}
 		const { openLinkedWorkspaceFile } =
 			await import("../../src/client/workspace-review.ts");
 		await openLinkedWorkspaceFile(result.path, result.workspacePath);

@@ -297,6 +297,14 @@ function renderTerminalSurfaceBody(surface: TerminalSurface): string {
 					autocapitalize: "off",
 				}}
 			/>
+			{/* RM2 persistence item 2: a subtle dot `terminal-keys.js` shows only once a
+			    batched input flush has been in flight over `PENDING_INDICATOR_DELAY_MS`
+			    (250ms) — invisible on an ordinary local round-trip. */}
+			<span
+				class="terminal-surface-pending"
+				data-terminal-surface-pending={surface.id}
+				aria-hidden="true"
+			/>
 			{interactiveKinds.has(surface.kind) && renderSoftKeyBar(surface.id)}
 		</div>,
 	);

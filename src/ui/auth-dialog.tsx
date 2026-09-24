@@ -215,7 +215,7 @@ function renderAuthenticationFlow(dialog: AppAuthDialog): string {
 					<button
 						type="button"
 						class="btn"
-						data-on:click={`@post('${endpoints.authInput}', { payload: { authInput: $authInput } })`}
+						data-on:click={postAuthInput("$authInput")}
 					>
 						Continue
 					</button>
@@ -240,7 +240,7 @@ function renderAuthenticationPrompt(dialog: AppAuthDialog): string {
 						data-variant="outline"
 						data-on:click={`
 							$authInput = ${JSON.stringify(option.id)};
-							@post('${endpoints.authInput}', { payload: { authInput: $authInput } });
+							${postAuthInput("$authInput")}
 						`}
 						safe
 					>
@@ -266,13 +266,26 @@ function renderAuthenticationPrompt(dialog: AppAuthDialog): string {
 				autofocus
 				data-on:keydown={`if (evt.code === 'Enter') {
 					evt.preventDefault();
-					@post('${endpoints.authInput}', {
-						payload: { authInput: $authInput },
-					});
+					${postAuthInput("$authInput")}
 				}`}
 			/>
 		</div>,
 	);
+}
+
+/**
+ * `document.body?.dataset?.displayClientId` — same runtime read as
+ * `extension-dialog.tsx`'s `postResponse` — so the server can tell other
+ * connected clients "answered elsewhere" for the auth_url/api-key/oauth
+ * prompt flow too (round RM1 multi-client #1). A raw expression, not a
+ * literal: this dialog is patched independently of the page's own per-render
+ * template, so it can't embed a build-time id the way `page.tsx` does.
+ */
+function postAuthInput(value: string): string {
+	return `@post('${endpoints.authInput}', { payload: {
+		authInput: ${value},
+		clientId: document.body?.dataset?.displayClientId,
+	} })`;
 }
 
 function renderResult(dialog: AppAuthDialog): string {

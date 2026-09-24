@@ -1,0 +1,30 @@
+# Reverse-proxies pi-ui behind TLS. See ../docs/remote.md for the full deployment guide.
+#
+# pi-ui itself only ever speaks plain HTTP, on loopback by default (127.0.0.1:31415).
+# Caddy terminates TLS and forwards to it. This file is written for the "public internet,
+# Let's Encrypt" path; if you can use Tailscale instead (recommended — see
+# ../docs/remote.md), you don't need this file at all: `tailscale serve` does the same job
+# with no config and nothing exposed to the internet.
+#
+# Usage:
+#   caddy run --config Caddyfile.example --adapter caddyfile
+#
+# Replace pi-ui.example.com with your real domain (its DNS must already point at this
+# host) and, if pi-ui isn't on the default port, 127.0.0.1:31415 below. Caddy obtains and
+# renews the certificate automatically; nothing else to configure.
+
+pi-ui.example.com {
+	reverse_proxy 127.0.0.1:31415 {
+		# The SSE stream (GET /stream) is pi-ui's only long-lived connection and carries
+		# every live update — the transcript, tool output, dialogs. Caddy's default
+		# response buffering would hold those back until the buffer fills or the
+		# connection closes, so the browser sees nothing for seconds at a time.
+		# flush_interval -1 disables buffering and forwards each chunk immediately.
+		flush_interval -1
+	}
+}
+
+# If you're also running the Cloudflare Tunnel path from ../docs/remote.md, skip this file
+# entirely — `cloudflared` connects out to Cloudflare and needs no inbound listener or
+# certificate here. Turn off Cloudflare's own buffering and caching for /stream instead
+# (see the tunnel config note in ../docs/remote.md).

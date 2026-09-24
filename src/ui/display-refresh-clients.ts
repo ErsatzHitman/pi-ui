@@ -30,6 +30,11 @@ export class DisplayRefreshClients {
 		this.clients.set(id, { connections: 1, hz: fallbackDisplayHz });
 	}
 
+	/** Whether `id` still has at least one open connection. */
+	has(id: string): boolean {
+		return this.clients.has(id);
+	}
+
 	disconnect(id: string): void {
 		const client = this.clients.get(id);
 		if (!client) return;

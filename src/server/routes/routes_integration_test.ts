@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { mock, test } from "bun:test";
 import { mkdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,6 +9,7 @@ import { assertEquals, assertStringIncludes } from "#testing/assertions";
 import { makeTempDir, makeTempFile } from "#testing/temp";
 
 import { getToolPath } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/utils/tools-manager.js";
+import { setRemoteMode } from "../../remote-mode.ts";
 import { sessionSidebarWidthDefault } from "../../session-sidebar-types.ts";
 import { AppStore } from "../../state/app-store.ts";
 import { assertStringExcludes } from "../../testing/assertions.ts";
@@ -706,6 +707,74 @@ test("file imports report content-detected image MIME types", async () => {
 	}
 });
 
+test("GET /sw.js renders a versioned, classic-script service worker", async () => {
+	const response = await createRouter(fakeContext()).fetch(
+		new Request("http://localhost/sw.js"),
+	);
+	assertEquals(response.status, 200);
+	assertEquals(response.headers.get("content-type"), "text/javascript; charset=utf-8");
+	const body = await response.text();
+	assertStringIncludes(body, 'const CACHE_NAME = "pi-ui-offline-test-version"');
+	assertEquals(body.includes("import "), false);
+});
+
+test("push subscribe stores a valid subscription and returns 204", async () => {
+	const added: unknown[] = [];
+	const response = await createRouter(
+		fakeContext({
+			pushSubscriptions: {
+				add: async (record) => {
+					added.push(record);
+				},
+				remove: async () => {},
+			},
+		}),
+	).fetch(
+		new Request("http://localhost/push/subscribe", {
+			method: "POST",
+			body: JSON.stringify({
+				endpoint: "https://push.example/abc",
+				keys: { p256dh: "p", auth: "a" },
+			}),
+		}),
+	);
+	assertEquals(response.status, 204);
+	assertEquals(added, [
+		{ endpoint: "https://push.example/abc", p256dh: "p", auth: "a" },
+	]);
+});
+
+test("push subscribe rejects a malformed body", async () => {
+	const response = await createRouter(fakeContext()).fetch(
+		new Request("http://localhost/push/subscribe", {
+			method: "POST",
+			body: JSON.stringify({ endpoint: "https://push.example/abc" }),
+		}),
+	);
+	assertEquals(response.status, 400);
+});
+
+test("push unsubscribe removes the subscription and returns 204", async () => {
+	const removed: string[] = [];
+	const response = await createRouter(
+		fakeContext({
+			pushSubscriptions: {
+				add: async () => {},
+				remove: async (endpoint) => {
+					removed.push(endpoint);
+				},
+			},
+		}),
+	).fetch(
+		new Request("http://localhost/push/unsubscribe", {
+			method: "POST",
+			body: JSON.stringify({ endpoint: "https://push.example/abc" }),
+		}),
+	);
+	assertEquals(response.status, 204);
+	assertEquals(removed, ["https://push.example/abc"]);
+});
+
 test("accepted prompts do not clear a newer frontend draft", async () => {
 	const router = createRouter(fakeContext());
 	for (const path of ["/prompt", "/prompt/follow-up"]) {
@@ -804,6 +873,107 @@ test("extension UI responses return to the active agent backend", async () => {
 	});
 });
 
+test("extension UI responses forward the answering client's id (RM1 multi-client #1)", async () => {
+	let receivedClientId: string | undefined;
+	const clientId = crypto.randomUUID();
+	const host = fakeHost({
+		respondExtensionUi: (_requestId, _value, _cancelled, thisClientId) => {
+			receivedClientId = thisClientId;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest("/extensions/ui/respond", {
+			extensionRequestId: "request-1",
+			extensionResponse: "selected",
+			extensionCancelled: false,
+			clientId,
+		}),
+	);
+
+	assertEquals(result.status, 204);
+	assertEquals(receivedClientId, clientId);
+});
+
+test("extension UI responses reject a malformed client id without reaching the runtime", async () => {
+	let called = false;
+	const host = fakeHost({
+		respondExtensionUi: () => {
+			called = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest("/extensions/ui/respond", {
+			extensionRequestId: "request-1",
+			extensionResponse: "selected",
+			extensionCancelled: false,
+			clientId: "not-a-uuid",
+		}),
+	);
+
+	assertEquals(result.status, 400);
+	assertEquals(called, false);
+});
+
+test("auth prompt input forwards the answering client's id (RM1 multi-client #1)", async () => {
+	let receivedClientId: string | undefined;
+	const clientId = crypto.randomUUID();
+	const host = fakeHost({
+		submitAuthInput: (_value, thisClientId) => {
+			receivedClientId = thisClientId;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest(endpoints.authInput, { authInput: "secret", clientId }),
+	);
+
+	assertEquals(result.status, 204);
+	assertEquals(receivedClientId, clientId);
+});
+
+test("auth prompt input rejects a malformed client id without reaching the runtime", async () => {
+	let called = false;
+	const host = fakeHost({
+		submitAuthInput: () => {
+			called = true;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest(endpoints.authInput, {
+			authInput: "secret",
+			clientId: "not-a-uuid",
+		}),
+	);
+
+	assertEquals(result.status, 400);
+	assertEquals(called, false);
+});
+
+test("a losing auth prompt input POST does not error visibly (RM2 multi-client)", async () => {
+	// `submitAuthInput` returns false when there is no active dialog to answer:
+	// someone else already answered it, the same race `/extensions/ui/respond`
+	// (above) resolves by ignoring its host call's return value entirely, not a
+	// client error. The losing tab must see a plain 204, the same as a winning
+	// submission, so it can show "Answered on another device" instead of an
+	// error toast.
+	const host = fakeHost({
+		submitAuthInput: () => false,
+	});
+	const router = createRouter(fakeContext({ host }));
+	const result = await router.fetch(
+		signalRequest(endpoints.authInput, { authInput: "secret" }),
+	);
+
+	assertEquals(result.status, 204);
+});
+
 test("extension UI actions route to the active extension's pi_ui_event handler", async () => {
 	let dispatched: unknown;
 	const host = fakeHost({
@@ -827,6 +997,37 @@ test("extension UI actions route to the active extension's pi_ui_event handler",
 		actionId: "submit",
 		value: { note: "typed value" },
 	});
+});
+
+test("extension UI actions forward the acting client's id (RM2 multi-client toast)", async () => {
+	let receivedClientId: string | undefined;
+	const clientId = crypto.randomUUID();
+	const host = fakeHost({
+		dispatchExtensionUiAction: async (_request, thisClientId) => {
+			receivedClientId = thisClientId;
+			return true;
+		},
+	});
+	const router = createRouter(fakeContext({ host }));
+	const response = await router.fetch(
+		signalRequest("/extensions/ui/action", {
+			elementId: "ask-user:ask",
+			actionId: "submit",
+			clientId,
+		}),
+	);
+
+	assertEquals(response.status, 204);
+	assertEquals(receivedClientId, clientId);
+
+	const rejected = await router.fetch(
+		signalRequest("/extensions/ui/action", {
+			elementId: "ask-user:ask",
+			actionId: "submit",
+			clientId: "not-a-uuid",
+		}),
+	);
+	assertEquals(rejected.status, 400);
 });
 
 test("extension UI actions accept an action with no value", async () => {
@@ -1176,6 +1377,32 @@ test("main stream binds a validated display client identity", async () => {
 	);
 });
 
+test("main stream forwards a Last-Event-ID header to the renderer for resume", async () => {
+	const clientId = "123e4567-e89b-42d3-a456-426614174000";
+	let receivedLastEventId: string | null | undefined;
+	const context = fakeContext({
+		renderer: uiRendererStub({
+			createStream: (
+				_signal: AbortSignal,
+				_clientId?: string,
+				_onDisconnect?: () => void,
+				lastEventId?: string | null,
+			) => {
+				receivedLastEventId = lastEventId;
+				return new Response();
+			},
+		}),
+	});
+	const router = createRouter(context);
+	const url = `http://localhost/stream?clientId=${clientId}&appVersion=${context.appVersion}`;
+
+	await router.fetch(new Request(url, { headers: { "Last-Event-ID": "boot-1:7" } }));
+	assertEquals(receivedLastEventId, "boot-1:7");
+
+	await router.fetch(new Request(url));
+	assertEquals(receivedLastEventId, null);
+});
+
 test("display refresh updates its connected presentation owner", async () => {
 	const clientId = "123e4567-e89b-42d3-a456-426614174000";
 	let measured: { clientId: string; hz: number } | undefined;
@@ -1301,6 +1528,61 @@ test("file links resolve inside and outside paths to the editor without download
 	} finally {
 		await rm(workspace, { recursive: true });
 		await rm(outside);
+	}
+});
+
+test("opening a linked directory opens it on the host outside remote mode", async () => {
+	const opened: string[] = [];
+	mock.module(openBrowserSpecifier, () => ({
+		openBrowser: (target: string) => {
+			opened.push(target);
+		},
+	}));
+	const workspace = await makeTempDir();
+	const nested = `${workspace}/notes`;
+	await mkdir(nested);
+	try {
+		const context = fakeContext();
+		context.store.setWorkspacePath(workspace);
+		const response = await createRouter(context).fetch(
+			fileOpenRequest(pathToFileURL(nested).href),
+		);
+		assertEquals(response.status, 200);
+		assertEquals(await response.json(), { opened: true });
+		assertEquals(opened.length, 1);
+	} finally {
+		await rm(workspace, { recursive: true });
+	}
+});
+
+test("remote mode reveals a linked directory in the Files view instead of opening it on the host", async () => {
+	const opened: string[] = [];
+	mock.module(openBrowserSpecifier, () => ({
+		openBrowser: (target: string) => {
+			opened.push(target);
+		},
+	}));
+	const workspace = await makeTempDir();
+	const nested = `${workspace}/notes`;
+	await mkdir(nested);
+	try {
+		const context = fakeContext();
+		context.store.setWorkspacePath(workspace);
+		setRemoteMode(true);
+		const response = await createRouter(context).fetch(
+			fileOpenRequest(pathToFileURL(nested).href),
+		);
+		assertEquals(response.status, 200);
+		assertEquals(await response.json(), {
+			opened: false,
+			directory: true,
+			path: "notes",
+			workspacePath: workspace,
+		});
+		assertEquals(opened, []);
+	} finally {
+		setRemoteMode(false);
+		await rm(workspace, { recursive: true });
 	}
 });
 
@@ -1566,6 +1848,46 @@ test("HTML previews render outside the workspace with relative assets", async ()
 	}
 });
 
+// RM2 persistence item 1: `/sessions/image?id=` used to 404 for every id from a
+// previous process, since `SessionImageStore` was purely in-memory. It now persists
+// to disk (`session-image-store.ts`), so a second, unrelated `SessionImageStore`
+// pointed at the same directory — standing in for the server having restarted —
+// must still be able to serve an id the first one registered.
+test("a session image survives a simulated server restart", async () => {
+	const directory = await makeTempDir();
+	try {
+		const store = new SessionImageStore({ directory });
+		const url = store.register({ data: "aW1hZ2U=", mimeType: "image/png" });
+		await store.flush();
+
+		const restartedContext = fakeContext();
+		restartedContext.resources.sessionImages = new SessionImageStore({ directory });
+		const response = await createRouter(restartedContext).fetch(
+			new Request(`http://localhost${url}`),
+		);
+		assertEquals(response.status, 200);
+		assertEquals(response.headers.get("content-type"), "image/png");
+		assertEquals(
+			new Uint8Array(await response.arrayBuffer()),
+			Uint8Array.fromBase64("aW1hZ2U="),
+		);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test("an unknown or malformed session image id is a 404, not a crash", async () => {
+	const context = fakeContext();
+	for (const id of ["", "not-a-real-id", "../../etc/passwd"]) {
+		const response = await createRouter(context).fetch(
+			new Request(
+				`http://localhost${endpoints.sessionsImage}?id=${encodeURIComponent(id)}`,
+			),
+		);
+		assertEquals(response.status, 404);
+	}
+});
+
 function createRouter(context: RouteContext) {
 	return {
 		fetch(request: Request): Promise<Response> {
@@ -1593,6 +1915,7 @@ function fakeContext(
 		toolbarHidden?: boolean;
 		themeLab?: boolean;
 		transferredFiles?: RouteContext["transferredFiles"];
+		pushSubscriptions?: RouteContext["pushSubscriptions"];
 	} = {},
 ): RouteContext {
 	const store = new AppStore();
@@ -1618,6 +1941,11 @@ function fakeContext(
 			sessionImages: new SessionImageStore(),
 		},
 		transferredFiles: overrides.transferredFiles ?? { importFiles: async () => [] },
+		pushPublicKey: "test-push-public-key",
+		pushSubscriptions: overrides.pushSubscriptions ?? {
+			add: async () => {},
+			remove: async () => {},
+		},
 		openWorkspace: async () => true,
 		serveStatic: async () => new Response("static"),
 	};
@@ -1671,6 +1999,9 @@ function fakeHost(overrides: Partial<RuntimeResource> = {}): RuntimeResource {
 	};
 }
 
+const openBrowserSpecifier =
+	"../../../node_modules/@earendil-works/pi-coding-agent/dist/utils/open-browser.js";
+
 function fileOpenRequest(uri: string): Request {
 	return new Request("http://localhost/files/open", {
 		method: "POST",
@@ -1699,3 +2030,31 @@ function signalRequest(path: string, signals: Record<string, Jsonifiable>): Requ
 		body: JSON.stringify(signals),
 	});
 }
+
+test("a tab's visibilitychange report reaches the renderer", async () => {
+	const clientId = "123e4567-e89b-42d3-a456-426614174000";
+	const reports: Array<[string, boolean]> = [];
+	const context = fakeContext({
+		renderer: uiRendererStub({
+			setClientVisibility: (receivedClientId: string, visible: boolean) => {
+				reports.push([receivedClientId, visible]);
+			},
+		}),
+	});
+	const router = createRouter(context);
+	const post = (body: unknown) =>
+		router.fetch(
+			new Request("http://localhost/stream/visibility", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(body),
+			}),
+		);
+	assertEquals((await post({ clientId, visible: false })).status, 204);
+	assertEquals((await post({ clientId, visible: true })).status, 204);
+	assertEquals(reports, [
+		[clientId, false],
+		[clientId, true],
+	]);
+	assertEquals((await post({ clientId: "nope", visible: true })).status, 400);
+});
