@@ -87,6 +87,7 @@ export function renderPage(
 						retryMaxCount: Infinity,
 						requestCancellation: 'cleanup',
 						openWhenHidden: true,
+						headers: window.piUi.streamResumeHeaders(),
 					})`;
 	// Remote mode (Web Push): the server pushes "finished" only while no connected tab
 	// is visible, since a backgrounded PWA or frozen tab keeps its stream open yet can't

@@ -174,11 +174,18 @@ export class DatastarClientHub {
 						this.replay(stream, resume);
 					} else {
 						const view = initial();
+						const scripts = view.scripts ?? [];
+						// The full render is the state as of the newest recorded broadcast, so
+						// its last event carries that head id: a tab that has seen nothing newer
+						// by its next (forced) reconnect resumes with an empty replay instead of
+						// a second full render. The broadcasts it has not seen replay after it.
+						const head = `${this.epochId}:${this.sequence}`;
 						this.patchClient(
 							stream,
 							view.elements,
 							view.signals,
-							view.scripts ?? [],
+							scripts,
+							scripts.length > 0 ? { script: head } : { signals: head },
 						);
 					}
 				} catch {

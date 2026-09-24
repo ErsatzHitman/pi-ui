@@ -148,8 +148,11 @@ test("hub sends a periodic empty signal-patch heartbeat to keep idle connections
 	const heartbeats = body.match(/signals \{\}/g) ?? [];
 	assertEquals(heartbeats.length, 2);
 	// Heartbeats carry no SSE id (round RM2 sse-resume): they must never advance a
-	// client's Last-Event-ID, and must never consume a resume sequence number.
-	assertStringExcludes(body, "id:");
+	// client's Last-Event-ID, and must never consume a resume sequence number. Only the
+	// initial full render carries one (the head id it reflects).
+	const withIds = body.split(/\r?\n\r?\n/).filter((event) => event.includes("id:"));
+	assertEquals(withIds.length, 1);
+	assertStringIncludes(withIds[0] ?? "", "id: ");
 });
 
 test("hub heartbeat is a no-op with no connected clients", () => {
@@ -304,8 +307,7 @@ test("a reconnect with no missed broadcasts resumes with an empty replay", async
 		})),
 	);
 	await readUntil(aReader, (text) => text.includes("event: datastar-patch-signals"));
-	// The initial view above carries no id (it is a per-connection full render, not a
-	// broadcast); only an actual broadcast produces something to resume from.
+	// A broadcast after the initial view moves the resume point past it.
 	hub.patchView('<main id="app">caught up</main>', "{}", []);
 	const caughtUpOutput = await readUntil(aReader, (text) => text.includes("caught up"));
 	const lastEventId = extractLastEventId(caughtUpOutput);
@@ -508,4 +510,36 @@ test("a hidden tab stays hidden across its own reconnects (a background tab's st
 	hub.setClientVisibility("tab", true);
 	assertEquals(hub.visibleClientCount, 1);
 	second.abort();
+});
+
+test("the initial full render carries the current head id, so a tab that has seen nothing newer resumes instead of re-rendering", async () => {
+	// A phone that opens the app and goes to the background while nothing changes:
+	// its forced reconnect on return (static/app/stream-reconnect.js) then costs no
+	// re-render at all.
+	const hub = new DatastarClientHub(datastarStream, false, 0);
+	const keeper = new AbortController();
+	hub.createStream(keeper.signal, () => ({ elements: "", signals: "{}" }));
+	hub.patchSignals('{"one":1}');
+
+	const first = new AbortController();
+	const firstResponse = hub.createStream(first.signal, () => ({
+		elements: '<main id="app">full render</main>',
+		signals: '{"view":1}',
+	}));
+	first.abort();
+	const head = extractLastEventId(await firstResponse.text());
+
+	hub.patchSignals('{"two":2}');
+	const second = new AbortController();
+	const secondResponse = hub.createStream(
+		second.signal,
+		() => ({ elements: '<main id="app">full render</main>', signals: '{"view":1}' }),
+		{ lastEventId: head },
+	);
+	second.abort();
+	keeper.abort();
+	const replay = await secondResponse.text();
+	assertStringExcludes(replay, "full render");
+	assertStringIncludes(replay, '{"two":2}');
+	assertStringExcludes(replay, '{"one":1}');
 });

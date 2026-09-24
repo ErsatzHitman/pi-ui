@@ -41,7 +41,7 @@ import {
 	readTransitionState,
 	startSessionPerformanceMeasurement,
 } from "./session-performance.js";
-import { bindStreamReconnect } from "./stream-reconnect.js";
+import { bindStreamEventIds, bindStreamReconnect } from "./stream-reconnect.js";
 import { bindTerminalSurfaces } from "./terminal-keys.js";
 import { showToast } from "./toast.js";
 import { bindTooltips } from "./tooltips.js";
@@ -49,6 +49,9 @@ import { bindVimScroll } from "./vim-scroll.js";
 import { windowFocus } from "./window-focus.js";
 
 const promptHistory = createPromptHistory();
+
+// Before Datastar (loaded after this module) opens the first /stream.
+const streamEventIds = bindStreamEventIds();
 
 window.piUi = {
 	controls: { refresh: refreshControls, activate: activateCommandItem },
@@ -85,6 +88,7 @@ window.piUi = {
 		start: startSessionPerformanceMeasurement,
 	},
 	toast: { show: showToast },
+	streamResumeHeaders: streamEventIds.resumeHeaders,
 	windowFocus,
 	workspaceReview: { applyOpen: () => {} },
 	liveWorkspace: { applyOpen: () => {} },

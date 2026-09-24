@@ -91,6 +91,8 @@ interface PiUiNamespace {
 		needsNotificationPermission(): boolean;
 		notificationsOptedIn(): boolean;
 	};
+	/** `Last-Event-ID` for a forced stream reconnect (`static/app/stream-reconnect.js`). */
+	streamResumeHeaders(): Record<string, string>;
 	/** Web Push opt-in (`static/app/push.js`); set once the service worker is ready. */
 	push?: {
 		covers(): boolean;

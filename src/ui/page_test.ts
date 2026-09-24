@@ -104,6 +104,8 @@ test("the SSE stream stays open while the tab is hidden, in local mode too", () 
 	const local = streamAction(renderSidebarPage());
 	assertStringIncludes(local, "retry: 'always'");
 	assertStringIncludes(local, "openWhenHidden: true");
+	// A forced reconnect (visibility/online) resumes from the last event it applied.
+	assertStringIncludes(local, "headers: window.piUi.streamResumeHeaders()");
 
 	setRemoteMode(true);
 	try {
