@@ -2,7 +2,10 @@ import { test } from "bun:test";
 
 import { assertEquals } from "#testing/assertions";
 
-import { createTurnPhaseWatcher } from "./live-workspace-turn-phase.ts";
+import {
+	createTurnPhaseWatcher,
+	turnNotificationWanted,
+} from "./live-workspace-turn-phase.ts";
 
 type Notified = { title: string; body: string };
 
@@ -88,4 +91,35 @@ test("does not notify on the initial idle-to-nothing transition", () => {
 	const h = harness(undefined, undefined);
 	h.setPhase(undefined);
 	assertEquals(h.notified, []);
+});
+
+test("turnNotificationWanted: only for a hidden, opted-in, granted page; 'Turn finished' is left to Web Push when this browser is subscribed", () => {
+	const base = {
+		hidden: true,
+		optedIn: true,
+		permission: "granted",
+		pushCovers: false,
+	};
+	assertEquals(turnNotificationWanted("Turn finished", base), true);
+	assertEquals(
+		turnNotificationWanted("Turn finished", { ...base, hidden: false }),
+		false,
+	);
+	assertEquals(
+		turnNotificationWanted("Turn finished", { ...base, optedIn: false }),
+		false,
+	);
+	assertEquals(
+		turnNotificationWanted("Turn finished", { ...base, permission: "default" }),
+		false,
+	);
+	assertEquals(
+		turnNotificationWanted("Turn finished", { ...base, pushCovers: true }),
+		false,
+	);
+	// "waiting for input" is never pushed, so it stays in-page.
+	assertEquals(
+		turnNotificationWanted("pi is waiting for input", { ...base, pushCovers: true }),
+		true,
+	);
 });

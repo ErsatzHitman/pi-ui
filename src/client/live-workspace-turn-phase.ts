@@ -13,6 +13,20 @@
  * the current session is still that same one. `live-workspace.tsx`'s `renderLiveWorkspaceNowSection`
  * carries the session path purely for this client-side disambiguation (never read server-side).
  */
+/**
+ * Whether `notifyTurnEvent` shows an in-page notification: only on a hidden page, opted in,
+ * with permission. "Turn finished" is left to Web Push when this browser is subscribed
+ * (`static/app/push.js`'s `covers()`): the server pushes whenever no tab is visible, and
+ * the service worker shows it — never both. "Waiting for input" is never pushed.
+ */
+export function turnNotificationWanted(
+	title: string,
+	state: { hidden: boolean; optedIn: boolean; permission: string; pushCovers: boolean },
+): boolean {
+	if (!state.hidden || !state.optedIn || state.permission !== "granted") return false;
+	return !(title === "Turn finished" && state.pushCovers);
+}
+
 export function createTurnPhaseWatcher(options: {
 	readPhase: () => string | undefined;
 	readSessionPath: () => string | undefined;

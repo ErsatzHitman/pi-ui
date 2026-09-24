@@ -260,7 +260,10 @@ export type RuntimeControllerActivationOptions = {
 	 * open `/stream` — see `PushService.notifySessionFinished`, wired from
 	 * `app.ts`. Fire-and-forget, like `notifySessionDone`: a push failure must
 	 * never affect the session runtime. */
-	sendWebPush?: (details: SessionDoneNotification) => void | Promise<void>;
+	sendWebPush?: (
+		details: SessionDoneNotification,
+		background: boolean,
+	) => void | Promise<void>;
 	autoTitle?: AutoTitleConfig;
 	/** How extensions are bound (`session.bindExtensions({ mode })`) for every
 	 * runtime this controller creates, forks, resumes, or switches to. See
@@ -2011,25 +2014,26 @@ export class RuntimeController {
 			// this stays background-only to avoid firing both for the same completion. See
 			// `AppStore.notifySessionFinished`.
 			this.state.notifySessionFinished(details);
-			// Web Push (round RM2 "pwa"): reaches a device with no tab open at all,
-			// which the SSE broadcast above cannot. `PushService` itself decides
-			// whether one is actually needed (remote mode, no connected client).
-			// Called synchronously (not deferred), matching `notifySessionDone`'s
-			// fire-and-forget shape and keeping this observable in the same tick
-			// as the event that triggered it; the try/catch and `.catch()` below
-			// cover both a synchronous throw and a rejected Promise, so a push
-			// failure never affects the session runtime (see this option's doc
-			// comment) or surfaces as an unhandled rejection.
-			try {
-				const pushResult = this.activationOptions.sendWebPush?.(details);
-				if (pushResult) {
-					void pushResult.catch((error) => {
-						console.error("Web Push notification failed", error);
-					});
-				}
-			} catch (error) {
-				console.error("Web Push notification failed", error);
+		}
+		// Web Push (round RM2 "pwa"): reaches a device with no tab open at all, which
+		// neither the SSE broadcast above nor the in-page "Turn finished" notice can —
+		// so foreground runs too (prompt on the phone, close the app, wait).
+		// `PushService` itself decides whether one is actually needed (remote mode, no
+		// connected client), which also keeps it from doubling an open tab's notice.
+		// Called synchronously (not deferred), matching `notifySessionDone`'s
+		// fire-and-forget shape; the try/catch and `.catch()` below cover both a
+		// synchronous throw and a rejected Promise, so a push failure never affects
+		// the session runtime (see this option's doc comment) or surfaces as an
+		// unhandled rejection.
+		try {
+			const pushResult = this.activationOptions.sendWebPush?.(details, background);
+			if (pushResult) {
+				void pushResult.catch((error) => {
+					console.error("Web Push notification failed", error);
+				});
 			}
+		} catch (error) {
+			console.error("Web Push notification failed", error);
 		}
 		void this.notifyRuntimeDoneWhenAppropriate(details, background);
 	}

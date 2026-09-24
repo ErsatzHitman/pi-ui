@@ -470,3 +470,42 @@ test("a resumed reconnect sends far fewer bytes than a fresh full render", async
 	// the size a fresh full render (the 20 KB view) would have cost.
 	assertEquals(resumedOutput.length < largeInitialView.length * 0.05, true);
 });
+
+test("visibleClientCount counts only connected tabs whose page is visible (Web Push presence)", () => {
+	const hub = new DatastarClientHub(datastarStream, false, 0);
+	const view = () => ({ elements: "", signals: "{}" });
+	const phone = new AbortController();
+	const desk = new AbortController();
+	const raw = new AbortController();
+	hub.createStream(phone.signal, view, { clientId: "phone" });
+	hub.createStream(desk.signal, view, { clientId: "desk" });
+	assertEquals(hub.visibleClientCount, 2);
+	hub.setClientVisibility("phone", false);
+	hub.setClientVisibility("desk", false);
+	assertEquals(hub.clientCount, 2);
+	assertEquals(hub.visibleClientCount, 0);
+	hub.setClientVisibility("desk", true);
+	assertEquals(hub.visibleClientCount, 1);
+
+	// A stream with no tab id (a raw client) can't report, so it always counts.
+	hub.createStream(raw.signal, view);
+	assertEquals(hub.visibleClientCount, 2);
+	for (const controller of [phone, desk, raw]) controller.abort();
+	assertEquals(hub.visibleClientCount, 0);
+});
+
+test("a hidden tab stays hidden across its own reconnects (a background tab's stream reconnects too)", () => {
+	const hub = new DatastarClientHub(datastarStream, false, 0);
+	const view = () => ({ elements: "", signals: "{}" });
+	const first = new AbortController();
+	hub.createStream(first.signal, view, { clientId: "tab" });
+	hub.setClientVisibility("tab", false);
+	first.abort();
+
+	const second = new AbortController();
+	hub.createStream(second.signal, view, { clientId: "tab" });
+	assertEquals(hub.visibleClientCount, 0);
+	hub.setClientVisibility("tab", true);
+	assertEquals(hub.visibleClientCount, 1);
+	second.abort();
+});

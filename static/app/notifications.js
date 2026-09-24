@@ -26,6 +26,9 @@ export function createSessionNotifier(options) {
 		if (options.getPermission() !== "granted") return false;
 		// The viewer is already looking at this tab — nothing to surface.
 		if (!options.isHidden() && options.hasFocus()) return false;
+		// Hidden, and this browser is push-subscribed: the server pushes whenever no tab
+		// is visible, and the service worker shows that one — never both (push.js).
+		if (options.isHidden() && options.pushCovers?.()) return false;
 		if (lastShownId !== undefined && detail.id <= lastShownId) return false;
 		lastShownId = detail.id;
 
@@ -64,5 +67,6 @@ export function bindNotifications() {
 		hasFocus: () => document.hasFocus(),
 		createNotification: createBrowserNotification,
 		focusWindow: () => window.focus(),
+		pushCovers: () => Boolean(window.piUi.push?.covers()),
 	});
 }

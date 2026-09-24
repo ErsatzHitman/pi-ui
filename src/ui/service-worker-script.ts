@@ -62,9 +62,10 @@ self.addEventListener("fetch", (event) => {
 });
 
 // Web Push "session finished" (src/server/push/push-service.ts): the server only
-// pushes while no tab has an open /stream, so this never doubles an in-page
-// notification. Every push shows one (the subscription is userVisibleOnly); a
-// payload that can't be read still gets a generic one rather than none.
+// pushes while no tab reports itself visible, and a hidden tab of this browser
+// skips its own in-page notice (static/app/push.js covers()), so this never
+// doubles one. Unless a pi-ui window is focused, every push shows a notification
+// (the subscription is userVisibleOnly), a generic one for an unreadable payload.
 self.addEventListener("push", (event) => {
 	let data = {};
 	try {
@@ -74,11 +75,18 @@ self.addEventListener("push", (event) => {
 	}
 	const title = typeof data.title === "string" && data.title ? data.title : "pi-ui";
 	event.waitUntil(
-		self.registration.showNotification(title, {
-			body: typeof data.body === "string" ? data.body : "",
-			tag: typeof data.tag === "string" && data.tag ? data.tag : "pi-ui-session-finished",
-			icon: "/notification-icon.png",
-			data: { sessionPath: data.sessionPath },
+		self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
+			// Someone is looking at pi-ui right now (a late or lost visibility report):
+			// nothing to surface, and Chrome requires none while the origin is in front.
+			if (windows.some((client) => client.focused && client.visibilityState === "visible")) {
+				return undefined;
+			}
+			return self.registration.showNotification(title, {
+				body: typeof data.body === "string" ? data.body : "",
+				tag: typeof data.tag === "string" && data.tag ? data.tag : "pi-ui-session-finished",
+				icon: "/notification-icon.png",
+				data: { sessionPath: data.sessionPath },
+			});
 		}),
 	);
 });

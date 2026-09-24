@@ -8,7 +8,10 @@
 
 import { formatRetryCountdown } from "../live-workspace-types.ts";
 import { bindLiveWorkspace } from "./live-workspace-open.ts";
-import { createTurnPhaseWatcher } from "./live-workspace-turn-phase.ts";
+import {
+	createTurnPhaseWatcher,
+	turnNotificationWanted,
+} from "./live-workspace-turn-phase.ts";
 import {
 	needsNotificationPermission,
 	requestNotificationPermission,
@@ -70,9 +73,12 @@ export function notificationsOptedIn(): boolean {
 function notifyTurnEvent(title: string, body: string): void {
 	if (
 		typeof Notification === "undefined" ||
-		Notification.permission !== "granted" ||
-		!notificationsOptedIn() ||
-		!document.hidden
+		!turnNotificationWanted(title, {
+			hidden: document.hidden,
+			optedIn: notificationsOptedIn(),
+			permission: Notification.permission,
+			pushCovers: Boolean(window.piUi.push?.covers()),
+		})
 	) {
 		return;
 	}

@@ -134,7 +134,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 	// `notificationsOptedIn()` this reads to sync a returning visitor's already-on
 	// preference, not just a fresh click of the bell toggle.
 	await serviceWorkerReady;
-	bindPushOptIn();
+	window.piUi.push = bindPushOptIn();
 });
 
 function bindDebugFps() {

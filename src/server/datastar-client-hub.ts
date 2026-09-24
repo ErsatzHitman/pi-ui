@@ -27,6 +27,9 @@ export type DatastarClientStreamOptions = {
 	lastEventId?: string | null;
 };
 
+/** Bounds `hiddenClientIds` against reports for tabs that never (re)connect. */
+const maxHiddenClientIds = 1024;
+
 type BroadcastElementsOptions = {
 	selector?: string;
 	mode?: "outer" | "replace" | "append" | "after" | "remove";
@@ -73,6 +76,10 @@ export class DatastarClientHub {
 	 */
 	private readonly streamIdByClientId = new Map<string, string>();
 	private readonly clientIdByStreamId = new Map<string, string>();
+	/** Tabs (`displayClientId`s) whose page last reported itself hidden. Kept across a
+	 * tab's reconnects (a background tab's stream reconnects too, and nothing re-reports
+	 * then); only its own "visible" report clears it. Bounded, oldest dropped first. */
+	private readonly hiddenClientIds = new Set<string>();
 	private readonly heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 	/**
 	 * Identifies this hub's current unbroken run of connected clients (round RM2
@@ -112,6 +119,36 @@ export class DatastarClientHub {
 
 	get clientCount(): number {
 		return this.clients.size;
+	}
+
+	/**
+	 * Connected streams whose tab's page is visible — "someone is looking". Web Push
+	 * (`PushService`) sends only when this is 0: a backgrounded PWA, a frozen tab, or
+	 * one parked in the back/forward cache keeps its stream open (so `clientCount`
+	 * still counts it) but can't run an in-page notification. A stream with no
+	 * `clientId` can't report and always counts.
+	 */
+	get visibleClientCount(): number {
+		let count = 0;
+		for (const id of this.clients.keys()) {
+			const clientId = this.clientIdByStreamId.get(id);
+			if (clientId === undefined || !this.hiddenClientIds.has(clientId)) count += 1;
+		}
+		return count;
+	}
+
+	/** A tab's page-visibility report (`routes/stream.ts`'s `streamVisibility`): sent
+	 * once on load and on every `visibilitychange` (`page.tsx`). */
+	setClientVisibility(clientId: string, visible: boolean): void {
+		if (visible) {
+			this.hiddenClientIds.delete(clientId);
+			return;
+		}
+		this.hiddenClientIds.add(clientId);
+		if (this.hiddenClientIds.size > maxHiddenClientIds) {
+			const oldest = this.hiddenClientIds.values().next().value;
+			if (oldest !== undefined) this.hiddenClientIds.delete(oldest);
+		}
 	}
 
 	createStream(

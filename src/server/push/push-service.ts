@@ -1,5 +1,5 @@
 /**
- * Wires "a background session finished" to Web Push: fans a notification out
+ * Wires "a session finished" (foreground or background) to Web Push: fans a notification out
  * to every stored subscription, but only when it's actually needed. Called
  * from `RuntimeController.notifyRuntimeDone` (`activationOptions.sendWebPush`,
  * wired in `app.ts`) alongside the existing SSE-based `AppStore.notifySessionFinished`.
@@ -11,7 +11,8 @@ import type { PushSubscriptionStore } from "./subscription-store.ts";
 import type { VapidKeyPair } from "./vapid-keys.ts";
 
 export interface PushHub {
-	readonly clientCount: number;
+	/** Connected clients whose page is visible (see `DatastarClientHub`). */
+	readonly visibleClientCount: number;
 }
 
 export interface PushServiceOptions {
@@ -22,24 +23,35 @@ export interface PushServiceOptions {
 	readonly hub: PushHub;
 	readonly sendWebPush?: typeof sendWebPushDefault;
 	readonly isRemoteMode?: () => boolean;
+	/** The shared "Notify on completion" preference (the Live Workspace bell). A device
+	 * keeps its subscription when the bell is switched off elsewhere, so this is what
+	 * actually stops pushes. Defaults to always on (tests). */
+	readonly isOptedIn?: () => boolean;
 }
 
 /**
- * Sends a push only when it can actually reach someone that the existing
- * in-page Web Notification (`static/app/notifications.js`, driven by the SSE
- * `session-finished` effect) cannot: no browser tab has an open `/stream`
- * connection right now. This is also the de-duplication rule — a tab that's
- * open (visible or hidden) already gets the in-page notification, so it never
- * also gets a push for the same event. Push is remote-mode-only: local mode's
+ * Sends a push only when nobody is looking: no connected client reports a
+ * visible page. Counting every open `/stream` instead missed the common phone
+ * case — a backgrounded (frozen/suspended) PWA or a tab parked in the
+ * back/forward cache keeps its stream open, yet can run no in-page
+ * notification. A hidden tab of a browser that HAS a push subscription skips
+ * its own in-page notice (`static/app/push.js`'s `covers()`), so the SW's push
+ * notification is the only one it shows. Push is remote-mode-only: local mode's
  * client never calls `PushManager.subscribe` (`static/app/push.js`), so this
  * gate is defence in depth, not the only thing keeping local mode silent.
  */
 export class PushService {
 	constructor(private readonly options: PushServiceOptions) {}
 
-	async notifySessionFinished(details: SessionDoneNotification): Promise<void> {
+	/** `background: false` is the foreground run (the one a phone prompted before its
+	 * app was closed), titled like the in-page "Turn finished" notice. */
+	async notifySessionFinished(
+		details: SessionDoneNotification,
+		background = true,
+	): Promise<void> {
 		const remote = this.options.isRemoteMode?.() ?? isRemoteMode();
-		if (!remote || this.options.hub.clientCount > 0) return;
+		if (!remote || this.options.isOptedIn?.() === false) return;
+		if (this.options.hub.visibleClientCount > 0) return;
 
 		const subscriptions = await this.options.subscriptions.list();
 		if (subscriptions.length === 0) return;
@@ -57,7 +69,9 @@ export class PushService {
 				const result = await send({
 					subscription,
 					payload: {
-						title: "Background session finished",
+						title: background
+							? "Background session finished"
+							: "Turn finished",
 						body: details.workspace,
 						tag: details.sessionPath ?? details.workspace,
 						sessionPath: details.sessionPath,

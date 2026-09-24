@@ -2030,3 +2030,31 @@ function signalRequest(path: string, signals: Record<string, Jsonifiable>): Requ
 		body: JSON.stringify(signals),
 	});
 }
+
+test("a tab's visibilitychange report reaches the renderer", async () => {
+	const clientId = "123e4567-e89b-42d3-a456-426614174000";
+	const reports: Array<[string, boolean]> = [];
+	const context = fakeContext({
+		renderer: uiRendererStub({
+			setClientVisibility: (receivedClientId: string, visible: boolean) => {
+				reports.push([receivedClientId, visible]);
+			},
+		}),
+	});
+	const router = createRouter(context);
+	const post = (body: unknown) =>
+		router.fetch(
+			new Request("http://localhost/stream/visibility", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(body),
+			}),
+		);
+	assertEquals((await post({ clientId, visible: false })).status, 204);
+	assertEquals((await post({ clientId, visible: true })).status, 204);
+	assertEquals(reports, [
+		[clientId, false],
+		[clientId, true],
+	]);
+	assertEquals((await post({ clientId: "nope", visible: true })).status, 400);
+});

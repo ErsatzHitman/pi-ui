@@ -88,6 +88,12 @@ export function renderPage(
 						requestCancellation: 'cleanup',
 						openWhenHidden: true,
 					})`;
+	// Remote mode (Web Push): the server pushes "finished" only while no connected tab
+	// is visible, since a backgrounded PWA or frozen tab keeps its stream open yet can't
+	// notify in-page (see `DatastarClientHub.visibleClientCount`).
+	const visibilityReportAction = isRemoteMode()
+		? `@post('${endpoints.streamVisibility}', { payload: { clientId: '${displayClientId}', visible: document.visibilityState === 'visible' } })`
+		: undefined;
 
 	return syncHtml(
 		"<!doctype html>" +
@@ -296,8 +302,13 @@ export function renderPage(
 							window.piUi.workspaceReview.applyOpen($_workspaceReviewOpen);
 							window.piUi.liveWorkspace.applyOpen($_liveWorkspaceOpen);
 						`}
-						data-init={streamConnectAction}
+						data-init={
+							visibilityReportAction
+								? `${streamConnectAction}; ${visibilityReportAction}`
+								: streamConnectAction
+						}
 						data-on:pi-ui-stream-reconnect__window={streamConnectAction}
+						data-on:visibilitychange__window={visibilityReportAction}
 					>
 						{renderSessionSidebar(state, {
 							open: sessionSidebarOpen,

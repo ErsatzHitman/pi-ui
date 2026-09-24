@@ -18,6 +18,7 @@ type NotifierOptions = {
 		options: NotificationInit,
 	) => NotificationHandle | undefined;
 	focusWindow: () => void;
+	pushCovers?: () => boolean;
 };
 
 function harness(overrides: Partial<NotifierOptions> = {}) {
@@ -140,4 +141,25 @@ test("falls back to the workspace path as the notification tag when no session p
 	h.notifier.sessionFinished({ id: 1, workspace: "/workspace" });
 
 	assertEquals(h.created[0]?.options.tag, "/workspace");
+});
+
+test("a hidden tab of a push-subscribed browser leaves it to the service worker's push (no double)", () => {
+	const covered = harness({ pushCovers: () => true });
+	covered.setOptedIn(true);
+	covered.setPermission("granted");
+	assertEquals(
+		covered.notifier.sessionFinished({ id: 1, workspace: "/workspace" }),
+		false,
+	);
+	assertEquals(covered.created.length, 0);
+
+	// Visible but unfocused: the server sees a visible tab and sends no push, so this
+	// tab still notifies in-page.
+	const visible = harness({ pushCovers: () => true, isHidden: () => false });
+	visible.setOptedIn(true);
+	visible.setPermission("granted");
+	assertEquals(
+		visible.notifier.sessionFinished({ id: 1, workspace: "/workspace" }),
+		true,
+	);
 });

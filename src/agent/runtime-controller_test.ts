@@ -1568,8 +1568,12 @@ test("RuntimeController broadcasts a session-finished effect for completed backg
 	await controller.dispose();
 });
 
-test("RuntimeController calls sendWebPush for completed background work only", async () => {
-	const pushDetails: SessionDoneNotification[] = [];
+test("RuntimeController calls sendWebPush for completed foreground and background work", async () => {
+	// Foreground too: the phone case is "prompt, close the app, wait" — the run that
+	// finishes is the FOREGROUND one, and with no tab open nothing else reaches the
+	// device. `PushService` only sends while no client is connected, so this never
+	// doubles an open tab's in-page "Turn finished" notification.
+	const pushDetails: Array<[SessionDoneNotification, boolean]> = [];
 	const background = fakeRuntime("/sessions/background.jsonl");
 	const foreground = fakeRuntime("/sessions/foreground.jsonl");
 	background.setStreaming(true);
@@ -1577,8 +1581,8 @@ test("RuntimeController calls sendWebPush for completed background work only", a
 		dependencies: dependencies([background, foreground]),
 		isApplicationFocused: () => true,
 		notifySessionDone: () => Promise.resolve(),
-		sendWebPush: (details) => {
-			pushDetails.push(details);
+		sendWebPush: (details, background) => {
+			pushDetails.push([details, background]);
 		},
 	});
 	controller.activate();
@@ -1586,12 +1590,15 @@ test("RuntimeController calls sendWebPush for completed background work only", a
 
 	foreground.emit(agentSessionEventStub({ type: "agent_end" }));
 	foreground.emit(agentSessionEventStub({ type: "agent_settled" }));
-	assertEquals(pushDetails, []);
+	assertEquals(pushDetails, [
+		[{ workspace: "/workspace", sessionPath: "/sessions/foreground.jsonl" }, false],
+	]);
 
 	background.emit(agentSessionEventStub({ type: "agent_end" }));
 	background.emit(agentSessionEventStub({ type: "agent_settled" }));
 	assertEquals(pushDetails, [
-		{ workspace: "/workspace", sessionPath: "/sessions/background.jsonl" },
+		[{ workspace: "/workspace", sessionPath: "/sessions/foreground.jsonl" }, false],
+		[{ workspace: "/workspace", sessionPath: "/sessions/background.jsonl" }, true],
 	]);
 	await controller.dispose();
 });

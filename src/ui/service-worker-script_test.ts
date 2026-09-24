@@ -38,12 +38,20 @@ test("drops every other pi-ui offline cache on activate and claims clients", () 
 });
 
 /** Runs the rendered worker against a fake `self`, collecting its listeners. */
-function loadWorker() {
+function loadWorker(
+	network: (request: unknown) => Promise<Response> = () =>
+		Promise.reject(new TypeError("offline")),
+) {
 	const listeners = new Map<string, (event: unknown) => void>();
 	const shown: Array<{ title: string; options: Record<string, unknown> }> = [];
 	const opened: string[] = [];
 	const focused: string[] = [];
-	const windows: Array<{ url: string; focus: () => Promise<unknown> }> = [];
+	const windows: Array<{
+		url: string;
+		focused: boolean;
+		visibilityState: string;
+		focus: () => Promise<unknown>;
+	}> = [];
 	const self = {
 		location: { origin: "https://pi.example" },
 		addEventListener: (type: string, listener: (event: unknown) => void) => {
@@ -64,7 +72,13 @@ function loadWorker() {
 		},
 	};
 	// eslint-disable-next-line no-new-func
-	new Function("self", "caches", renderServiceWorkerScript("abc123"))(self, {});
+	const offlinePage = new Response("offline page", { status: 200 });
+	const caches = { match: () => Promise.resolve(offlinePage) };
+	new Function("self", "caches", "fetch", renderServiceWorkerScript("abc123"))(
+		self,
+		caches,
+		network,
+	);
 	async function dispatch(type: string, event: Record<string, unknown>) {
 		let pending: Promise<unknown> = Promise.resolve();
 		listeners.get(type)?.({
@@ -72,12 +86,17 @@ function loadWorker() {
 			waitUntil: (promise: Promise<unknown>) => {
 				pending = promise;
 			},
+			respondWith: (promise: Promise<unknown>) => {
+				pending = promise;
+			},
 		});
-		await pending;
+		return pending;
 	}
-	function addWindow(url: string) {
+	function addWindow(url: string, isFocused = false, visibilityState = "hidden") {
 		windows.push({
 			url,
+			focused: isFocused,
+			visibilityState,
 			focus: () => {
 				focused.push(url);
 				return Promise.resolve();
@@ -146,4 +165,22 @@ test("is syntactically valid JavaScript", () => {
 	// this only checks the syntax, never executes the body.
 	// eslint-disable-next-line no-new-func
 	new Function(renderServiceWorkerScript("abc123"));
+});
+
+test("a push arriving while a pi-ui window is focused and visible shows nothing (someone is looking)", async () => {
+	// The server only pushes while no tab reports itself visible, but a report can be
+	// late or lost; Chrome requires no notification while the origin is in the foreground.
+	const worker = loadWorker();
+	worker.addWindow("https://pi.example/", true, "visible");
+	await worker.dispatch("push", {
+		data: { json: () => ({ title: "Turn finished", body: "~/work" }) },
+	});
+	assertEquals(worker.shown, []);
+
+	const background = loadWorker();
+	background.addWindow("https://pi.example/", false, "hidden");
+	await background.dispatch("push", {
+		data: { json: () => ({ title: "Turn finished", body: "~/work" }) },
+	});
+	assertEquals(background.shown.length, 1);
 });

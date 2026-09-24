@@ -29,6 +29,9 @@ function subscriptionRequestBody(subscription) {
 }
 
 export function createPushOptIn(options) {
+	// Whether this browser's subscription reached the server (see `covers`).
+	let subscribed = false;
+
 	async function ensureSubscribed() {
 		if (
 			!options.isRemoteMode() ||
@@ -48,10 +51,11 @@ export function createPushOptIn(options) {
 						options.applicationServerKey,
 					),
 				}));
-			await options.post(
+			const accepted = await options.post(
 				endpoints.pushSubscribe,
 				subscriptionRequestBody(subscription),
 			);
+			subscribed = accepted !== false;
 		} catch {
 			// Best-effort: the in-page Web Notification (this tab, while open) still
 			// works even if the push subscription itself never succeeds.
@@ -59,6 +63,7 @@ export function createPushOptIn(options) {
 	}
 
 	async function ensureUnsubscribed() {
+		subscribed = false;
 		const registration = await options.getRegistration();
 		const subscription = await registration?.pushManager?.getSubscription();
 		if (!subscription) return;
@@ -70,15 +75,24 @@ export function createPushOptIn(options) {
 		}
 	}
 
-	return { ensureSubscribed, ensureUnsubscribed };
+	/** True while the server pushes "finished" to this browser whenever no tab is
+	 * visible: a hidden tab then skips its own in-page notice, so the service
+	 * worker's push notification is the only one (`notifications.js`,
+	 * `src/client/live-workspace.ts`). */
+	function covers() {
+		return subscribed;
+	}
+
+	return { ensureSubscribed, ensureUnsubscribed, covers };
 }
 
 async function postJson(url, body) {
-	await fetch(url, {
+	const response = await fetch(url, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify(body),
 	});
+	return response.ok;
 }
 
 export function bindPushOptIn({ getRegistration } = {}) {

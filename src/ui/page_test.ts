@@ -128,3 +128,21 @@ test("exposes remote mode and the VAPID public key to static/app/push.js as body
 		setRemoteMode(false);
 	}
 });
+
+test("in remote mode a tab reports its page visibility on load and on every change (Web Push presence)", () => {
+	const report = "@post('/stream/visibility'";
+	const local = renderSidebarPage();
+	assertFalse(local.includes(report));
+
+	setRemoteMode(true);
+	try {
+		const page = renderSidebarPage();
+		const init = /data-init="([^"]*)"/.exec(page)?.[1] ?? "";
+		assertStringIncludes(init, "@get('/stream?");
+		assertStringIncludes(init, report);
+		assertStringIncludes(page, `data-on:visibilitychange__window="${report}`);
+		assertStringIncludes(page, "visible: document.visibilityState === 'visible'");
+	} finally {
+		setRemoteMode(false);
+	}
+});

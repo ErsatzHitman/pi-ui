@@ -90,12 +90,14 @@ export async function createApp() {
 		vapidSubject,
 		subscriptions: pushSubscriptions,
 		hub,
+		isOptedIn: () => store.liveWorkspacePreferences.notifications === true,
 	});
 	const host = await RuntimeController.create(store, undefined, {
 		autoTitle,
 		extensionsMode: extensions.mode,
 		transitionController: transitions,
-		sendWebPush: (details) => pushService.notifySessionFinished(details),
+		sendWebPush: (details, background) =>
+			pushService.notifySessionFinished(details, background),
 	}).catch((error: ErrorOptions["cause"]) => {
 		console.error("Failed to start pi SDK runtime", error);
 		return undefined;

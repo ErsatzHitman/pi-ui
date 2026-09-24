@@ -23,7 +23,7 @@ function harness(options: {
 	const service = new PushService({
 		vapidKeys,
 		vapidSubject: "mailto:ops@example.com",
-		hub: { clientCount: options.clientCount },
+		hub: { visibleClientCount: options.clientCount },
 		isRemoteMode: () => options.remote,
 		subscriptions: {
 			list: async () => options.subscriptions,
@@ -57,7 +57,7 @@ function subscription(endpoint: string): PushSubscriptionRecord {
 	return { endpoint, p256dh: "p", auth: "a" };
 }
 
-test("sends nothing when a client is connected (the in-page notification already covers it)", async () => {
+test("sends nothing while a connected client is visible (someone is looking)", async () => {
 	const h = harness({
 		clientCount: 1,
 		remote: true,
@@ -100,6 +100,24 @@ test("sends to every stored subscription when remote and no client is connected"
 	]);
 	assertEquals(h.sent[0]?.payload, {
 		title: "Background session finished",
+		body: "~/work",
+		tag: "/sessions/x.jsonl",
+		sessionPath: "/sessions/x.jsonl",
+	});
+});
+
+test("titles a finished foreground run 'Turn finished', like the in-page notice", async () => {
+	const h = harness({
+		clientCount: 0,
+		remote: true,
+		subscriptions: [subscription("https://a")],
+	});
+	await h.service.notifySessionFinished(
+		{ workspace: "~/work", sessionPath: "/sessions/x.jsonl" },
+		false,
+	);
+	assertEquals(h.sent[0]?.payload, {
+		title: "Turn finished",
 		body: "~/work",
 		tag: "/sessions/x.jsonl",
 		sessionPath: "/sessions/x.jsonl",
@@ -155,7 +173,7 @@ test("a rejected send for one subscription doesn't crash the others or throw (ne
 	const service = new PushService({
 		vapidKeys,
 		vapidSubject: "mailto:ops@example.com",
-		hub: { clientCount: 0 },
+		hub: { visibleClientCount: 0 },
 		isRemoteMode: () => true,
 		subscriptions: {
 			list: async () => [subscription("https://bad"), subscription("https://good")],
@@ -171,4 +189,31 @@ test("a rejected send for one subscription doesn't crash the others or throw (ne
 	});
 	await service.notifySessionFinished({ workspace: "~/work" });
 	assertEquals(sent.sort(), ["https://bad", "https://good"]);
+});
+
+test("sends nothing while 'Notify on completion' is off (the bell is shared by every device)", async () => {
+	// A phone keeps its PushSubscription when the bell is switched off on the desktop:
+	// the server-side preference is the one switch every device sees.
+	let optedIn = false;
+	const sent: unknown[] = [];
+	const service = new PushService({
+		vapidKeys,
+		vapidSubject: "mailto:ops@example.com",
+		hub: { visibleClientCount: 0 },
+		isRemoteMode: () => true,
+		isOptedIn: () => optedIn,
+		subscriptions: {
+			list: async () => [subscription("https://a")],
+			remove: async () => {},
+		},
+		sendWebPush: async (options) => {
+			sent.push(options.payload);
+			return { outcome: "sent" };
+		},
+	});
+	await service.notifySessionFinished({ workspace: "~/work" });
+	assertEquals(sent.length, 0);
+	optedIn = true;
+	await service.notifySessionFinished({ workspace: "~/work" });
+	assertEquals(sent.length, 1);
 });

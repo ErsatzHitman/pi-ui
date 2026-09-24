@@ -91,6 +91,10 @@ interface PiUiNamespace {
 		needsNotificationPermission(): boolean;
 		notificationsOptedIn(): boolean;
 	};
+	/** Web Push opt-in (`static/app/push.js`); set once the service worker is ready. */
+	push?: {
+		covers(): boolean;
+	};
 	notifications: {
 		sessionFinished(detail: {
 			id: number;

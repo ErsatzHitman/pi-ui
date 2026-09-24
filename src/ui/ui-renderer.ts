@@ -189,6 +189,10 @@ export class UiRenderer implements AppStorePresentation {
 			throw error;
 		}
 	}
+	/** A tab's `visibilitychange` report — see `DatastarClientHub.visibleClientCount`. */
+	setClientVisibility(clientId: string, visible: boolean): void {
+		this.hub.setClientVisibility(clientId, visible);
+	}
 	beginUpdate(): void {
 		this.updateDepth += 1;
 	}

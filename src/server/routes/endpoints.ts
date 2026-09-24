@@ -13,6 +13,7 @@ export function filePreviewUrl(path: string): string {
 export const endpoints = {
 	root: "/",
 	stream: "/stream",
+	streamVisibility: "/stream/visibility",
 	displayRefresh: "/display-refresh",
 	codeTheme: "/code-theme",
 	fonts: "/fonts",

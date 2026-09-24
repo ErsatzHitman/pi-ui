@@ -145,3 +145,38 @@ test("base64UrlToUint8Array decodes a padded, URL-safe key to raw bytes", () => 
 	const bytes = base64UrlToUint8Array("aGVsbG8");
 	assertEquals(Buffer.from(bytes).toString("utf8"), "hello");
 });
+
+test("covers() is true only once this browser's subscription reached the server, until it unsubscribes", async () => {
+	// A hidden tab of a subscribed browser skips its own in-page "finished" notice:
+	// the server pushes whenever no tab is visible, and the SW shows that one.
+	const h = harness();
+	assertEquals(h.pushOptIn.covers(), false);
+	await h.pushOptIn.ensureSubscribed();
+	assertEquals(h.pushOptIn.covers(), true);
+	await h.pushOptIn.ensureUnsubscribed();
+	assertEquals(h.pushOptIn.covers(), false);
+});
+
+test("covers() stays false when the subscription can't be made or posted", async () => {
+	const local = harness({ isRemoteMode: () => false });
+	await local.pushOptIn.ensureSubscribed();
+	assertEquals(local.pushOptIn.covers(), false);
+
+	const failing = createPushOptIn({
+		isRemoteMode: () => true,
+		applicationServerKey: "abc123",
+		getPermission: () => "granted",
+		getRegistration: async () => ({
+			pushManager: {
+				getSubscription: async () => undefined,
+				subscribe: async () => {
+					throw new Error("push service unreachable");
+				},
+			},
+		}),
+		toApplicationServerKey: (key: string) => key,
+		post: async () => {},
+	});
+	await failing.ensureSubscribed();
+	assertEquals(failing.covers(), false);
+});
