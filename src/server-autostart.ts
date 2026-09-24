@@ -1,5 +1,5 @@
 import type { MakeDirectoryOptions } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 
@@ -232,8 +232,8 @@ async function disableSystemdService(
  * `ExecStart` line, which any local user can read via `ps`. Exported so a caller (or a
  * test) can persist it without going through `systemctl`.
  *
- * The file is created with mode 0600 from the start (`Bun.write`'s `mode` option, applied
- * at `open()` time) rather than written world/group-readable and `chmod`ed afterward — that
+ * The file is created with mode 0600 from the start (an exclusive `writeFile` whose `mode`
+ * is applied at `open()` time; see `writeConfig`) rather than written world/group-readable and `chmod`ed afterward — that
  * write-then-chmod sequence leaves a brief window where a file containing
  * `PI_UI_AUTH_TOKEN=<token>` sits on disk with default (umask-controlled, typically
  * world/group-readable) permissions, readable by another local user on a shared host. Its
@@ -406,11 +406,16 @@ async function writeConfig(
 	const mkdirOptions: MakeDirectoryOptions = { recursive: true };
 	if (options.dirMode !== undefined) mkdirOptions.mode = options.dirMode;
 	await mkdir(dirname(path), mkdirOptions);
-	await Bun.write(
-		path,
-		contents,
-		options.mode !== undefined ? { mode: options.mode } : undefined,
-	);
+	if (options.mode === undefined) {
+		await Bun.write(path, contents);
+		return;
+	}
+	// Bun.write silently ignores its `mode` option (verified on Linux, Bun 1.4.2: the file
+	// comes out 0644 under the usual umask), and `writeFile`'s `mode` only applies when it
+	// creates the file. So drop any existing file first (it may be a world-readable one
+	// from an older install) and create it exclusively ("wx") with the mode set at open().
+	await rm(path, { force: true });
+	await writeFile(path, contents, { mode: options.mode, flag: "wx" });
 }
 
 async function removeIfPresent(path: string): Promise<void> {

@@ -1,5 +1,5 @@
 import { test } from "bun:test";
-import { stat } from "node:fs/promises";
+import { chmod, mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import {
@@ -216,6 +216,26 @@ test("writeSystemdServiceEnvironment writes a 0600 file with the persisted optio
 		const dirMode = (await stat(dirname(path))).mode & 0o777;
 		assertEquals(dirMode, 0o700);
 	}
+});
+
+test("writeSystemdServiceEnvironment tightens a pre-existing world-readable env file to 0600", async () => {
+	if (process.platform === "win32") return;
+	const home = await makeTempDir();
+	const config = serverAutostartConfig(
+		"linux",
+		{ executable: "/usr/bin/pi-ui", standalone: true },
+		{ serviceEnvironment: { remote: true, authToken: "rotated" } },
+	);
+	const stale = `${home}/.config/pi-ui/pi-ui.env`;
+	await mkdir(dirname(stale), { recursive: true });
+	await writeFile(stale, "PI_UI_AUTH_TOKEN=old\n", { mode: 0o644 });
+	await chmod(stale, 0o644);
+
+	const path = await writeSystemdServiceEnvironment({ ...config, home });
+
+	assertEquals(path, stale);
+	assertStringIncludes(await Bun.file(path).text(), "PI_UI_AUTH_TOKEN=rotated");
+	assertEquals((await stat(path)).mode & 0o777, 0o600);
 });
 
 test("writeSystemdServiceEnvironment persists --insecure-no-auth for a remote service", async () => {
