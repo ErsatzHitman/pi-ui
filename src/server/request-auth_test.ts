@@ -319,10 +319,11 @@ test("while an IP is blocked even the correct token gets 429, so the block is no
 		token,
 		{ server, rateLimiter },
 	);
-	for (const headers of [
+	const correctCredentials: Record<string, string>[] = [
 		{ authorization: `Bearer ${token}` },
 		{ cookie: `pi_ui_token=${token}` },
-	]) {
+	];
+	for (const headers of correctCredentials) {
 		const result = checkAuthToken(
 			new Request("http://localhost/", { headers }),
 			token,
