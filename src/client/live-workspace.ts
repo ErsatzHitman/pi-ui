@@ -8,6 +8,7 @@
 
 import { formatRetryCountdown } from "../live-workspace-types.ts";
 import { bindLiveWorkspace } from "./live-workspace-open.ts";
+import { createTurnPhaseWatcher } from "./live-workspace-turn-phase.ts";
 
 const tickIntervalMs = 1000;
 
@@ -93,29 +94,20 @@ function notifyTurnEvent(title: string, body: string): void {
 }
 
 /** Watches the always-rendered "Now" tab turn banner for phase transitions, independent of
- * whether the pane itself is open — notifications should fire even while it's closed. */
+ * whether the pane itself is open — notifications should fire even while it's closed. Also
+ * watches `data-live-workspace-session` (see `live-workspace-turn-phase.ts`) so a session switch
+ * while a turn is running is never mistaken for that turn finishing. */
 function watchTurnPhase(): void {
 	const now = document.getElementById("live-workspace-now");
 	if (!now) return;
-	let previousPhase: string | undefined;
-	const readPhase = () =>
-		now.querySelector<HTMLElement>(".live-workspace-turn-banner")?.dataset.turnPhase;
-	previousPhase = readPhase();
-	new MutationObserver(() => {
-		const phase = readPhase();
-		if (phase === previousPhase) return;
-		const previous = previousPhase;
-		previousPhase = phase;
-		if (phase === "waiting-for-extension") {
-			notifyTurnEvent("pi is waiting for input", "Open pi-ui to respond.");
-		} else if (
-			phase === undefined &&
-			(previous === "running" || previous === "retrying")
-		) {
-			notifyTurnEvent("Turn finished", "pi has finished the current turn.");
-		}
-	}).observe(now, {
-		attributeFilter: ["data-turn-phase"],
+	const watcher = createTurnPhaseWatcher({
+		readPhase: () =>
+			now.querySelector<HTMLElement>(".live-workspace-turn-banner")?.dataset.turnPhase,
+		readSessionPath: () => now.dataset.liveWorkspaceSession,
+		notify: notifyTurnEvent,
+	});
+	new MutationObserver(() => watcher.check()).observe(now, {
+		attributeFilter: ["data-turn-phase", "data-live-workspace-session"],
 		attributes: true,
 		childList: true,
 		subtree: true,

@@ -112,6 +112,29 @@ test("a compacting turn reports its reason and offers no abort action", () => {
 	assertFalse(html.includes("Abort"));
 });
 
+test("the now section carries the current session path so the client can tell a session switch from a finished turn", () => {
+	const html = renderLiveWorkspaceData(
+		snapshot({ turn: { phase: "running" } }),
+		{},
+		emptyUsage,
+		undefined,
+		"/sessions/abc.jsonl",
+	);
+	const nowIndex = html.indexOf('id="live-workspace-now"');
+	assertStringIncludes(
+		html.slice(nowIndex, nowIndex + 300),
+		'data-live-workspace-session="/sessions/abc.jsonl"',
+	);
+});
+
+test("the now section renders no session attribute when there is no current session", () => {
+	const html = renderLiveWorkspaceData(snapshot({ turn: { phase: "running" } }), {}, emptyUsage);
+	const nowIndex = html.indexOf('id="live-workspace-now"');
+	assertFalse(
+		html.slice(nowIndex, nowIndex + 300).includes("data-live-workspace-session"),
+	);
+});
+
 test("a retrying turn renders a client-tickable countdown element (A#26)", () => {
 	const retryAt = Date.now() + 4000;
 	const html = renderLiveWorkspaceData(

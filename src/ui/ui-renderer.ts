@@ -308,7 +308,11 @@ export class UiRenderer implements AppStorePresentation {
 		const liveWorkspaceTab = snapshot.liveWorkspacePreferences.tab ?? "now";
 		if (dirty.liveWorkspaceNow) {
 			this.hub.patchView(
-				renderLiveWorkspaceNowSection(snapshot.liveWorkspace, liveWorkspaceTab),
+				renderLiveWorkspaceNowSection(
+					snapshot.liveWorkspace,
+					liveWorkspaceTab,
+					snapshot.currentSessionPath,
+				),
 				"{}",
 				[],
 			);
@@ -558,6 +562,7 @@ export class UiRenderer implements AppStorePresentation {
 					snapshot.liveWorkspacePreferences,
 					snapshot.usage,
 					snapshot,
+					snapshot.currentSessionPath,
 				),
 			signals: this.renderSignals(snapshot, overrides),
 			scripts: this.initialDialogScripts(snapshot),
