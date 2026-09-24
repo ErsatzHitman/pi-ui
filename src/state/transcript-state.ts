@@ -1,3 +1,5 @@
+import type { ExtensionActivityView, ExtensionRef } from "../extension-activity-types.ts";
+
 export type TranscriptMessageRole =
 	| "user"
 	| "assistant"
@@ -8,7 +10,8 @@ export type TranscriptMessageRole =
 	| "compaction"
 	| "summary"
 	| "skill"
-	| "custom";
+	| "custom"
+	| "extension-activity";
 
 export type TranscriptMessageTitlePart = {
 	text: string;
@@ -67,6 +70,25 @@ export type TranscriptMessage = {
 	 * text/markdown fallback to fall back to.
 	 */
 	customRenderError?: string;
+	/**
+	 * `role: "extension-activity"` only. Folds the tool call the activity's
+	 * `anchor` names into this message's own turn instead of a separate one —
+	 * set from `ExtensionActivity.anchor.toolCallId`. Never used to route
+	 * `updateMessage`; each activity's card is still addressed by this
+	 * message's own `id`.
+	 */
+	toolCallId?: string;
+	/**
+	 * `role: "extension-activity"` only. One or more activities rendered as
+	 * a single card — normally one, but `instrument.ts` can fold several
+	 * scopes of the same extension's turn into one message (see
+	 * `extension-activity/tracker.ts`). Ordered oldest first.
+	 */
+	activities?: readonly ExtensionActivityView[];
+	/** `role: "extension-activity"` only. The activities' shared owner —
+	 * lets the renderer show one header (icon/label) instead of repeating it
+	 * per activity. */
+	extension?: ExtensionRef;
 };
 
 export type TranscriptMessageOptions = Pick<
@@ -81,6 +103,9 @@ export type TranscriptMessageOptions = Pick<
 	| "details"
 	| "customRenderHtml"
 	| "customRenderError"
+	| "toolCallId"
+	| "activities"
+	| "extension"
 >;
 
 export type TranscriptMessageInput = Omit<TranscriptMessage, "id">;

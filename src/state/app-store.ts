@@ -5,6 +5,7 @@ import {
 	type TerminalSurface,
 } from "../agent/terminal-surface/types.ts";
 import { appCommandCatalog } from "../commands/catalog.ts";
+import type { ExtensionActivityChip } from "../extension-activity-types.ts";
 import {
 	type ExtensionChannelSnapshot,
 	type PiUiElement,
@@ -100,7 +101,14 @@ export type AppExtensionDialog =
 			placeholder?: string;
 			prefill?: string;
 	  };
-export type AppExtensionStatus = { key: string; text: string };
+export type AppExtensionStatus = {
+	key: string;
+	text: string;
+	/** The `ExtensionActivity.id` this status line is currently attributed to,
+	 * when `extension-activity` tracking recognized it as one — lets the
+	 * footer link a status line to its card (see `extension-activity/`). */
+	activityId?: string;
+};
 /**
  * A `pi.registerShortcut()` shortcut — see `src/agent/extension-shortcuts.ts`.
  * `reachableByKeyboard` is false for either of two reasons: `key` collides
@@ -334,6 +342,14 @@ export type AppStateSnapshot = Readonly<{
 	extensionWorkingIndicator: AppExtensionWorkingIndicator | undefined;
 	extensionWorkingMessage: string | undefined;
 	extensionWorkingVisible: boolean;
+	/** Prompt-strip chip row for every open (`started`/`working`)
+	 * `ExtensionActivity` — see `extension-activity/ledger.ts`'s `listOpen()`. */
+	extensionActivityChips: readonly ExtensionActivityChip[];
+	/** The `ExtensionActivity.id` behind the currently-shown working
+	 * indicator/message, when one is attributed — lets the indicator link to
+	 * its card the same way `AppExtensionStatus.activityId` does for a status
+	 * line. */
+	extensionWorkingActivityId: string | undefined;
 	llamaDialog: AppLlamaDialog | undefined;
 	currentModel: string | undefined;
 	currentSessionPath: string | undefined;
@@ -538,6 +554,8 @@ export class AppStore {
 	extensionWorkingIndicator: AppExtensionWorkingIndicator | undefined;
 	extensionWorkingMessage: string | undefined;
 	extensionWorkingVisible = true;
+	extensionActivityChips: ExtensionActivityChip[] = [];
+	extensionWorkingActivityId: string | undefined;
 	llamaDialog: AppLlamaDialog | undefined;
 	currentModel: string | undefined;
 	currentSessionPath: string | undefined;
@@ -657,6 +675,10 @@ export class AppStore {
 				: undefined,
 			extensionWorkingMessage: this.extensionWorkingMessage,
 			extensionWorkingVisible: this.extensionWorkingVisible,
+			extensionActivityChips: this.extensionActivityChips.map((chip) => ({
+				...chip,
+			})),
+			extensionWorkingActivityId: this.extensionWorkingActivityId,
 			llamaDialog: this.llamaDialog ? structuredClone(this.llamaDialog) : undefined,
 			currentModel: this.currentModel,
 			currentSessionPath: this.currentSessionPath,
@@ -1139,10 +1161,17 @@ export class AppStore {
 		message?: string;
 		visible: boolean;
 		indicator?: AppExtensionWorkingIndicator;
+		activityId?: string;
 	}): void {
 		this.extensionWorkingMessage = options.message;
 		this.extensionWorkingVisible = options.visible;
 		this.extensionWorkingIndicator = options.indicator;
+		this.extensionWorkingActivityId = options.activityId;
+		this.commit();
+	}
+	/** Prompt-strip chip row — see `AppStateSnapshot.extensionActivityChips`. */
+	setExtensionActivityChips(chips: ExtensionActivityChip[]): void {
+		this.extensionActivityChips = chips.map((chip) => ({ ...chip }));
 		this.commit();
 	}
 	setDocumentTitle(title: string): void {
