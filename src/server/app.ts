@@ -36,6 +36,10 @@ import { SessionImageStore } from "./session-image-store.ts";
 import { createStaticAssetServer } from "./static-assets.ts";
 import { staticRoot } from "./static-path.ts";
 import { TransferredFileStore } from "./transferred-files.ts";
+import { createGroqTranscriber } from "./voice/groq-transcriber.ts";
+import { parseVoiceConfig } from "./voice/voice-config.ts";
+import { resolveGroqApiKey } from "./voice/voice-key.ts";
+import { createVoiceService } from "./voice/voice-service.ts";
 import { WorkspaceReviewController } from "./workspace-review-controller.ts";
 
 /** RFC 8292 `sub` contact URI a push service may use if this server's VAPID
@@ -52,6 +56,12 @@ export async function createApp() {
 	const fonts = validFonts(appConfig.fonts) ?? defaultFonts();
 	const autoTitle = parseAutoTitleConfig(appConfig.autoTitle);
 	const extensions = parseExtensionsConfig(appConfig.extensions);
+	const voiceConfig = parseVoiceConfig(appConfig.voice);
+	const voiceService = createVoiceService({
+		config: voiceConfig,
+		resolveKey: () => resolveGroqApiKey(),
+		transcriber: createGroqTranscriber({ appVersion: staticAssets.version }),
+	});
 	// Must run before the first `RuntimeController.create()` below, which loads
 	// extensions synchronously with session creation.
 	applyExtensionsHostMarker(extensions);
@@ -130,6 +140,7 @@ export async function createApp() {
 		transferredFiles,
 		pushPublicKey: vapidKeys.publicKeyRaw.toString("base64url"),
 		pushSubscriptions,
+		voice: voiceService,
 		appVersion: staticAssets.version,
 		keybindHints: appConfig.keybindHints !== false,
 		minimalMode: appConfig.minimalMode === true,

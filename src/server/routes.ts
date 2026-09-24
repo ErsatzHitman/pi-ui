@@ -21,6 +21,7 @@ import { sessionSidebarRoutes } from "./routes/session-sidebar.ts";
 import { sessionRoutes } from "./routes/sessions.ts";
 import { streamRoutes } from "./routes/stream.ts";
 import { treeRoutes } from "./routes/tree.ts";
+import { voiceRoutes } from "./routes/voice.ts";
 import { workspaceReviewRoutes } from "./routes/workspace-review.ts";
 import { workspaceRoutes } from "./routes/workspace.ts";
 
@@ -48,4 +49,5 @@ export const appRoutes: RouteMap<RouteContext> = {
 	...commandRoutes,
 	...pushRoutes,
 	...serviceWorkerRoutes,
+	...voiceRoutes,
 };

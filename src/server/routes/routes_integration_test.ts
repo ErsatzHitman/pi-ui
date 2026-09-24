@@ -18,6 +18,7 @@ import { DatastarClientHub } from "../datastar-client-hub.ts";
 import { executeRoute } from "../route.ts";
 import { appRoutes } from "../routes.ts";
 import { SessionImageStore } from "../session-image-store.ts";
+import type { VoiceService, VoiceTranscribeResult } from "../voice/voice-service.ts";
 import type { RouteContext, RuntimeResource } from "./context.ts";
 import { endpoints, filesPreviewBase, filePreviewUrl } from "./endpoints.ts";
 import { fileRoutes } from "./files.ts";
@@ -1844,6 +1845,151 @@ test("an unknown or malformed session image id is a 404, not a crash", async () 
 	}
 });
 
+test("the page embeds the voice status, endpoint and max-seconds as body data attributes", async () => {
+	const context = fakeContext();
+	context.renderer = new UiRenderer(context.store, new DatastarClientHub());
+	const response = await createRouter(context).fetch(new Request("http://localhost/"));
+	const html = await response.text();
+	assertStringIncludes(html, 'data-voice-endpoint="/voice/transcribe"');
+	assertStringIncludes(html, 'data-voice-status="ready"');
+	assertStringIncludes(html, 'data-voice-max-seconds="300"');
+});
+
+function voiceUploadRequest(
+	options: {
+		audio?: File | null;
+		durationMs?: string;
+		headers?: Record<string, string>;
+	} = {},
+): Request {
+	const formData = new FormData();
+	if (options.audio !== null) {
+		formData.set(
+			"audio",
+			options.audio ??
+				new File(["fake audio bytes"], "voice.webm", { type: "audio/webm" }),
+		);
+	}
+	if (options.durationMs !== undefined) formData.set("durationMs", options.durationMs);
+	return new Request(`http://localhost${endpoints.voiceTranscribe}`, {
+		method: "POST",
+		headers: options.headers,
+		body: formData,
+	});
+}
+
+test("a valid recording is transcribed and returned as {text}", async () => {
+	const response = await createRouter(fakeContext()).fetch(voiceUploadRequest());
+	assertEquals(response.status, 200);
+	assertEquals(await response.json(), { text: "transcribed text" });
+});
+
+test("a missing or empty audio field is a 400 invalid-audio", async () => {
+	const context = fakeContext();
+	const missing = await createRouter(context).fetch(
+		voiceUploadRequest({ audio: null }),
+	);
+	assertEquals(missing.status, 400);
+	assertEquals((await missing.json()).error, "invalid-audio");
+
+	const empty = await createRouter(context).fetch(
+		voiceUploadRequest({ audio: new File([], "blob", { type: "audio/webm" }) }),
+	);
+	assertEquals(empty.status, 400);
+	assertEquals((await empty.json()).error, "invalid-audio");
+});
+
+test("a non-audio mime type is a 400 invalid-audio", async () => {
+	const response = await createRouter(fakeContext()).fetch(
+		voiceUploadRequest({
+			audio: new File(["not audio"], "blob", { type: "application/octet-stream" }),
+		}),
+	);
+	assertEquals(response.status, 400);
+	assertEquals((await response.json()).error, "invalid-audio");
+});
+
+test("a content-length over the cap is rejected with 413 before the body is read", async () => {
+	let formDataCalled = false;
+	const context = fakeContext({
+		voice: {
+			status: () => ({ status: "ready", maxSeconds: 300 }),
+			transcribe: async () => {
+				formDataCalled = true;
+				return { ok: true, text: "should not run" };
+			},
+		},
+	});
+	const response = await createRouter(context).fetch(
+		voiceUploadRequest({ headers: { "content-length": String(30 * 1024 * 1024) } }),
+	);
+	assertEquals(response.status, 413);
+	assertEquals((await response.json()).error, "too-large");
+	assertEquals(formDataCalled, false);
+});
+
+test("a not-configured voice service is a 503 with an actionable message", async () => {
+	const context = fakeContext({
+		voice: {
+			status: () => ({ status: "no-key", maxSeconds: 300 }),
+			transcribe: async () => ({ ok: true, text: "unused" }),
+		},
+	});
+	const response = await createRouter(context).fetch(voiceUploadRequest());
+	assertEquals(response.status, 503);
+	const body = await response.json();
+	assertEquals(body.error, "not-configured");
+	assertStringIncludes(body.message, "Groq API key");
+});
+
+test("a disabled voice service is a 404", async () => {
+	const context = fakeContext({
+		voice: {
+			status: () => ({ status: "disabled", maxSeconds: 300 }),
+			transcribe: async () => ({ ok: true, text: "unused" }),
+		},
+	});
+	const response = await createRouter(context).fetch(voiceUploadRequest());
+	assertEquals(response.status, 404);
+	assertEquals((await response.json()).error, "disabled");
+});
+
+test("a voice-service error passes its status, code, message and retryAfterSeconds through", async () => {
+	const context = fakeContext({
+		voice: {
+			status: () => ({ status: "ready", maxSeconds: 300 }),
+			transcribe: async () => ({
+				ok: false,
+				status: 429,
+				code: "rate-limited",
+				message: "Groq rate limit reached. Try again in 3s.",
+				retryAfterSeconds: 3,
+			}),
+		},
+	});
+	const response = await createRouter(context).fetch(voiceUploadRequest());
+	assertEquals(response.status, 429);
+	assertEquals(await response.json(), {
+		error: "rate-limited",
+		message: "Groq rate limit reached. Try again in 3s.",
+		retryAfterSeconds: 3,
+	});
+});
+
+test("durationMs past the configured limit plus slack is a 413 too-long", async () => {
+	const context = fakeContext({
+		voice: {
+			status: () => ({ status: "ready", maxSeconds: 10 }),
+			transcribe: async () => ({ ok: true, text: "should not run" }),
+		},
+	});
+	const response = await createRouter(context).fetch(
+		voiceUploadRequest({ durationMs: String(16_000) }),
+	);
+	assertEquals(response.status, 413);
+	assertEquals((await response.json()).error, "too-long");
+});
+
 function createRouter(context: RouteContext) {
 	return {
 		fetch(request: Request): Promise<Response> {
@@ -1872,6 +2018,7 @@ function fakeContext(
 		themeLab?: boolean;
 		transferredFiles?: RouteContext["transferredFiles"];
 		pushSubscriptions?: RouteContext["pushSubscriptions"];
+		voice?: VoiceService;
 	} = {},
 ): RouteContext {
 	const store = new AppStore();
@@ -1902,8 +2049,23 @@ function fakeContext(
 			add: async () => {},
 			remove: async () => {},
 		},
+		voice: overrides.voice ?? fakeVoiceService(),
 		openWorkspace: async () => true,
 		serveStatic: async () => new Response("static"),
+	};
+}
+
+/** A `ready` voice service by default: a test that wants `no-key`, `disabled`,
+ * or a scripted `transcribe` result passes its own `VoiceService` instead. */
+function fakeVoiceService(
+	overrides: Partial<VoiceService> & { transcribeResult?: VoiceTranscribeResult } = {},
+): VoiceService {
+	return {
+		status: overrides.status ?? (() => ({ status: "ready", maxSeconds: 300 })),
+		transcribe:
+			overrides.transcribe ??
+			(async () =>
+				overrides.transcribeResult ?? { ok: true, text: "transcribed text" }),
 	};
 }
 
