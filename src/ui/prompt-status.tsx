@@ -5,6 +5,7 @@ import type {
 } from "../state/app-store.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
 import { formatTokens } from "../utils/format.ts";
+import { renderExtensionActivityChips } from "./extension-activity.tsx";
 import { Icon } from "./icon.tsx";
 import { Loader } from "./icons.ts";
 import { renderPiUiStatusChips } from "./pi-ui-elements.tsx";
@@ -41,19 +42,28 @@ export function renderPromptStatus(state: AppStateSnapshot): string {
 				{loaderIcon()}
 				<span safe>{sendingLabel}</span>
 			</span>
-			{state.extensionWorkingVisible && activityText && (
-				<span class="prompt-working-status">
-					<span class="prompt-working-content">
-						{renderWorkingIndicator(state.extensionWorkingIndicator)}
-						<span safe>{activityText}</span>
+			{state.extensionWorkingVisible &&
+				activityText &&
+				!state.extensionWorkingActivityId && (
+					<span class="prompt-working-status">
+						<span class="prompt-working-content">
+							{renderWorkingIndicator(state.extensionWorkingIndicator)}
+							<span safe>{activityText}</span>
+						</span>
 					</span>
-				</span>
-			)}
-			{state.extensionStatuses.map((status) => (
-				<span class="extension-status" data-extension-status={status.key} safe>
-					{status.text}
-				</span>
-			))}
+				)}
+			{state.extensionStatuses
+				.filter((status) => !status.activityId)
+				.map((status) => (
+					<span
+						class="extension-status"
+						data-extension-status={status.key}
+						safe
+					>
+						{status.text}
+					</span>
+				))}
+			{renderExtensionActivityChips(state.extensionActivityChips)}
 			{renderPiUiStatusChips(state)}
 			{/* extension-keys.js flashes `hidden` client-side; a status re-render
 			    (e.g. the notice the consumed key triggers) must not reset it. */}

@@ -186,8 +186,11 @@
 		font-size: var(--text-2xs);
 		text-transform: uppercase;
 	}
+
+	/* Pink matches every other "an extension/sub-agent is working right now" surface
+	   (activity cards, prompt chips, Live Workspace running rows — DESIGN-ext-activity.md §4.3). */
 	.piui-roster-row[data-piui-roster-state="running"] .piui-roster-state {
-		color: var(--status-success);
+		color: var(--status-active);
 	}
 	.piui-roster-row[data-piui-roster-state="error"] .piui-roster-state,
 	.piui-roster-row[data-piui-roster-state="failed"] .piui-roster-state {

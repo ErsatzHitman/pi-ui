@@ -1,0 +1,162 @@
+/* Durable extension-activity lifecycle (DESIGN-ext-activity.md §4). Reuses
+   .message-tool/.tool-timeline-item/.context-details/.tool-output-surface —
+   no new visual primitives, only the states/colors/layout this feature adds. */
+@layer components {
+	/* The one "working" color shared by activity cards, tool-card steps, prompt
+	   chips, extension-owned running tool dots, and Live Workspace/roster running
+	   rows (§4.3). Passed as StatusDot's `runningClass` in place of the default
+	   `.status-dot-running` (session-sidebar.css), which stays muted text. */
+	.status-dot-active {
+		color: var(--status-active);
+	}
+
+	.badge[data-variant="activity"] {
+		background: var(--status-active-surface);
+		color: var(--status-active);
+	}
+
+	.ext-activity-summary {
+		border-radius: var(--radius-md);
+		transition: background-color 160ms var(--ease-out);
+	}
+
+	.message-ext-activity[data-activity-state="working"] .ext-activity-summary,
+	.ext-activity-step[data-activity-state="working"] .ext-activity-summary {
+		background: var(--status-active-surface);
+	}
+
+	.ext-activity-state {
+		flex-shrink: 0;
+		color: var(--text-muted);
+		font-size: var(--text-2xs);
+		text-transform: uppercase;
+	}
+
+	.message-ext-activity[data-activity-state="working"] .ext-activity-state,
+	.ext-activity-step[data-activity-state="working"] .ext-activity-state {
+		color: var(--status-active);
+	}
+
+	.message-ext-activity[data-activity-state="error"] .ext-activity-state,
+	.ext-activity-step[data-activity-state="error"] .ext-activity-state {
+		color: var(--status-error);
+	}
+
+	/* "Stopped" reads as neutral, not a failure — the result ball goes muted
+	   rather than the default success teal (§4.3). */
+	.message-ext-activity[data-activity-state="cancelled"] .tool-status-result,
+	.ext-activity-step[data-activity-state="cancelled"] .tool-status-result {
+		color: var(--text-muted);
+	}
+
+	.ext-activity-progress {
+		margin: 0.375rem 0 0;
+		color: var(--text-muted);
+		font-size: var(--text-sm);
+	}
+
+	.ext-activity-section {
+		padding: 0.5rem 0.625rem;
+	}
+
+	.ext-activity-section + .ext-activity-section {
+		border-top: 1px solid var(--border);
+	}
+
+	.ext-activity-section > h4 {
+		margin: 0 0 0.25rem;
+	}
+
+	.ext-activity-output-text {
+		margin: 0;
+		overflow-x: auto;
+		font: var(--text-2xs) / 1.4 var(--font-mono);
+		white-space: pre-wrap;
+		overflow-wrap: break-word;
+	}
+
+	.ext-activity-truncated {
+		margin: 0.25rem 0 0;
+	}
+
+	.ext-activity-steps {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+		margin: 0.5rem 0 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.ext-activity-minimal-summary {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		margin: 0;
+		font-size: var(--text-sm);
+	}
+
+	.ext-activity-minimal-content {
+		display: flex;
+		min-width: 0;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.375rem;
+		overflow: hidden;
+	}
+
+	.ext-activity-minimal-content > :last-child {
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+
+	/* Prompt-strip chips (§4.1 point 2). */
+	.ext-activity-chip-row {
+		display: inline-flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.25rem;
+	}
+
+	.ext-activity-chip {
+		cursor: pointer;
+		border: 0;
+	}
+
+	.ext-activity-chip .tool-state-dot {
+		position: static;
+		translate: none;
+	}
+
+	.ext-activity-chip-label {
+		font-weight: 600;
+	}
+
+	.ext-activity-chip-progress {
+		overflow: hidden;
+		max-inline-size: 32ch;
+		color: inherit;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		opacity: 0.85;
+	}
+
+	@media (width < 40rem) {
+		.ext-activity-chip-progress {
+			max-inline-size: 14ch;
+		}
+
+		.ext-activity-chip-row {
+			max-inline-size: 100%;
+		}
+	}
+}
+
+@layer utilities {
+	/* Minimal mode keeps the activity card visible as a one-line summary rather
+	   than hiding it like earlier tool rows (§4.4, Q4's default). */
+	[data-minimal-mode] .message-ext-activity {
+		padding-left: 0;
+	}
+}

@@ -255,6 +255,35 @@ test("the agents tab offers to open a tracked background session", () => {
 	assertStringIncludes(html, "/sessions/bg.jsonl");
 });
 
+test("a running agent row carries its status as a data attribute for the shared pink 'working' color", () => {
+	const html = renderLiveWorkspaceData(
+		snapshot({
+			agents: [
+				{
+					id: "subagents:reviewer",
+					kind: "channel-entry",
+					source: "subagents:fleet",
+					label: "reviewer",
+					status: "running",
+					depth: 0,
+				},
+				{
+					id: "subagents:done",
+					kind: "channel-entry",
+					source: "subagents:fleet",
+					label: "done-agent",
+					status: "completed",
+					depth: 0,
+				},
+			],
+		}),
+		{ tab: "agents" },
+		emptyUsage,
+	);
+	assertStringIncludes(html, 'data-live-workspace-agent-status="running"');
+	assertStringIncludes(html, 'data-live-workspace-agent-status="completed"');
+});
+
 test("the agents tab reports an empty roster when nothing is tracked", () => {
 	const html = renderLiveWorkspaceData(snapshot(), { tab: "agents" }, emptyUsage);
 	assertStringIncludes(html, "No subagents, background jobs, or background sessions.");

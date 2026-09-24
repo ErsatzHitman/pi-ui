@@ -650,6 +650,7 @@ function renderAgentRow(agent: LiveWorkspaceAgentRow): string {
 	return syncHtml(
 		<li
 			class="live-workspace-agent-row"
+			data-live-workspace-agent-status={agent.status}
 			style={agent.depth > 0 ? `padding-left: ${agent.depth}rem` : undefined}
 		>
 			<span class="live-workspace-agent-label" safe>
