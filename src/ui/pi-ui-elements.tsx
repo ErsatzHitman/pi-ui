@@ -9,6 +9,8 @@ import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
 import type { JsonObject, JsonValue } from "../utils/json-types.ts";
 import { isBoolean, isJsonObject, isNumber, isString } from "../utils/type-guards.ts";
+import { Icon } from "./icon.tsx";
+import { ArrowUp, Square, X } from "./icons.ts";
 import { renderMarkdownStreaming } from "./markdown.tsx";
 import { syncHtml } from "./sync-html.ts";
 
@@ -258,22 +260,26 @@ function renderPiUiSheetDialog(element: PiUiElement): string {
 					<h2 id={`${dialogId(element)}-title`} safe>
 						{element.title ?? element.ns}
 					</h2>
+					{/* A single header close control (Esc/backdrop already close it too) —
+					 * extensions no longer need their own footer "Close" action just to give
+					 * the sheet a close affordance (that was one of btw's duplicate controls). */}
+					<button
+						type="button"
+						class="btn"
+						data-variant="ghost"
+						data-size="icon-sm"
+						commandfor={dialogId(element)}
+						command="close"
+						aria-label="Close"
+						data-tooltip="Close"
+					>
+						<Icon icon={X} />
+					</button>
 				</header>
 				{body || renderPiUiSheetEmptyState()}
-				<footer>
-					{!element.actions?.some((action) => action.id === closeActionId) && (
-						<button
-							type="button"
-							class="btn"
-							data-variant="outline"
-							commandfor={dialogId(element)}
-							command="close"
-						>
-							Close
-						</button>
-					)}
-					{renderPiUiActions(element)}
-				</footer>
+				{renderPiUiActions(element) && (
+					<footer>{renderPiUiActions(element)}</footer>
+				)}
 			</div>
 		</dialog>,
 	);
@@ -441,6 +447,33 @@ function renderMarkdownBody(element: PiUiElement): string {
 	);
 }
 
+function renderPiUiTurn(element: PiUiElement, value: JsonValue, index: number): string {
+	if (!isJsonObject(value)) return "";
+	const role = textField(value.role) ?? "assistant";
+	const isUser = role === "user";
+	const streaming = isBoolean(value.streaming) && value.streaming;
+	const text = textField(value.text) ?? (streaming ? "…" : "");
+	if (!text) return "";
+	return syncHtml(
+		<div class={`piui-turn piui-turn-${isUser ? "user" : "assistant"}`}>
+			<span class="sr-only" safe>
+				{isUser ? "You" : element.title || element.ns}
+			</span>
+			{isUser ? (
+				<p class="piui-turn-text" safe>
+					{text}
+				</p>
+			) : (
+				<div class="piui-turn-text markdown-content">
+					{renderMarkdownStreaming(text, {
+						cacheKey: `piui:${element.ns}:${element.id}:turn:${index}`,
+					})}
+				</div>
+			)}
+		</div>,
+	);
+}
+
 function renderDiffBody(element: PiUiElement): string {
 	const diffText =
 		textField(element.data.unifiedDiff) ?? textField(element.data.diff) ?? "";
@@ -519,6 +552,29 @@ function renderPanelSection(
 			</div>,
 		);
 	}
+	// A compact one-line muted chip (e.g. btw's "model · thinking level") — deliberately
+	// plainer than `markdown` so a short fact doesn't read as prose (round: btw-compact).
+	if (kind === "meta") {
+		if (!text) return "";
+		return syncHtml(
+			<div class="piui-panel-section piui-panel-meta fine-print" safe>
+				{text}
+			</div>,
+		);
+	}
+	// A compact chat transcript — pairs of `{role: "user" | "assistant", text}` turns,
+	// rendered as visually distinct blocks (a plain trailing bubble for the user, markdown
+	// for the reply) instead of a "**› you** / **› btw**" markdown wall (round: btw-compact,
+	// the sheet still needs role context for screen readers, so it's an sr-only label here).
+	if (kind === "turns") {
+		const turns = arrayFieldOf(record.turns) ?? [];
+		if (turns.length === 0) return "";
+		return syncHtml(
+			<div class="piui-panel-section piui-turns">
+				{turns.map((turn, index) => renderPiUiTurn(element, turn, index))}
+			</div>,
+		);
+	}
 	if (kind === "log") {
 		return syncHtml(
 			<div class="piui-panel-section piui-panel-log" safe>
@@ -526,8 +582,9 @@ function renderPanelSection(
 			</div>,
 		);
 	}
+	const tone = textField(record.tone);
 	return syncHtml(
-		<div class="piui-panel-section piui-panel-status" safe>
+		<div class="piui-panel-section piui-panel-status" data-tone={tone} safe>
 			{text}
 		</div>,
 	);
@@ -631,9 +688,29 @@ function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 				data-signals={`{${signal}: ''}`}
 				data-bind={signal}
 				autocomplete="off"
+				aria-label={field.label ? undefined : field.placeholder}
+				// A single-line field's placeholder routinely promises "Enter to send" (btw's
+				// composer, e.g.) — make that true for every piui text field, not just btw's.
+				data-on:keydown={submitOnEnterScript()}
 			/>
 		</div>,
 	);
+}
+
+/**
+ * Enter (without Shift, and not while composing an IME candidate) clicks the nearest
+ * non-destructive/outline action button instead of doing nothing — the primary action for
+ * whichever form this field belongs to, whether that's a top-level field (its action lives
+ * in the sheet's `<footer>`) or a nested form section's own `.piui-actions` (btw's composer).
+ */
+function submitOnEnterScript(): string {
+	return `if (evt.key === 'Enter' && !evt.shiftKey && !evt.isComposing) {
+		evt.preventDefault();
+		const root = evt.target.closest('.piui-sheet-panel, .piui-element') ?? document;
+		const button = root.querySelector('.piui-actions .btn:not([data-variant="outline"]):not([data-variant="destructive"])')
+			?? root.querySelector('.piui-actions .btn');
+		button?.click();
+	}`;
 }
 
 function renderPiUiActions(element: PiUiElement): string {
@@ -666,23 +743,39 @@ function renderActionButton(
 	size?: "xs",
 ): string {
 	const post = actionPost(element, action.id, valueExpression);
+	const onClick = action.confirm
+		? `if (confirm(${JSON.stringify(action.confirm)})) { ${post} }`
+		: post;
+	const variant =
+		action.variant === "primary"
+			? undefined
+			: action.variant === "danger"
+				? "destructive"
+				: "outline";
+	// A compact single input row (btw's composer) wants an inline icon button, not a
+	// labeled one — `label` still carries the accessible name and tooltip text.
+	if (action.icon) {
+		return syncHtml(
+			<button
+				type="button"
+				class="btn"
+				data-variant={variant}
+				data-size={size ? "icon-xs" : "icon"}
+				data-on:click={onClick}
+				aria-label={action.label}
+				data-tooltip={action.label}
+			>
+				<Icon icon={action.icon === "stop" ? Square : ArrowUp} />
+			</button>,
+		);
+	}
 	return syncHtml(
 		<button
 			type="button"
 			class="btn"
-			data-variant={
-				action.variant === "primary"
-					? undefined
-					: action.variant === "danger"
-						? "destructive"
-						: "outline"
-			}
+			data-variant={variant}
 			data-size={size}
-			data-on:click={
-				action.confirm
-					? `if (confirm(${JSON.stringify(action.confirm)})) { ${post} }`
-					: post
-			}
+			data-on:click={onClick}
 			safe
 		>
 			{action.label}
@@ -784,6 +877,7 @@ function parseActions(value: JsonValue | undefined): PiUiAction[] {
 		const label = textField(candidate.label);
 		if (id === undefined || label === undefined) continue;
 		const variant = candidate.variant;
+		const icon = candidate.icon;
 		actions.push({
 			id,
 			label,
@@ -792,6 +886,7 @@ function parseActions(value: JsonValue | undefined): PiUiAction[] {
 					? variant
 					: undefined,
 			confirm: textField(candidate.confirm),
+			icon: icon === "send" || icon === "stop" ? icon : undefined,
 		});
 	}
 	return actions;

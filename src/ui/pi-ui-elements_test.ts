@@ -138,7 +138,6 @@ test("nested form sections render their fields and actions once", () => {
 			element({
 				ns: "btw",
 				placement: "screen",
-				actions: [{ id: "close", label: "Close" }],
 				data: {
 					sections: [
 						{
@@ -156,8 +155,136 @@ test("nested form sections render their fields and actions once", () => {
 	assertStringIncludes(html, "Ask btw");
 	assertStringIncludes(html, ">Send</button>");
 	assertStringIncludes(html, "$_piuiField_btw_panel_q");
-	// The element declares its own close action, so the built-in Close button is omitted.
-	assertStringExcludes(html, 'command="close"');
+});
+
+test("every sheet gets one header close control instead of a footer Close fallback (btw-compact)", () => {
+	const html = renderPiUiSheets({ extensionElements: [element({})] });
+	// The header close button (native `command=\"close\"`, same mechanism the old footer
+	// fallback used) is the sheet's only close control now — no separate "Close" text button.
+	assertStringIncludes(html, 'aria-label="Close"');
+	assertStringIncludes(html, 'command="close"');
+	assertStringExcludes(html, ">Close</button>");
+});
+
+test("a sheet with no declared actions renders no footer at all (btw-compact)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({ data: { sections: [{ kind: "status", text: "hello" }] } }),
+		],
+	});
+	assertStringExcludes(html, "<footer>");
+});
+
+test("an action with an icon renders as an icon-only button, not a labeled one (btw-compact)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				ns: "btw",
+				placement: "screen",
+				data: {
+					sections: [
+						{
+							kind: "form",
+							fields: [{ id: "q", kind: "text", placeholder: "Ask btw…" }],
+							actions: [
+								{
+									id: "submit",
+									label: "Send",
+									variant: "primary",
+									icon: "send",
+								},
+							],
+						},
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, 'aria-label="Send"');
+	assertStringExcludes(html, ">Send</button>");
+});
+
+test("a text field submits on Enter without a surrounding <form> (btw-compact)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [element({ data: { fields: [{ id: "q", kind: "text" }] } })],
+	});
+	assertStringIncludes(html, "evt.key === 'Enter'");
+	assertStringIncludes(html, ".piui-actions .btn");
+});
+
+test("a text field without a visible label still gets an accessible name from its placeholder (btw-compact)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				data: { fields: [{ id: "q", kind: "text", placeholder: "Ask btw…" }] },
+			}),
+		],
+	});
+	assertStringIncludes(html, 'aria-label="Ask btw…"');
+});
+
+test("a 'turns' section renders a compact chat without '› you'/'› btw' markdown headers (btw-compact)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				ns: "btw",
+				placement: "screen",
+				data: {
+					sections: [
+						{
+							kind: "turns",
+							turns: [
+								{ role: "user", text: "Hi. What is going on" },
+								{ role: "assistant", text: "Not much." },
+							],
+						},
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, "piui-turn-user");
+	assertStringIncludes(html, "piui-turn-assistant");
+	assertStringIncludes(html, "Hi. What is going on");
+	assertStringIncludes(html, "Not much.");
+	assertStringExcludes(html, "› you");
+	assertStringExcludes(html, "› btw");
+	assertStringExcludes(html, "**");
+});
+
+test("a 'turns' section carries the role in an sr-only label for assistive tech", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				ns: "btw",
+				title: "btw",
+				placement: "screen",
+				data: {
+					sections: [{ kind: "turns", turns: [{ role: "user", text: "hi" }] }],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, 'class="sr-only"');
+});
+
+test("a 'meta' section renders one muted line", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				data: {
+					sections: [
+						{
+							kind: "meta",
+							text: "openai-codex/gpt-5.6-sol · Thinking: high",
+						},
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, "piui-panel-meta");
+	assertStringIncludes(html, "openai-codex/gpt-5.6-sol · Thinking: high");
 });
 
 test("actions send the namespaced elementId lib/bridge.ts expects", () => {

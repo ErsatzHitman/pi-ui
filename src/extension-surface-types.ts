@@ -30,6 +30,11 @@ export type PiUiAction = {
 	label: string;
 	variant?: "primary" | "secondary" | "danger";
 	confirm?: string;
+	/**
+	 * Renders as an icon-only button (`label` becomes its `aria-label`/tooltip instead of
+	 * visible text) — for a compact single input row such as btw's composer send/stop.
+	 */
+	icon?: "send" | "stop";
 };
 
 /**

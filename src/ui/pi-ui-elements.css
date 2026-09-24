@@ -221,6 +221,38 @@
 		color: var(--text-muted);
 		font-size: var(--text-xs);
 	}
+	.piui-panel-section.piui-panel-status[data-tone="error"] {
+		color: var(--status-error);
+	}
+	.piui-panel-section.piui-panel-meta {
+		font-size: var(--text-xs);
+	}
+
+	/* A compact chat transcript inside a PIUI sheet (btw's composer, e.g.): the user's turn
+	 * reads as a trailing bubble (matching `.message-user-text` in the main transcript, just
+	 * smaller) and the reply as plain markdown, so no "› you"/"› btw" label text is needed to
+	 * tell them apart — those stay in a `.sr-only` span for assistive tech only. */
+	.piui-turns {
+		display: flex;
+		flex-direction: column;
+		gap: 0.625rem;
+	}
+	.piui-turn-user {
+		align-self: flex-end;
+		max-width: 88%;
+	}
+	.piui-turn-user .piui-turn-text {
+		margin: 0;
+		border-radius: var(--radius-lg);
+		background: var(--action-primary);
+		padding: 0.5rem 0.75rem;
+		color: var(--action-primary-text);
+		overflow-wrap: anywhere;
+		white-space: pre-wrap;
+	}
+	.piui-turn-assistant .piui-turn-text {
+		font-size: var(--text-sm);
+	}
 	.piui-fields {
 		display: grid;
 		gap: 0.625rem;
@@ -256,6 +288,20 @@
 	.piui-sheet-empty {
 		margin: 0;
 		padding-block: 0.5rem;
+	}
+
+	/* The generic `.dialog > * > header` is a single-column grid (overlays.css) — a piui
+	 * sheet's header additionally carries its own close button (see renderPiUiSheetDialog),
+	 * so it needs to sit beside the title instead of stacking under it. */
+	.piui-sheet > .piui-sheet-panel > header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+	.piui-sheet > .piui-sheet-panel > header h2 {
+		min-width: 0;
+		flex: 1;
 	}
 
 	.piui-sheet > .piui-sheet-panel {
