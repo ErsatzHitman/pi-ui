@@ -2,14 +2,17 @@ import {
 	formatAdaptiveDateTime,
 	formatExpandedDateTime,
 } from "../utils/date-time-format.ts";
-import type {
-	GitGraphRef,
-	GitGraphRow,
-	WorkspaceGitGraphCommitDetail,
-	WorkspaceGitGraphSnapshot,
+import {
+	type GitGraphRef,
+	type GitGraphRow,
+	unloadedWorkspaceGitGraphSnapshot,
+	type WorkspaceGitGraphCommitDetail,
+	workspaceGitGraphPageSize,
+	type WorkspaceGitGraphSnapshot,
 } from "../workspace-git-graph-types.ts";
 import type { createWorkspaceGitGraphApi } from "./workspace-git-graph-api.ts";
 
+const unloadedRevision = unloadedWorkspaceGitGraphSnapshot.revision;
 const maxLaneGap = 16;
 const laneInset = 8;
 const rowHeight = 28;
@@ -77,6 +80,13 @@ export function createWorkspaceGitGraph(
 	let detailOpen = false;
 	const detailCache = new Map<string, WorkspaceGitGraphCommitDetail>();
 	let detailRequest = 0;
+	// Rows "Load more" asked for. Live refreshes (the workspace watcher, e.g. every file
+	// an agent writes) publish the default-sized window; while this is set they are
+	// re-read at this size instead, so the extra history (and the scroll position in it)
+	// is not dropped on the next change.
+	let expandedCount: number | undefined;
+	let expandedRequest: Promise<void> | undefined;
+	let expandedStale = false;
 
 	rowsHost.addEventListener("keydown", handleKeydown);
 	moreButton.addEventListener("click", () => void loadMore());
@@ -95,6 +105,46 @@ export function createWorkspaceGitGraph(
 	resize.observe(rowsHost);
 
 	function applySnapshot(next: WorkspaceGitGraphSnapshot): void {
+		if (!next.isGitRepository || next.revision === unloadedRevision) {
+			expandedCount = undefined;
+		}
+		if (
+			expandedCount !== undefined &&
+			next.hasMore &&
+			next.rows.length < expandedCount
+		) {
+			void refreshExpanded();
+			return;
+		}
+		show(next);
+	}
+
+	async function refreshExpanded(): Promise<void> {
+		if (expandedRequest) {
+			expandedStale = true;
+			return expandedRequest;
+		}
+		expandedRequest = (async () => {
+			do {
+				expandedStale = false;
+				const count = expandedCount;
+				if (count === undefined) return;
+				try {
+					show(await api.loadMore(count));
+				} catch {
+					// Keep the rows already shown; the next refresh retries.
+				}
+			} while (expandedStale);
+		})();
+		try {
+			await expandedRequest;
+		} finally {
+			expandedRequest = undefined;
+		}
+	}
+
+	function show(next: WorkspaceGitGraphSnapshot): void {
+		if (snapshot?.revision === next.revision) return;
 		snapshot = next;
 		if (selectedHash && !next.rows.some((row) => row.hash === selectedHash)) {
 			selectedHash = undefined;
@@ -107,12 +157,19 @@ export function createWorkspaceGitGraph(
 		if (!snapshot) return;
 		const changeCount = snapshot.changeCount;
 		const scrollTop = rowsHost.scrollTop;
+		// Rows are rebuilt on every refresh and resize; keep keyboard focus on the same
+		// commit so arrow-key browsing survives a live update.
+		const focusedHash =
+			document.activeElement instanceof HTMLElement &&
+			rowsHost.contains(document.activeElement)
+				? document.activeElement.dataset.hash
+				: undefined;
 		rowsHost.replaceChildren();
 		if (changeCount > 0) rowsHost.append(renderWorkingRow(changeCount));
 		if (snapshot.rows.length === 0 && changeCount === 0) {
 			empty.hidden = false;
 			empty.textContent =
-				snapshot.revision === "git-graph-unloaded"
+				snapshot.revision === unloadedRevision
 					? "Loading Git data…"
 					: snapshot.isGitRepository
 						? "No commits yet"
@@ -122,6 +179,11 @@ export function createWorkspaceGitGraph(
 			for (const row of snapshot.rows) rowsHost.append(renderRow(row));
 		}
 		rowsHost.scrollTop = scrollTop;
+		if (focusedHash) {
+			rowButtons()
+				.find((button) => button.dataset.hash === focusedHash)
+				?.focus({ preventScroll: true });
+		}
 		moreButton.hidden = !snapshot.hasMore;
 	}
 
@@ -328,6 +390,13 @@ export function createWorkspaceGitGraph(
 		meta.append(hash, author, time);
 		detail.append(heading, meta);
 
+		if (value.body) {
+			const body = document.createElement("p");
+			body.className = "review-graph-body";
+			body.textContent = value.body;
+			detail.append(body);
+		}
+
 		if (value.parents.length > 0) {
 			const parents = document.createElement("div");
 			parents.className = "fine-print review-graph-parents";
@@ -407,7 +476,8 @@ export function createWorkspaceGitGraph(
 		if (!snapshot) return;
 		moreButton.disabled = true;
 		try {
-			applySnapshot(await api.loadMore(snapshot.rows.length + 200));
+			expandedCount = snapshot.rows.length + workspaceGitGraphPageSize;
+			show(await api.loadMore(expandedCount));
 		} finally {
 			moreButton.disabled = false;
 		}

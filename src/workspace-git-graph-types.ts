@@ -80,6 +80,8 @@ const workspaceGitGraphCommitDetailSchema = Type.ReadonlyObject(
 	Type.Object({
 		author: Type.String(),
 		authoredAt: Type.String(),
+		/** The commit message after its subject line; empty for a one-line message. */
+		body: Type.String(),
 		changes: Type.ReadonlyObject(
 			Type.Array(
 				Type.ReadonlyObject(

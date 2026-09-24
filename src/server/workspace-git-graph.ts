@@ -23,6 +23,9 @@ export type {
 
 type GitResult = Readonly<{ code: number; stderr: string; stdout: string }>;
 const graphLogFormat = "--format=format:%H%x1f%h%x1f%an%x1f%aI%x1f%P%x1f%D%x1f%s%x1e";
+// The graph's fields plus the message body (%b), for one commit's detail only.
+const commitDetailFormat =
+	"--format=format:%H%x1f%h%x1f%an%x1f%aI%x1f%P%x1f%D%x1f%s%x1f%b%x1e";
 const decoder = new TextDecoder();
 
 type GitGraphLogEntry = Readonly<{
@@ -167,7 +170,7 @@ export async function readWorkspaceGitGraphCommit(
 	const root = await findGitRoot(workspacePath);
 	if (!root) return undefined;
 	const [metadataResult, statusResult] = await Promise.all([
-		git(root, "show", "-s", graphLogFormat, commitHash),
+		git(root, "show", "-s", commitDetailFormat, commitHash),
 		git(
 			root,
 			"diff-tree",
@@ -222,12 +225,18 @@ export async function readWorkspaceGitGraphCommit(
 	return {
 		author: entry.author,
 		authoredAt: entry.authoredAt,
+		body: parseCommitBody(metadataResult.stdout),
 		changes,
 		hash: entry.hash,
 		parents: entry.parents,
 		shortHash: entry.shortHash,
 		subject: entry.subject,
 	};
+}
+
+/** The message body (everything after the subject) from `commitDetailFormat` output. */
+export function parseCommitBody(output: string): string {
+	return (output.split("\x1e")[0]?.split("\x1f")[7] ?? "").trim();
 }
 
 async function hash(value: string): Promise<string> {

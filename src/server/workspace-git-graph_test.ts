@@ -66,7 +66,14 @@ test("git graph lays out a merged feature branch with refs and detects main", as
 		await git(repository, "checkout", "-b", "feature");
 		await Bun.write(`${repository}/feature.txt`, "feature\n");
 		await git(repository, "add", ".");
-		await git(repository, "commit", "-m", "feature work");
+		await git(
+			repository,
+			"commit",
+			"-m",
+			"feature work",
+			"-m",
+			"Why: the body line.\nSecond body line.",
+		);
 		await git(repository, "checkout", "main");
 		await Bun.write(`${repository}/main.txt`, "main\n");
 		await git(repository, "add", ".");
@@ -105,11 +112,16 @@ test("git graph lays out a merged feature branch with refs and detects main", as
 
 		const detail = await readWorkspaceGitGraphCommit(repository, merge.hash);
 		assertEquals(detail?.subject, "merge feature");
+		assertEquals(detail?.body, "");
 		assertEquals(detail?.parents.length, 2);
 		assertEquals(
 			detail?.changes.some((change) => change.path === "feature.txt"),
 			true,
 		);
+		// The detail shows the full message, not just the row's subject line.
+		const featureDetail = await readWorkspaceGitGraphCommit(repository, feature.hash);
+		assertEquals(featureDetail?.subject, "feature work");
+		assertEquals(featureDetail?.body, "Why: the body line.\nSecond body line.");
 	} finally {
 		await rm(repository, { recursive: true });
 	}

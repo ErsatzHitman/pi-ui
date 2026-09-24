@@ -100,6 +100,12 @@ export function renderWorkspaceReview(
 			<div
 				id="review-body"
 				class="review-body"
+				data-review-tab={
+					snapshot.isGitRepository && preferences.tab !== "files"
+						? "git"
+						: "files"
+				}
+				data-attr:data-review-tab="$_workspaceReviewGitAvailable && $workspaceReviewPreferences.tab !== 'files' ? 'git' : 'files'"
 				data-style={`{
 					'--review-sidebar-width': ($workspaceReviewPreferences.reviewSidebarWidth || ${reviewSidebarWidthDefault}) + 'px',
 				}`}

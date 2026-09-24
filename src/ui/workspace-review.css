@@ -113,6 +113,15 @@
 		margin-block-end: var(--workspace-gap);
 		padding-inline: 0.25rem;
 	}
+
+	/* Grow with styles/controls.css's 44px coarse-pointer button floor instead of
+	   letting "Load more"/close hang out of a 30px bar under the graph. */
+	@media (pointer: coarse) {
+		.review-toolbar {
+			height: auto;
+			min-height: var(--review-toolbar-height);
+		}
+	}
 	.review-file-heading {
 		display: flex;
 		min-width: 0;
@@ -441,20 +450,30 @@
 		outline: 1px solid var(--lane-color, var(--text-muted));
 		outline-offset: -1px;
 	}
+
+	/* Fixed-width trailing columns, pushed right by the hash's auto margin only, so
+	   hash/author/time line up from row to row whatever each subject and ref set
+	   leaves free (an auto margin on all three split that space unevenly per row). */
 	.review-graph-hash,
 	.review-graph-author,
 	.review-graph-time {
 		flex-shrink: 0;
-		margin-inline-start: auto;
 		font-size: var(--text-2xs);
 	}
 	.review-graph-hash {
+		inline-size: 7ch;
+		margin-inline-start: auto;
 		font-family: var(--font-mono);
 	}
 	.review-graph-author {
 		overflow: hidden;
-		max-inline-size: 8rem;
+		inline-size: 7rem;
 		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.review-graph-time {
+		inline-size: 4.5rem;
+		text-align: end;
 		white-space: nowrap;
 	}
 	.review-graph-detail {
@@ -467,6 +486,20 @@
 		border-radius: 0 0 var(--radius-sm) var(--radius-sm);
 		background: var(--surface-raised);
 		box-shadow: var(--shadow-lg);
+	}
+
+	/* The detail shows the whole message: the subject wraps instead of truncating
+	   like a row does, and the body keeps its own line breaks. */
+	.review-graph-detail .review-detail-subject {
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+	.review-graph-body {
+		margin-block-start: 0.375rem;
+		color: var(--text-muted);
+		font-size: var(--text-2xs);
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
 	}
 	.review-graph-parents {
 		display: flex;
@@ -512,6 +545,21 @@
 		}
 		.review-graph-ref {
 			max-inline-size: 4rem;
+		}
+
+		/* The Git sidebar only carries the Files | Git switch and the change count
+		   (which the graph's own "uncommitted changes" row repeats), yet its 14rem
+		   floor left the graph about 150px at phone width. Stack it above the graph
+		   as a slim header instead, so the graph and subjects get the full width. */
+		.review-body[data-review-tab="git"] {
+			grid-template-columns: minmax(0, 1fr);
+			grid-template-rows: auto var(--workspace-gap) minmax(0, 1fr);
+		}
+		.review-body[data-review-tab="git"] > #review-sidebar-separator {
+			visibility: hidden;
+		}
+		.review-body[data-review-tab="git"] .review-changes {
+			display: none;
 		}
 	}
 
