@@ -118,6 +118,13 @@ export class UiRenderer implements AppStorePresentation {
 		signal: AbortSignal,
 		clientId: string = crypto.randomUUID(),
 		onDisconnect?: () => void,
+		/**
+		 * The reconnecting client's `Last-Event-ID` (round RM2 sse-resume), threaded
+		 * straight through to `DatastarClientHub.createStream` — see its doc comment on
+		 * `DatastarClientStreamOptions.lastEventId` for how it decides between a resume
+		 * replay and this method's own `initial()` full-render callback below.
+		 */
+		lastEventId?: string | null,
 	): Response {
 		this.flush();
 		this.displayClients.connect(clientId);
@@ -125,18 +132,26 @@ export class UiRenderer implements AppStorePresentation {
 		const disconnect = () => {
 			this.displayClients.disconnect(clientId);
 			this.messages.setDisplayRefreshHz(this.displayClients.targetHz);
-			// So a closed tab's reported color scheme can't keep overriding a still-open
-			// tab's (round-4 O4) — see `AppStore.clearClientColorScheme`.
-			this.store.clearClientColorScheme(clientId);
-			// Same reasoning for the viewport hint a freshly mounted terminal surface is
-			// seeded from (Round 6 F2) — see `AppStore.clearClientViewportCells`.
-			this.store.clearClientViewportCells(clientId);
-			// R7-B item 1: same reasoning for a closed tab's own reported terminal-surface
-			// sizes (`TerminalSurfaceController.forgetClient`). That lives on whichever
-			// `RuntimeController` is current at disconnect time, not on this long-lived
-			// renderer/store, so the caller (`stream.ts`, which still has `context.resources`)
-			// passes it in rather than this class reaching for a "current host" of its own.
-			onDisconnect?.();
+			// A stale stream the hub closed because the SAME tab reconnected (RM1
+			// multi-client dedupe) is not the tab going away: its per-client reports
+			// below still describe the live connection, which — when resumed rather
+			// than fully re-rendered (RM2 sse-resume) — never re-runs the mount
+			// scripts that would report them again. Forget them only once the tab's
+			// last connection closes.
+			if (!this.displayClients.has(clientId)) {
+				// So a closed tab's reported color scheme can't keep overriding a still-open
+				// tab's (round-4 O4) — see `AppStore.clearClientColorScheme`.
+				this.store.clearClientColorScheme(clientId);
+				// Same reasoning for the viewport hint a freshly mounted terminal surface is
+				// seeded from (Round 6 F2) — see `AppStore.clearClientViewportCells`.
+				this.store.clearClientViewportCells(clientId);
+				// R7-B item 1: same reasoning for a closed tab's own reported terminal-surface
+				// sizes (`TerminalSurfaceController.forgetClient`). That lives on whichever
+				// `RuntimeController` is current at disconnect time, not on this long-lived
+				// renderer/store, so the caller (`stream.ts`, which still has `context.resources`)
+				// passes it in rather than this class reaching for a "current host" of its own.
+				onDisconnect?.();
+			}
 			if (this.hub.clientCount === 0) {
 				this.pendingEnhancements.clear();
 				this.messages.transcriptReplacing();
@@ -167,7 +182,7 @@ export class UiRenderer implements AppStorePresentation {
 					}
 					return view;
 				},
-				{ onDisconnect: disconnect, clientId },
+				{ onDisconnect: disconnect, clientId, lastEventId },
 			);
 		} catch (error) {
 			disconnect();

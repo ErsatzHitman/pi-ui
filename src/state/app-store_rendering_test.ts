@@ -708,6 +708,36 @@ test("headless updates initialize one current view and tolerate disconnect", asy
 	}
 });
 
+test("a client whose connection blips resumes without a full render while another tab stays connected", async () => {
+	const state = createState();
+	// A second, still-connected client keeps the resume window alive across `a`'s drop —
+	// see `DatastarClientHub`'s `epochId` doc comment.
+	connect(state);
+
+	const aController = new AbortController();
+	connections.push(aController);
+	const aReader = responseReader(state.createStream(aController.signal));
+	await readUntil(aReader, (text) => text.includes("event: datastar-patch-signals"));
+
+	state.replaceMessages([markdownMessage("**live update**")]);
+	const liveOutput = await readUntil(aReader, (text) => text.includes("live update"));
+	const lastEventId = extractLastEventId(liveOutput);
+	aController.abort();
+
+	state.replaceMessages([markdownMessage("**missed while away**")]);
+
+	const reconnectController = new AbortController();
+	connections.push(reconnectController);
+	const reconnectOutput = await readUntil(
+		responseReader(
+			state.createStream(reconnectController.signal, undefined, lastEventId),
+		),
+		(text) => text.includes("missed while away"),
+	);
+	assertNotIncludes(reconnectOutput, "live update");
+	assertEqual(count(reconnectOutput, "event: datastar-patch-elements"), 1);
+});
+
 test("message work waits for a client and continues while another tab remains", async () => {
 	const rendered: string[] = [];
 	const render = async (text: string) => {
@@ -1377,9 +1407,31 @@ test("a dialog answered on one client broadcasts a toast the others can filter t
 	assertIncludes(bText, "client-a");
 });
 
+test("a tab's deduped stale stream keeps that tab's per-client reports (RM2 merge)", () => {
+	const state = createState();
+	const staleController = new AbortController();
+	state.createStream(staleController.signal, "client-a");
+	state.setClientColorScheme("light", "client-a");
+
+	// The same tab reconnects: the hub closes its stale stream, but the tab is
+	// still connected, so its reported scheme must survive (a resumed stream
+	// never re-runs the mount script that would report it again).
+	const freshController = new AbortController();
+	state.createStream(freshController.signal, "client-a");
+	assertEqual(state.clientColorScheme, "light");
+
+	// Once the tab's last connection closes, it is forgotten as before.
+	freshController.abort();
+	assertEqual(state.clientColorScheme, "dark");
+});
+
 type TestStore = AppStore & {
 	readonly renderer: UiRenderer;
-	createStream(signal: AbortSignal, clientId?: string): Response;
+	createStream(
+		signal: AbortSignal,
+		clientId?: string,
+		lastEventId?: string | null,
+	): Response;
 };
 
 function createState(options: MessageRenderServiceOptions = {}): TestStore {
@@ -1387,8 +1439,11 @@ function createState(options: MessageRenderServiceOptions = {}): TestStore {
 	const renderer = new UiRenderer(store, new DatastarClientHub(), options);
 	return Object.assign(store, {
 		renderer,
-		createStream: (signal: AbortSignal, clientId?: string) =>
-			renderer.createStream(signal, clientId),
+		createStream: (
+			signal: AbortSignal,
+			clientId?: string,
+			lastEventId?: string | null,
+		) => renderer.createStream(signal, clientId, undefined, lastEventId),
 	});
 }
 
@@ -1518,4 +1573,12 @@ async function collectFinalizedPatches(state: TestStore, response: Response) {
 
 function count(value: string, search: string): number {
 	return value.split(search).length - 1;
+}
+
+/** The last SSE `id:` line seen in an accumulated chunk of raw stream text. */
+function extractLastEventId(text: string): string {
+	const matches = [...text.matchAll(/^id: (.+)\r?$/gm)];
+	const last = matches.at(-1);
+	if (!last) throw new Error("No SSE 'id:' line found in the stream output.");
+	return last[1] ?? "";
 }

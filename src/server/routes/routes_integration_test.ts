@@ -1309,6 +1309,32 @@ test("main stream binds a validated display client identity", async () => {
 	);
 });
 
+test("main stream forwards a Last-Event-ID header to the renderer for resume", async () => {
+	const clientId = "123e4567-e89b-42d3-a456-426614174000";
+	let receivedLastEventId: string | null | undefined;
+	const context = fakeContext({
+		renderer: uiRendererStub({
+			createStream: (
+				_signal: AbortSignal,
+				_clientId?: string,
+				_onDisconnect?: () => void,
+				lastEventId?: string | null,
+			) => {
+				receivedLastEventId = lastEventId;
+				return new Response();
+			},
+		}),
+	});
+	const router = createRouter(context);
+	const url = `http://localhost/stream?clientId=${clientId}&appVersion=${context.appVersion}`;
+
+	await router.fetch(new Request(url, { headers: { "Last-Event-ID": "boot-1:7" } }));
+	assertEquals(receivedLastEventId, "boot-1:7");
+
+	await router.fetch(new Request(url));
+	assertEquals(receivedLastEventId, null);
+});
+
 test("display refresh updates its connected presentation owner", async () => {
 	const clientId = "123e4567-e89b-42d3-a456-426614174000";
 	let measured: { clientId: string; hz: number } | undefined;
