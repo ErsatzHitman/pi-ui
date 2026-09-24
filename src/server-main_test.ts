@@ -8,7 +8,7 @@ import {
 } from "#testing/assertions";
 
 import { serverAutostartConfig, systemdService } from "./server-autostart.ts";
-import { buildServiceInstallAutostartConfig } from "./server-main.ts";
+import { buildServiceInstallAutostartConfig, createShutdown } from "./server-main.ts";
 
 // These tests exercise the exact function `main()`'s `pi-ui service install` branch calls
 // (`buildServiceInstallAutostartConfig`), not a hand-built `serverAutostartConfig` /
@@ -152,4 +152,26 @@ test("service install persists --insecure-no-auth so an explicitly unauthenticat
 		authToken: undefined,
 		insecureNoAuth: true,
 	});
+});
+
+test("shutdown closes open SSE streams in remote mode, so SIGTERM never waits on a connected client", async () => {
+	for (const remote of [true, false]) {
+		const calls: string[] = [];
+		const shutdown = createShutdown(
+			{
+				stop: async (closeActiveConnections?: boolean) => {
+					calls.push(`stop(${closeActiveConnections === true})`);
+				},
+			},
+			async () => {
+				calls.push("dispose");
+			},
+			remote,
+		);
+		await Promise.all([shutdown(), shutdown()]);
+		// Remote: `systemctl stop/restart` with a phone still connected used to hang for
+		// systemd's 90 s stop timeout and end in SIGKILL (disposeApp never ran). Local
+		// keeps Bun's default graceful stop.
+		assertEquals(calls, [`stop(${remote})`, "dispose"]);
+	}
 });

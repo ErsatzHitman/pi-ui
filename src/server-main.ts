@@ -151,6 +151,30 @@ export function buildServiceInstallAutostartConfig(
 	return { headless, serviceEnvironment };
 }
 
+/**
+ * SIGINT/SIGTERM handler: stop accepting connections, then dispose the app (runtimes,
+ * watchers, transfer dirs). Bun's default `server.stop()` waits for in-flight requests,
+ * and a connected client's `/stream` SSE never finishes on its own — so in remote mode,
+ * where a phone or laptop is typically still connected, `systemctl stop/restart` hung
+ * for systemd's 90 s stop timeout and ended in SIGKILL without disposing anything. Remote
+ * mode closes those connections instead (clients reconnect on their own); local mode
+ * keeps the default. Runs once however many signals arrive.
+ */
+export function createShutdown(
+	server: { stop(closeActiveConnections?: boolean): Promise<void> },
+	disposeApp: () => Promise<void>,
+	closeActiveConnections: boolean = isRemoteMode(),
+): () => Promise<void> {
+	let stopping: Promise<void> | undefined;
+	return () => {
+		stopping ??= (async () => {
+			await server.stop(closeActiveConnections);
+			await disposeApp();
+		})();
+		return stopping;
+	};
+}
+
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 
@@ -220,13 +244,7 @@ async function main(): Promise<void> {
 					? withAuthToken(fallback, options.authToken, { rateLimiter })
 					: fallback,
 			});
-			let stopping = false;
-			const stop = async () => {
-				if (stopping) return;
-				stopping = true;
-				await server.stop();
-				await disposeApp();
-			};
+			const stop = createShutdown(server, disposeApp);
 			process.once("SIGINT", () => void stop());
 			process.once("SIGTERM", () => void stop());
 			console.log(`pi-ui listening on ${server.url}`);
