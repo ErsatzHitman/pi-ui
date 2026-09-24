@@ -195,7 +195,7 @@ export function createWorkspaceGitGraph(
 		const hiddenRefs = sortedRefs.slice(maxVisibleRefs);
 		if (hiddenRefs.length > 0) {
 			const more = document.createElement("span");
-			more.className = "review-graph-ref";
+			more.className = "badge review-graph-ref";
 			more.title = hiddenRefs.map((ref) => ref.name).join(", ");
 			more.textContent = `+${hiddenRefs.length}`;
 			button.append(more);
