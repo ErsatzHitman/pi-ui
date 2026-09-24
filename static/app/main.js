@@ -47,6 +47,7 @@ import { bindTerminalSurfaces } from "./terminal-keys.js";
 import { showToast } from "./toast.js";
 import { bindTooltips } from "./tooltips.js";
 import { bindVimScroll } from "./vim-scroll.js";
+import { bindVoice, voice } from "./voice.js";
 import { windowFocus } from "./window-focus.js";
 
 const promptHistory = createPromptHistory();
@@ -95,6 +96,7 @@ window.piUi = {
 	},
 	toast: { show: showToast },
 	streamResumeHeaders: streamEventIds.resumeHeaders,
+	voice,
 	windowFocus,
 	workspaceReview: { applyOpen: () => {} },
 	liveWorkspace: { applyOpen: () => {} },
@@ -130,6 +132,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 	bindStreamReconnect();
 	bindTerminalSurfaces();
 	bindExtensionKeys();
+	bindVoice();
 	bindDebugFps();
 	const serviceWorkerReady = registerServiceWorker();
 

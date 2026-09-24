@@ -3,7 +3,7 @@ import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
 import { renderExtensionWidgets } from "./extension-widgets.tsx";
 import { Icon } from "./icon.tsx";
-import { ArrowDown, Paperclip, X } from "./icons.ts";
+import { ArrowDown, Check, Loader, Mic, Paperclip, Pause, Play, X } from "./icons.ts";
 import { ShortcutKbd, ShortcutTooltip } from "./keyboard.tsx";
 import { renderPiUiWidgets } from "./pi-ui-elements.tsx";
 import { renderSlashPicker, slashPickerOpenExpression } from "./pickers.tsx";
@@ -28,6 +28,8 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 				_slashPickerOpen: false,
 				_promptSubmitting: false,
 				fileQuery: "",
+				_voiceState: "idle",
+				_voiceBlocked: "",
 			})}
 			data-on:pointerdown__outside="window.piUi.pickers.close()"
 			data-effect="
@@ -38,6 +40,7 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 				window.piUi.pickers.sync(true);
 			"
 			data-on:pi-ui-prompt-submit-finished="$_promptSubmitting = false"
+			data-on:pi-ui-voice-state="$_voiceState = evt.detail.state; $_voiceBlocked = evt.detail.blocked ?? ''"
 		>
 			<div class="prompt-popovers">
 				{renderLatestButton()}
@@ -80,6 +83,7 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 			<div
 				class="input-group raised-surface prompt-surface"
 				data-orientation="vertical"
+				data-attr:data-voice-state="$_voiceState"
 				data-prompt-initial
 				data-init="el.removeAttribute('data-prompt-initial')"
 			>
@@ -87,6 +91,39 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 				{renderPiUiWidgets(state)}
 				{renderTerminalSurfacePersistent(state, "aboveEditor")}
 				<div class="prompt-editor-row">
+					<div
+						id="prompt-voice-panel"
+						class="prompt-voice-panel"
+						data-ignore-morph
+						hidden
+					>
+						<span class="prompt-voice-dot" aria-hidden="true" />
+						<span
+							id="prompt-voice-timer"
+							class="prompt-voice-timer"
+							role="timer"
+						>
+							0:00
+						</span>
+						<canvas
+							id="prompt-voice-wave"
+							class="prompt-voice-wave"
+							aria-hidden="true"
+						/>
+						<div class="prompt-voice-label">
+							<Icon
+								icon={Loader}
+								class="icon-spin prompt-voice-label-spinner"
+							/>
+							<span class="prompt-voice-label-text" />
+						</div>
+						<div
+							id="prompt-voice-status"
+							class="sr-only"
+							role="status"
+							aria-live="polite"
+						/>
+					</div>
 					<textarea
 						id="prompt-input"
 						class="prompt-input"
@@ -241,6 +278,69 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 						>
 							<Icon icon={Paperclip} />
 							<ShortcutTooltip label="Files" shortcut="@" />
+						</button>
+						<button
+							id="prompt-voice-button"
+							type="button"
+							class="btn prompt-voice-button"
+							data-variant="ghost"
+							data-size="icon"
+							data-attr:data-voice-blocked="$_voiceBlocked"
+							data-attr:aria-disabled="$_voiceBlocked ? 'true' : 'false'"
+							data-on:click="window.piUi.voice.toggle()"
+							data-tooltip="Voice input"
+							data-tooltip-delay
+							data-align="center"
+							aria-label="Voice input"
+						>
+							<Icon icon={Mic} />
+							<ShortcutTooltip label="Voice input" shortcut="alt V" />
+						</button>
+						<button
+							id="prompt-voice-cancel"
+							type="button"
+							class="btn prompt-voice-control"
+							data-variant="ghost"
+							data-size="icon"
+							data-on:click="window.piUi.voice.cancel()"
+							data-tooltip="Cancel"
+							data-tooltip-delay
+							data-align="center"
+							aria-label="Cancel recording"
+						>
+							<Icon icon={X} />
+							<ShortcutTooltip label="Cancel" shortcut="Esc" />
+						</button>
+						<button
+							id="prompt-voice-pause"
+							type="button"
+							class="btn prompt-voice-control"
+							data-variant="ghost"
+							data-size="icon"
+							data-on:click="window.piUi.voice.togglePause()"
+							data-tooltip="Pause"
+							data-tooltip-delay
+							data-align="center"
+							data-attr:aria-label="$_voiceState === 'paused' ? 'Resume recording' : 'Pause recording'"
+							aria-label="Pause recording"
+						>
+							<Icon icon={Pause} class="prompt-voice-pause-icon" />
+							<Icon icon={Play} class="prompt-voice-resume-icon" />
+						</button>
+						<button
+							id="prompt-voice-done"
+							type="button"
+							class="btn prompt-voice-control"
+							data-size="icon"
+							data-attr:disabled="$_voiceState === 'arming'"
+							data-on:click="window.piUi.voice.complete()"
+							data-tooltip="Done"
+							data-tooltip-delay
+							data-align="center"
+							aria-label="Finish and transcribe"
+						>
+							<Icon icon={Check} />
+							<ShortcutTooltip label="Done" shortcut="Enter" />
 						</button>
 						{renderPromptAction(state)}
 					</div>
