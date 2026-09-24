@@ -19,6 +19,7 @@
 @import "./markdown.css";
 @import "./diffs.css";
 @import "./messages.css";
+@import "./extension-activity.css";
 @import "./session-sidebar.css";
 @import "./prompt-box.css";
 @import "./toolbar.css";

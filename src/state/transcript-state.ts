@@ -1,3 +1,5 @@
+import type { ExtensionActivityView, ExtensionRef } from "../extension-activity-types.ts";
+
 export type TranscriptMessageRole =
 	| "user"
 	| "assistant"
@@ -8,7 +10,8 @@ export type TranscriptMessageRole =
 	| "compaction"
 	| "summary"
 	| "skill"
-	| "custom";
+	| "custom"
+	| "extension-activity";
 
 export type TranscriptMessageTitlePart = {
 	text: string;
@@ -67,6 +70,20 @@ export type TranscriptMessage = {
 	 * text/markdown fallback to fall back to.
 	 */
 	customRenderError?: string;
+	/**
+	 * `role: "tool"` — the tool call this message resolves, so an extension's
+	 * activity (see `activities` below) can be anchored to it as a step.
+	 */
+	toolCallId?: string;
+	/**
+	 * Durable `pi-ui.extension-activity` lifecycle records: for
+	 * `role: "extension-activity"` exactly one standalone card; for
+	 * `role: "tool"`, zero or more steps folded into that tool's card
+	 * (§2.4/§4.2 of DESIGN-ext-activity.md). Never LLM context.
+	 */
+	activities?: readonly ExtensionActivityView[];
+	/** The extension that owns a `role: "tool"` message's tool, for the card's label/dot. */
+	extension?: ExtensionRef;
 };
 
 export type TranscriptMessageOptions = Pick<
@@ -81,6 +98,9 @@ export type TranscriptMessageOptions = Pick<
 	| "details"
 	| "customRenderHtml"
 	| "customRenderError"
+	| "toolCallId"
+	| "activities"
+	| "extension"
 >;
 
 export type TranscriptMessageInput = Omit<TranscriptMessage, "id">;

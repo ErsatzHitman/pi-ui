@@ -33,6 +33,13 @@
 		--border: oklch(90.33% 0 none);
 		--focus-ring: var(--gray-4);
 		--selection: var(--gray-2);
+
+		/* Extension-activity "working" state (DESIGN-ext-activity.md §4.3) — the one
+		color every "an extension/sub-agent is working right now" surface uses:
+		activity cards, prompt chips, extension-owned running tool dots, and the
+		Live Workspace Agents tab / sub-agent roster running rows. */
+		--status-active: oklch(from var(--color-9) l c var(--hue-pink));
+		--status-active-surface: oklch(from var(--status-active) l c h / 8%);
 		--status-danger: var(--status-error);
 		--status-error: oklch(from var(--color-9) l c var(--hue-red));
 		--status-warning: oklch(from var(--color-9) l c var(--hue-orange));
@@ -86,6 +93,8 @@
 		--border: var(--gray-13);
 		--focus-ring: var(--gray-6);
 		--selection: var(--gray-12);
+		--status-active: oklch(from var(--color-4) l c var(--hue-pink));
+		--status-active-surface: oklch(from var(--status-active) l c h / 14%);
 		--status-error: oklch(from var(--color-3) l c var(--hue-red));
 		--status-warning: oklch(from var(--color-3) l c var(--hue-yellow));
 		--status-success: oklch(from var(--color-4) l c var(--hue-teal));
