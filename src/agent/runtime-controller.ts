@@ -30,7 +30,10 @@ import type {
 	ExtensionActivityChip,
 } from "../extension-activity-types.ts";
 import { resolveExtensionRef } from "../extension-activity/identity.ts";
-import { instrumentExtensions } from "../extension-activity/instrument.ts";
+import {
+	identifyMessageOwner,
+	instrumentExtensions,
+} from "../extension-activity/instrument.ts";
 import type { LedgerChange } from "../extension-activity/ledger.ts";
 import {
 	encodeActivityEntry,
@@ -135,6 +138,7 @@ import {
 import { defaultTerminalColumns } from "./terminal-surface/headless-terminal.ts";
 import { resolveTranscriptTheme } from "./terminal-surface/theme.ts";
 import {
+	contentToText,
 	formatToolResult,
 	formatToolStart,
 	toolEndMeta,
@@ -150,6 +154,13 @@ import { type TreeNavigationResult, TreeProjector } from "./tree-projector.ts";
 import { UsageController } from "./usage-controller.ts";
 
 const extensionFactories = [llamaProviderExtension];
+
+/** A live `custom` `AgentMessage` from a `message_start` event — same
+ * narrowing `transcript-projector.ts`'s own `CustomAgentMessage` uses. */
+type CustomAgentMessage = Extract<
+	Extract<AgentSessionEvent, { type: "message_start" }>["message"],
+	{ role: "custom" }
+>;
 
 /**
  * Which Live Workspace host-extension instance was loaded into which session. Each runtime
@@ -2146,6 +2157,33 @@ export class RuntimeController {
 	}
 
 	/**
+	 * `message_start` tap for a live `pi.sendMessage`/custom `AgentMessage`
+	 * (§2.2.6): resolves which loaded extension owns `customType` and, when
+	 * one does, attaches its text to that extension's open-or-recent activity
+	 * — including a `display:false` one, which otherwise leaves no visible
+	 * trace anywhere else in the transcript. A message no extension owns is
+	 * left alone (renders exactly as it does today, unattached).
+	 */
+	private observeCustomMessageActivity(message: CustomAgentMessage): void {
+		const tracker = extensionActivityTrackers.get(this.runtime.session);
+		if (!tracker) return;
+		const extensions =
+			this.runtime.services.resourceLoader.getExtensions().extensions;
+		const owner = identifyMessageOwner(
+			extensions,
+			message.customType,
+			resolveExtensionRef,
+		);
+		if (!owner) return;
+		tracker.observeCustomMessage(
+			owner,
+			contentToText(message.content),
+			message.display === false,
+			Date.now(),
+		);
+	}
+
+	/**
 	 * Publishes the LiveWorkspaceController snapshot into AppStore. Raw session events are
 	 * high-frequency (tool output deltas, queue updates), so ordinary publishes coalesce
 	 * through a dedicated low-rate frame scheduler; lifecycle boundaries pass `immediate`.
@@ -2399,6 +2437,9 @@ export class RuntimeController {
 			extensionActivityTrackers
 				.get(this.runtime.session)
 				?.setRunActive(event.type === "agent_start", Date.now());
+		}
+		if (event.type === "message_start" && event.message.role === "custom") {
+			this.observeCustomMessageActivity(event.message);
 		}
 		this.state.update(
 			() => {
