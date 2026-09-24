@@ -333,6 +333,108 @@ test("model picker distinguishes missing auth from an unselected model", () => {
 	assertStringIncludes(withoutSelection, "Claude Sonnet");
 });
 
+test("model picker refreshes keyboard state when it opens, not when it closes", () => {
+	// Regression: the popover used to reset `.active`/aria-activedescendant only on
+	// `evt.newState === 'closed'`, so a freshly-opened picker had no active row and a
+	// bare Enter (before ever pressing an arrow key) silently did nothing — the user had
+	// to reach for the mouse. `/model` with no argument (and Enter on the slash picker's
+	// `/model` row) must let arrow keys + Enter select immediately on open.
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "claude-sonnet",
+					provider: "anthropic",
+					name: "Claude Sonnet",
+					configured: true,
+					scoped: false,
+				},
+			],
+			currentModel: "anthropic/claude-sonnet",
+		}),
+	);
+	assertStringIncludes(html, "evt.newState === 'open'");
+	assertStringIncludes(html, "window.piUi.modelPicker.reset(el)");
+	assertFalse(html.includes("evt.newState === 'closed'"));
+});
+
+test("model picker is a dual-pane provider -> model picker", () => {
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "claude-sonnet",
+					provider: "anthropic",
+					name: "Claude Sonnet",
+					configured: true,
+					scoped: false,
+				},
+				{
+					id: "claude-haiku",
+					provider: "anthropic",
+					name: "Claude Haiku",
+					configured: true,
+					scoped: false,
+				},
+				{
+					id: "gpt-5.6",
+					provider: "openai-codex",
+					name: "GPT 5.6",
+					configured: false,
+					scoped: false,
+				},
+			],
+			currentModel: "anthropic/claude-sonnet",
+		}),
+	);
+
+	// Provider pane: one row per provider, with a model count and current-provider marker.
+	assertStringIncludes(html, 'id="model-provider-menu"');
+	assertStringIncludes(html, 'aria-label="Providers"');
+	assertStringIncludes(html, 'id="model-provider-anthropic"');
+	assertStringIncludes(html, 'id="model-provider-openai-codex"');
+	assertStringIncludes(html, 'data-provider="anthropic"');
+	assertStringIncludes(html, 'aria-current="true"');
+	assertStringIncludes(html, "2 models");
+	assertStringIncludes(html, "1 model");
+	assertStringIncludes(html, "no auth");
+
+	// Model pane: grouped by provider, one group per provider.
+	assertStringIncludes(html, 'id="model-select-menu"');
+	assertStringIncludes(html, 'data-provider-group="anthropic"');
+	assertStringIncludes(html, 'data-provider-group="openai-codex"');
+	assertStringIncludes(html, "Claude Sonnet");
+	assertStringIncludes(html, "Claude Haiku");
+	assertStringIncludes(html, "GPT 5.6");
+
+	// The current model is pre-selected: its provider is the initial active provider/pane.
+	assertStringIncludes(html, 'data-active-provider="anthropic"');
+	assertStringIncludes(html, 'data-active-pane="models"');
+	assertStringIncludes(html, 'data-multi-pane="true"');
+
+	// Mobile drill-down needs a way back to the provider list.
+	assertStringIncludes(html, "data-pane-back");
+});
+
+test("model picker falls back to the providers pane with no model selected yet", () => {
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "claude-sonnet",
+					provider: "anthropic",
+					name: "Claude Sonnet",
+					configured: true,
+					scoped: false,
+				},
+			],
+			currentModel: undefined,
+		}),
+	);
+	assertStringIncludes(html, 'data-active-pane="providers"');
+	assertStringIncludes(html, 'data-active-provider="anthropic"');
+});
+
 test("model picker shows only the final model name in its trigger", () => {
 	const html = renderModelPicker(
 		appRenderSnapshot({
