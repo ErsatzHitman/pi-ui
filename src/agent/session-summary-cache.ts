@@ -10,7 +10,7 @@ import {
 	attachmentDisplayName,
 	splitLeadingAttachmentReferences,
 } from "../utils/attachment-references.ts";
-import { isNotFound } from "../utils/fs-errors.ts";
+import { isBusy, isNotFound, isPermissionDenied } from "../utils/fs-errors.ts";
 import type { JsonValue } from "../utils/json-types.ts";
 import { operatingSystem } from "../utils/platform.ts";
 import { isNumber, isRecord, isString } from "../utils/type-guards.ts";
@@ -76,6 +76,26 @@ export async function readSessionSummaryCache(
 	}
 }
 
+/**
+ * Windows refuses to rename over a file another handle has open, with EPERM or EACCES
+ * (EBUSY on some filesystems). Reads of the cache are not serialized with its writes
+ * (`SessionCatalog` reads it before each path refresh), so an in-process read can briefly
+ * hold the target open while a write lands. Retry the rename a few times, as graceful-fs
+ * does, before giving up.
+ */
+async function renameReplacing(from: string, to: string): Promise<void> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			await rename(from, to);
+			return;
+		} catch (error) {
+			const retryable = isPermissionDenied(error) || isBusy(error);
+			if (!retryable || attempt >= 5) throw error;
+			await Bun.sleep(10 * 2 ** attempt);
+		}
+	}
+}
+
 async function writeSessionSummaryCache(
 	cache: SessionSummaryCache,
 	path = sessionSummaryCachePath(),
@@ -84,7 +104,7 @@ async function writeSessionSummaryCache(
 	const temporaryPath = `${path}.${crypto.randomUUID()}.tmp`;
 	try {
 		await Bun.write(temporaryPath, `${JSON.stringify(cache, null, "\t")}\n`);
-		await rename(temporaryPath, path);
+		await renameReplacing(temporaryPath, path);
 	} catch (error) {
 		await rm(temporaryPath).catch(() => undefined);
 		throw error;
