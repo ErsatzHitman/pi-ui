@@ -266,20 +266,6 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 							<ShortcutKbd shortcut={activeKeybind("focus-prompt")} />
 						</div>
 						<button
-							type="button"
-							class="btn prompt-file-button"
-							data-variant="ghost"
-							data-size="icon"
-							data-on:click="window.piUi.fileTransfer.pick()"
-							data-tooltip="Files"
-							data-tooltip-delay
-							data-align="center"
-							aria-label="Files"
-						>
-							<Icon icon={Paperclip} />
-							<ShortcutTooltip label="Files" shortcut="@" />
-						</button>
-						<button
 							id="prompt-voice-button"
 							type="button"
 							class="btn prompt-voice-button"
@@ -303,6 +289,20 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 								label="Voice input"
 								shortcut={activeKeybind("voice-input")}
 							/>
+						</button>
+						<button
+							type="button"
+							class="btn prompt-file-button"
+							data-variant="ghost"
+							data-size="icon"
+							data-on:click="window.piUi.fileTransfer.pick()"
+							data-tooltip="Files"
+							data-tooltip-delay
+							data-align="center"
+							aria-label="Files"
+						>
+							<Icon icon={Paperclip} />
+							<ShortcutTooltip label="Files" shortcut="@" />
 						</button>
 						<button
 							id="prompt-voice-cancel"

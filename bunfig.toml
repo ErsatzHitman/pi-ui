@@ -1,2 +1,5 @@
 [test]
 preload = ["./scripts/test-env.ts"]
+# Many tests spawn real git / pi processes; under full-suite parallel load a few
+# of them intermittently crossed Bun's 5s default without anything being wrong.
+timeout = 30000
