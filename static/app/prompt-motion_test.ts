@@ -4,7 +4,9 @@ import { assertEquals } from "#testing/assertions";
 
 import {
 	freshIds,
+	holdsForRebuild,
 	planQueueExits,
+	rebuildComplete,
 	queueTextKey,
 	settleQueueFrame,
 } from "./prompt-motion.js";
@@ -193,4 +195,48 @@ test("a new id in the settled frame is fresh; a pressed id with no same-text rem
 	);
 	assertEquals(frame.fresh, ["b-0"]);
 	assertEquals(frame.kept, []);
+});
+
+test("a pressed item's ghost leaves from its dim; every other exit starts from full opacity", () => {
+	const plan = planQueueExits(
+		[removedItem("pressed-0", "down"), removedItem("delivered-0")],
+		new Set<string>(),
+		new Map([
+			["pressed-0", offset],
+			["delivered-0", offset],
+		]),
+	);
+	assertEquals(
+		plan.map((exit) => [exit.node.id, exit.fromOpacity]),
+		[
+			["pressed-0", 0.5],
+			["delivered-0", 1],
+		],
+	);
+});
+
+test("an emptied list is held for the rebuild only while it still has survivors", () => {
+	// ✕ on alpha: the server clears the queue and re-queues bravo and charlie.
+	assertEquals(
+		holdsForRebuild(["alpha-0", "bravo-0", "charlie-0"], new Set(["alpha-0"])),
+		true,
+	);
+	// ✕ on the last item: a real removal, it just leaves.
+	assertEquals(holdsForRebuild(["alpha-0"], new Set(["alpha-0"])), false);
+	// Every item pressed: nothing survives the rebuild.
+	assertEquals(holdsForRebuild(["a-0", "b-0"], new Set(["a-0", "b-0"])), false);
+	// No ✕ in flight (steers delivered, Restore all): the list leaves as usual.
+	assertEquals(holdsForRebuild(["a-0", "b-0"], new Set<string>()), false);
+});
+
+test("the rebuild's refill is complete only once every survivor is back", () => {
+	const survivors = ["bravo-0", "charlie-0"];
+	// The server re-queues one survivor per patch: the first patch is not the end.
+	assertEquals(rebuildComplete(survivors, new Set(["bravo-0"])), false);
+	assertEquals(rebuildComplete(survivors, new Set(["bravo-0", "charlie-0"])), true);
+	// The pressed item coming back (a failed removal) does not hold the cover open.
+	assertEquals(
+		rebuildComplete(survivors, new Set(["alpha-0", "bravo-0", "charlie-0"])),
+		true,
+	);
 });

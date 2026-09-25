@@ -51,7 +51,7 @@ test("a closed auth dialog keeps its content while it fades out", () => {
 	// ...and the /auth/close patch carries the marker too, so Datastar skips that morph.
 	assertStringIncludes(
 		renderAuthDialogContent(undefined),
-		'<div id="auth-dialog-content" class="dialog-wide" data-ignore-morph>',
+		'<div id="auth-dialog-content" class="dialog-wide" data-ignore-morph data-init=',
 	);
 	// A real phase has no marker, so the next open's patch replaces the stale content.
 	assertEquals(
@@ -77,4 +77,35 @@ test("an auth error fades in, and Continue dims while its request is in flight",
 	assertStringIncludes(html, "data-indicator:_auth-submitting");
 	assertStringIncludes(html, 'data-attr:disabled="$_authSubmitting"');
 	assertEquals(html.includes("Continue"), true);
+});
+
+test("the auth panel eases between phase heights instead of snapping", () => {
+	for (const html of [
+		renderAuthDialogContent(undefined),
+		renderAuthDialogContent(dialog({})),
+		renderAuthDialogContent(dialog({ phase: "result", status: "Done" })),
+	]) {
+		// Installed once on the panel itself, whatever phase it renders.
+		assertStringIncludes(html, "if (el.piUiPanelResize) return;");
+		// Each patch tweens from the settled (or in-flight) height to the new one...
+		assertStringIncludes(
+			html,
+			"const from = tweening() ? el.offsetHeight : settled;",
+		);
+		assertStringIncludes(
+			html,
+			"[{ height: from + 'px', overflow: 'clip' }, { height: to + 'px', overflow: 'clip' }]",
+		);
+		assertStringIncludes(
+			html,
+			"{ duration: 160, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' }",
+		);
+		// ...only inside an open dialog that is not running its own entry/exit, and never
+		// under reduced motion.
+		assertStringIncludes(
+			html,
+			"if (!d?.open || d.getAnimations().length || Math.abs(to - from) < 1) return;",
+		);
+		assertStringIncludes(html, "prefers-reduced-motion: reduce");
+	}
 });

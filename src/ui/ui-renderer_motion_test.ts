@@ -59,8 +59,9 @@ async function settle(): Promise<void> {
 
 const quietHoldScript = "window.piUi.messageScroll.quietTranscript({ hold: true })";
 
+/** `data-enter` attributes only (not the loading binding's `'data-enter'` gate). */
 function dataEnterCount(html: string): number {
-	return html.split("data-enter").length - 1;
+	return html.match(/\sdata-enter(?=[\s>=])/g)?.length ?? 0;
 }
 
 function pendingAppends(calls: readonly HubCall[]): number {
@@ -306,8 +307,12 @@ test("a session replace keeps data-enter on follow-up morphs until the session h
 	const replace = hub.take().find((call) => call.kind === "replaceElement");
 	assert(replace?.kind === "replaceElement", "replaced");
 	assertEquals(dataEnterCount(replace.elements), 1);
+	// Never dimmed while it enters: its loading binding is gated on its own marker, so it
+	// dims again only once it is the outgoing node (PN3-2).
 	assert(
-		!replace.elements.includes("data-class:messages-loading"),
+		/data-class:messages-loading="[^"]*&& !el\.hasAttribute\('data-enter'\)"/.test(
+			replace.elements,
+		),
 		"never born with the loading dim",
 	);
 	const transcriptMorph = () =>
@@ -327,7 +332,7 @@ test("a session replace keeps data-enter on follow-up morphs until the session h
 	await settle();
 	const loaded = transcriptMorph();
 	assert(loaded?.kind === "patchView", "a sessions morph once loaded");
-	assert(!loaded.elements.includes("data-enter"), "the marker is released");
+	assertEquals(dataEnterCount(loaded.elements), 0, "the marker is released");
 	assert(
 		loaded.elements.includes("data-class:messages-loading"),
 		"the dim is bound again",

@@ -427,6 +427,11 @@ function renderAttachments() {
 		renderAttachment,
 	);
 	attachmentNodes = nodes;
+	// The tray's height before this change: 0 while hidden, mid-tween wherever it is. A
+	// change that leaves chips (first chip, a chip wrapping to a new row, a chip added while
+	// the tray folds away) eases to the new height; the last removal folds in exitAttachment.
+	const trayBefore = tray.hidden ? 0 : tray.offsetHeight;
+	const keepsChips = attachments.length > 0;
 	for (const [attachment, node] of removed) {
 		if (instantRemovals.has(attachment) || !node.isConnected) {
 			node.remove();
@@ -435,7 +440,13 @@ function renderAttachments() {
 	}
 	// New chips, plus kept chips whose tray was re-rendered, go to the end in order.
 	for (const node of nodes.values()) if (node.parentElement !== tray) tray.append(node);
+	if (keepsChips) {
+		trayCollapse?.cancel();
+		trayCollapse = undefined;
+	}
 	syncTrayHidden(tray);
+	if (keepsChips && removed.length === 0)
+		resizeTray(tray, trayBefore, tray.offsetHeight);
 	const send = document.querySelector("[data-send-trigger]");
 	if (send instanceof HTMLButtonElement)
 		send.disabled = !canSubmit(promptInput()?.value ?? "");
@@ -458,10 +469,13 @@ export function exitAttachment(tray, node, attachment) {
 	const hadFocus = node.contains(document.activeElement);
 	node.inert = true;
 	node.setAttribute("aria-hidden", "true");
+	const last = !tray.querySelector(".prompt-attachment:not([data-exiting])");
 	if (hadFocus)
 		(
 			tray.querySelector(".prompt-attachment:not([data-exiting])") ?? promptInput()
 		)?.focus({ preventScroll: true });
+	// The last chip: the tray folds away while the chip fades, not after it.
+	if (last && attachments.length === 0) collapseTray(tray);
 	const done = () => {
 		const before = survivorRects(tray);
 		node.remove();
@@ -506,11 +520,59 @@ function glideSurvivors(before) {
 	}
 }
 
-/** The tray stays shown while its last chip fades out. */
+/** The tray stays shown while its last chip fades out and while it folds away. */
 function syncTrayHidden(tray) {
 	tray.hidden =
 		attachments.length === 0 &&
+		trayCollapse === undefined &&
 		!tray.querySelector(".prompt-attachment[data-exiting]");
+}
+
+// The running fold of an emptied tray, until it ends (or a new chip reopens the tray).
+let trayCollapse;
+let trayResize;
+
+/**
+ * Pure: keyframes that ease the attachment tray between two heights (flow-critique S2). The
+ * composer is bottom-anchored, so the tray's first chip or its last removal moves the
+ * composer's top edge (and the queue above it) by the whole row: this bridges that edge
+ * instead of jumping it in one frame. The margin under the row folds with it. `overflow:
+ * clip` holds for the whole tween, so the chip is revealed or tucked away by the edge.
+ */
+export function trayResizeKeyframes(from, to, margin) {
+	const box = (height) => ({
+		height: `${height}px`,
+		marginBottom: height === 0 ? "0px" : margin,
+		overflow: "clip",
+	});
+	return [box(from), box(to)];
+}
+
+/** Tweens the tray from `from` to `to` px (160ms). Reduced motion: the height steps. */
+function resizeTray(tray, from, to) {
+	trayResize?.cancel();
+	trayResize = undefined;
+	if (reducedMotion() || Math.abs(to - from) < 1) return undefined;
+	const margin = getComputedStyle(tray).marginBottom;
+	trayResize = tray.animate(trayResizeKeyframes(from, to, margin), {
+		duration: duration.md,
+		easing: easing.out,
+	});
+	return trayResize;
+}
+
+/** Folds the emptied tray to 0 alongside its last chip's exit, then hides it. */
+export function collapseTray(tray) {
+	const animation = resizeTray(tray, tray.offsetHeight, 0);
+	if (!animation) return;
+	trayCollapse = animation;
+	const done = () => {
+		if (trayCollapse !== animation) return;
+		trayCollapse = undefined;
+		syncTrayHidden(tray);
+	};
+	// Settles in the frame the fold ends (before it paints), so the tray never springs back.
+	animation.finished.then(done, done);
 }
 
 function revokePreview(attachment) {

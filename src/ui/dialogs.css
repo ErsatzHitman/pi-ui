@@ -51,6 +51,13 @@
 		font: var(--text-xs)/1.25 var(--font-mono);
 	}
 
+	/* While the auth panel eases to a shorter phase (auth-dialog.tsx AUTH_PANEL_RESIZE) the
+	   footer rides its bottom edge instead of floating over an empty band; at rest the panel
+	   fits its content, so the auto margin is 0. */
+	#auth-dialog-content > footer {
+		margin-block-start: auto;
+	}
+
 	.dialog-flow {
 		display: grid;
 		gap: 1rem;

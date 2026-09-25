@@ -7,7 +7,9 @@ import {
 	bindMessageResize,
 	blockRevealTargets,
 	chaseStep,
+	enterFrom,
 	followBottom,
+	frameClampedStart,
 	hasPointerDragIntent,
 	holdFollow,
 	holdSpacerForSend,
@@ -408,13 +410,15 @@ test("jump to latest lands a screen above, then tweens to the live bottom in 250
 	assertEquals(messages.scrollTop, 4600);
 	frames.frame(0);
 	assertEquals(messages.scrollTop, 4600);
-	frames.frame(100);
+	for (let now = 1000 / 60; now < 100; now += 1000 / 60) frames.frame(now);
 	assert(messages.scrollTop > 4600 && messages.scrollTop < 5000, "tweening");
 	// Streaming grows the transcript mid-jump; the pinned follow must not take over.
 	messages.scrollHeight = 5500;
 	followBottom(messages);
 	const during = messages.scrollTop;
 	assert(during < 5100, "the jump keeps scrollTop");
+	// It lands on the live bottom at 250ms.
+	for (let now = 100; now <= 250; now += 1000 / 60) frames.frame(now);
 	frames.frame(250);
 	assertEquals(messages.scrollTop, 5100);
 });
@@ -521,15 +525,22 @@ async function quietReleased(): Promise<void> {
 /** The module keeps one ResizeObserver for its lifetime: its callback, once created. */
 let resizeCallback: (entries: unknown[]) => void = () => {};
 
-/** A stub transcript: #messages, its stack, the composer, and a ResizeObserver hook. */
-function transcriptStubs() {
+/** The module keeps one #message-list MutationObserver: its callback, once created. */
+let listMutated: (records: unknown[]) => void = () => {};
+
+/** A stub transcript: #messages, its stack, the composer, and a ResizeObserver hook.
+ * `enter`: #messages is a session replace's incoming node (`data-enter`). */
+function transcriptStubs({ enter = false, scrollTop = 1400, promptHeight = 144 } = {}) {
 	const attributes = new Set<string>();
-	const messages = Object.assign(new ClampedScroller(2000, 600, 1400), {
+	const messages = Object.assign(new ClampedScroller(2000, 600, scrollTop), {
 		classList: { contains: () => false },
-		hasAttribute: () => false,
+		hasAttribute: (name: string) => enter && name === "data-enter",
 	});
+	const list = new ClampedScroller(0, 0, 0);
 	const stack = new ClampedScroller(0, 0, 0);
-	const prompt = Object.assign(new ClampedScroller(0, 0, 0), { offsetHeight: 144 });
+	const prompt = Object.assign(new ClampedScroller(0, 0, 0), {
+		offsetHeight: promptHeight,
+	});
 	let spacerHeight = 306;
 	const spacer = {
 		offsetTop: 1000,
@@ -548,6 +559,7 @@ function transcriptStubs() {
 	Object.setPrototypeOf(spacer, ClampedScroller.prototype);
 	const nodes = new Map<string, unknown>([
 		["messages", messages],
+		["message-list", list],
 		["prompt-box", prompt],
 		["messages-prompt-spacer", spacer],
 	]);
@@ -566,7 +578,10 @@ function transcriptStubs() {
 	install(
 		"MutationObserver",
 		class {
-			observe() {}
+			constructor(readonly callback: (records: unknown[]) => void) {}
+			observe(target: unknown) {
+				if (target === list) listMutated = this.callback;
+			}
 			disconnect() {}
 		},
 	);
@@ -583,6 +598,7 @@ function transcriptStubs() {
 	bindMessageResize();
 	return {
 		messages,
+		list,
 		spacer,
 		resize: (width: number) =>
 			resizeCallback([{ target: stack, contentRect: { width } }]),
@@ -698,5 +714,94 @@ test("an accordion moving under a live send hold never eats the held space", asy
 	settle();
 	await Promise.resolve();
 	for (const now of [33, 50, 66]) frames.frame(now);
+	scrollBottom("instant");
+});
+
+test("a tween's clock advances at most a nominal frame, whatever the timestamps", () => {
+	// First frame: the clock starts.
+	assertEquals(frameClampedStart(undefined, undefined, 500), 500);
+	// A 17ms frame: unchanged.
+	assertEquals(frameClampedStart(500, 1000, 1017), 500);
+	// A 250ms gap advances only 1000/30 ms: the start moves up by the rest.
+	assertEquals(frameClampedStart(500, 1000, 1250), 500 + 250 - 1000 / 30);
+	// A stale (earlier) timestamp never moves it back.
+	assertEquals(frameClampedStart(500, 1000, 990), 500);
+});
+
+test("an appended message's glide never completes in one late frame", () => {
+	const frames = fakeFrames();
+	reducedMotion(false);
+	emptyDocument();
+	scrollBottom("instant");
+	const messages = scroller(1300, 400, 500);
+	followBottom(messages, true);
+	frames.frame(1000);
+	assertEquals(messages.scrollTop, 500);
+	// The next frame arrives 250ms later: at most a 30fps frame's progress.
+	frames.frame(1250);
+	const progress = (messages.scrollTop - 500) / 400;
+	// A 30fps frame's worth of the curve (a normal first frame moves about 0.4).
+	assert(progress > 0 && progress < 0.65, `one frame moved ${progress}`);
+	assert(frames.pending() > 0, "still gliding");
+	runFrames(frames, 1250 + 1000 / 60);
+	assertEquals(messages.scrollTop, 900);
+});
+
+test("a fast switch fades in briefly from 0.6; a slow one continues from its dim", () => {
+	assertEquals(enterFrom(1), { from: "0.6", duration: "var(--duration-sm)" });
+	assertEquals(enterFrom(0.83), { from: "0.6", duration: "var(--duration-sm)" });
+	assertEquals(enterFrom(0.5), { from: "0.5", duration: "var(--duration-md)" });
+	assertEquals(enterFrom(0.504), { from: "0.5", duration: "var(--duration-md)" });
+	assertEquals(enterFrom(Number.NaN), { from: "0.6", duration: "var(--duration-sm)" });
+});
+
+test("a session replace opens pinned at its bottom, and its first measure never glides", async () => {
+	const frames = fakeFrames();
+	reducedMotion(false);
+	emptyDocument();
+	markUnpinned();
+	const { messages, resize } = transcriptStubs({ enter: true, scrollTop: 0 });
+	// Pinned before its first paint (data-init), not shown at its top.
+	assertEquals(messages.scrollTop, 1400);
+	// Late layout before the first resize pass: it snaps, it does not ease or chase.
+	messages.scrollHeight = 2100;
+	resize(800);
+	assertEquals(messages.scrollTop, 1500);
+	// No follow was started: nothing moves it afterwards.
+	messages.scrollTop = 1450;
+	for (const now of [16, 33, 50, 66]) frames.frame(now);
+	assertEquals(messages.scrollTop, 1450);
+	await quietReleased();
+});
+
+test("the spacer never aims below its CSS floor", async () => {
+	fakeFrames();
+	reducedMotion(false);
+	install("getComputedStyle", () => ({ minHeight: "192px" }));
+	// A 116px composer needs only 164px: the spacer's min-height (12rem) is the floor.
+	const { spacer, resize } = transcriptStubs({ promptHeight: 116 });
+	resize(800);
+	assertEquals(spacer.offsetHeight, 192);
+	await quietReleased();
+});
+
+test("a send-time follow-up snap keeps a live append's land-and-glide", async () => {
+	const frames = fakeFrames();
+	reducedMotion(false);
+	install("Element", FakeNode);
+	const { messages, list, resize } = transcriptStubs();
+	resize(800);
+	await quietReleased();
+	scrollBottom();
+	// A live user article taller than a screen lands before the resize pass sees it.
+	const article = new FakeNode(".message[data-enter]");
+	Object.assign(list, { lastElementChild: article });
+	listMutated([{ target: list, addedNodes: [article] }]);
+	messages.scrollHeight = 2900;
+	// scrollBottom's 16ms follow-up runs first: it lands a screen above, then glides.
+	await new Promise((resolve) => setTimeout(resolve, 30));
+	assertEquals(messages.scrollTop, 1700);
+	runFrames(frames, 0);
+	assertEquals(messages.scrollTop, 2300);
 	scrollBottom("instant");
 });

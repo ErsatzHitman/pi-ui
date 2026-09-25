@@ -36,19 +36,23 @@
 		transition-duration: var(--duration-sm);
 		transition-delay: 80ms; /* guard: fast switches never dim */
 	}
-	#messages.messages-loading .recent-session:disabled {
+
+	/* A recent-session row is disabled only during a session transition, which the
+	   container already shows: never the base :disabled dim, on either node (PN3-3). */
+	#messages .recent-session:disabled {
 		opacity: 1;
 	}
 
 	/* A session replace (switch, new chat) marks the incoming #messages `data-enter`
 	   (ui-renderer.ts; never a code-theme replace): it rises from the outgoing node's
-	   opacity (`--messages-enter-from`, published on #chat-pane by message-scroll.js;
-	   #chat-pane is never replaced, so it inherits) instead of cutting in, so a slow switch
-	   continues from its dim and a fast one from full opacity. The dim belongs to the
-	   outgoing node: the incoming one is never born `.messages-loading`. `transition` is
-	   not redeclared, so `.messages-loading`'s 80ms guard above keeps precedence. */
+	   opacity (`--messages-enter-from` and `--messages-enter-duration`, published on
+	   #chat-pane by message-scroll.js; #chat-pane is never replaced, so it inherits)
+	   instead of cutting in: a slow switch continues from its dim, and a fast one (never
+	   dimmed) fades in briefly from 0.6. The dim belongs to the outgoing node: the incoming
+	   one is never `.messages-loading` while it enters. `transition` is not redeclared, so
+	   `.messages-loading`'s 80ms guard above keeps precedence. */
 	#messages[data-enter]:not(.messages-loading) {
-		transition-duration: var(--duration-md);
+		transition-duration: var(--messages-enter-duration, var(--duration-md));
 	}
 	@starting-style {
 		:root[data-motion-ready] #messages[data-enter] {

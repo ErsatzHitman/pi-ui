@@ -90,14 +90,9 @@
 		margin-inline-end: var(--session-sidebar-width);
 	}
 
-	/* Pane FLIP width lock (pane-motion.ts): the centred column takes its post-open width
-	   at the keypress, so the only re-wrap happens with the action, not at the end. */
-	#chat-pane[data-pane-lock] #messages > .messages-stack {
-		max-width: var(--pane-lock-stack);
-	}
-	#chat-pane[data-pane-lock] #prompt-box {
-		max-width: var(--pane-lock-prompt);
-	}
+	/* The pane FLIP width lock (`#chat-pane[data-pane-lock]`: the centred column takes its
+	   post-open width at the keypress) lives in pane-motion.ts's own constructed sheet. As
+	   an inherited custom property here it relaid out the whole transcript per change. */
 
 	/* Sessions ⇄ Live Workspace share one slot: swapping crossfades in place (the incoming
 	   pane fades in over 200ms, the outgoing out over 120ms, the chat does not move). */
@@ -223,6 +218,15 @@
 		container: prompt / inline-size;
 		opacity: 1;
 		translate: 0;
+	}
+
+	/* While a pane FLIP moves the toolbar's clusters, the toolbar is not a size container:
+	   as one, it laid itself out again on every slide frame (8-12ms). A FLIP shows the
+	   toolbar at its pane-closed width (an open holds the reserve, a close drops it at t0),
+	   where its `prompt` 30rem queries never match; pane-motion.ts pins the centred
+	   cluster's container-resolved translate meanwhile, so nothing moves. */
+	#app[data-pane-flipping] .toolbar {
+		container-type: normal;
 	}
 	.toolbar .btn[data-variant="ghost"] {
 		color: var(--text-muted);

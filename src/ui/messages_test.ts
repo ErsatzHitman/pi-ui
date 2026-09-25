@@ -369,8 +369,9 @@ function message(id: string, overrides: Partial<AppMessage> = {}): AppMessage {
 	};
 }
 
+/** `data-enter` attributes only (not the loading binding's `'data-enter'` gate). */
 function dataEnterCount(html: string): number {
-	return html.split("data-enter").length - 1;
+	return html.match(/\sdata-enter(?=[\s>=])/g)?.length ?? 0;
 }
 
 test("markEntering marks exactly the article root of every message role", () => {
@@ -496,10 +497,20 @@ test("a full render keeps a showing pending row in place without replaying its e
 	);
 });
 
-test("a session replace's incoming #messages is never born with the loading dim", () => {
+test("an incoming #messages is never dimmed while it enters, and dims once outgoing", () => {
 	const hint = { keys: "ctrl+k", description: "commands" };
 	const entering = renderMessages([], hint, false, [], true, false, { enter: true });
-	assertStringExcludes(entering, "data-class:messages-loading");
+	// Always bound (the next switch dims this node as the outgoing one), gated on the
+	// one-shot marker the incoming node is born with (PN3-2).
+	for (const html of [entering, renderMessages([], hint)]) {
+		const binding = html.match(/data-class:messages-loading="([^"]*)"/)?.[1] ?? "";
+		// Signals first: a leading marker check would short-circuit their tracking.
+		assert(
+			binding.indexOf("$_sessionLoading") < binding.indexOf("data-enter"),
+			binding,
+		);
+		assertStringIncludes(binding, "data-enter");
+	}
+	assertEquals(dataEnterCount(entering), 1);
 	assertStringIncludes(entering, "data-attr:aria-busy");
-	assertStringIncludes(renderMessages([], hint), "data-class:messages-loading");
 });

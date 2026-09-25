@@ -57,8 +57,11 @@ export type RenderMessagesOptions = {
 	enteringId?: string;
 	/** Mark `#messages` itself `data-enter`: a session replace fades the new transcript in
 	 * (flow-critique #2/#3). Never set for code-theme replaces, reconnects or full views.
-	 * The incoming node is never born `.messages-loading`: the loading dim belongs to the
-	 * outgoing node, and a follow-up render without `enter` restores the binding. */
+	 * The incoming node is never `.messages-loading` while it enters: the loading dim
+	 * belongs to the outgoing node. The binding is gated on the marker, not omitted, so
+	 * the node dims again once it is the outgoing one (next switch, New chat: PN3-2). The
+	 * signals are read first, so they are always tracked (a short-circuit on the marker
+	 * would leave the effect with no dependencies, never to run again). */
 	enter?: boolean;
 	/** The live turn's pending "thinking..." row is showing (ui-renderer.ts): a full
 	 * render (reconnect, code-theme replace) keeps it, without replaying its entry. */
@@ -80,14 +83,10 @@ export function renderMessages(
 			class={messages.length === 0 ? "messages-empty" : undefined}
 			data-enter={options.enter === true}
 			data-show="!$_sessionTransitionVisible"
-			data-class:messages-loading={
-				options.enter === true
-					? undefined
-					: `
-				$_sessionLoading ||
-				$_sessionTransitionStatus === 'loading'
-			`
-			}
+			data-class:messages-loading="
+				($_sessionLoading || $_sessionTransitionStatus === 'loading') &&
+				!el.hasAttribute('data-enter')
+			"
 			data-attr:aria-busy="
 				$_sessionLoading ||
 				$_sessionTransitionStatus === 'loading' ? 'true' : 'false'

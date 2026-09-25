@@ -18,6 +18,7 @@ Object.defineProperty(globalThis, "ResizeObserver", {
 
 const {
 	attachmentExitKeyframes,
+	collapseTray,
 	composePrompt,
 	convertAvifToJpeg,
 	currentChipState,
@@ -29,6 +30,7 @@ const {
 	isHeicImageFile,
 	jpegFileName,
 	reconcileKeyed,
+	trayResizeKeyframes,
 } = await import("./file-transfer.js");
 
 test("file references use one line per path and end with a newline", () => {
@@ -315,6 +317,60 @@ test("a removed chip leaves inert and hidden, hands focus on, and its survivors 
 		]);
 	} finally {
 		restoreGlobal("document", originalDocument);
+		restoreGlobal("getComputedStyle", originalStyle);
+	}
+});
+
+test("the tray eases between heights with its margin, clipped for the whole tween", () => {
+	// First chip: from nothing (hidden) to the row plus its 8px margin.
+	assertEquals(trayResizeKeyframes(0, 64, "8px"), [
+		{ height: "0px", marginBottom: "0px", overflow: "clip" },
+		{ height: "64px", marginBottom: "8px", overflow: "clip" },
+	]);
+	// Last chip removed: the row folds away with its margin.
+	assertEquals(trayResizeKeyframes(64, 0, "8px"), [
+		{ height: "64px", marginBottom: "8px", overflow: "clip" },
+		{ height: "0px", marginBottom: "0px", overflow: "clip" },
+	]);
+});
+
+test("an emptied tray folds with its last chip and hides only once the fold ends", async () => {
+	const originalStyle = Object.getOwnPropertyDescriptor(globalThis, "getComputedStyle");
+	const animations: unknown[][] = [];
+	let finish = () => undefined as void;
+	const tray = {
+		hidden: false,
+		offsetHeight: 64,
+		querySelector: () => null,
+		animate: (...args: unknown[]) => {
+			animations.push(args);
+			return {
+				cancel: () => undefined,
+				finished: new Promise<void>((resolve) => {
+					finish = resolve;
+				}),
+			};
+		},
+	};
+	Object.defineProperty(globalThis, "getComputedStyle", {
+		configurable: true,
+		value: () => ({ marginBottom: "8px" }),
+	});
+	try {
+		collapseTray(tray);
+		assertEquals(animations, [
+			[
+				trayResizeKeyframes(64, 0, "8px"),
+				{ duration: 160, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
+			],
+		]);
+		// Still shown while it folds, even with no chips left.
+		assertEquals(tray.hidden, false);
+		finish();
+		await Promise.resolve();
+		await Promise.resolve();
+		assertEquals(tray.hidden, true);
+	} finally {
 		restoreGlobal("getComputedStyle", originalStyle);
 	}
 });

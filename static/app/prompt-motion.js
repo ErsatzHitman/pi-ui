@@ -3,13 +3,26 @@
 // #prompt-status. Entries play only for ids that were not on screen a moment ago, so a
 // morph that moves or re-inserts a kept node (engines without `moveBefore`) never replays
 // one. Queue items the server removes leave through a client ghost.
-import { duration, easing, ghostExit, motionReady, reducedMotion } from "./motion.js";
+import {
+	duration,
+	easing,
+	ghostExit,
+	motionReady,
+	reducedMotion,
+	stripCloneAttributes,
+} from "./motion.js";
 
 const queueItemSelector = ".prompt-queue-item[id]";
 const statusSelector =
 	"#prompt-working-status, .extension-status[id], .ext-activity-chip[id]";
 /** How long a "Restore all" press keeps steering removed items down into the composer. */
 const restoreWindowMs = 2000;
+/** A ✕-pressed item's dim (prompt-box.css `.prompt-queue-item[data-exit]`): its ghost
+ * leaves from here, so it never flashes back to full opacity. */
+const pressedOpacity = 0.5;
+/** Longest the queue is frozen while the server rebuilds it (see `holdsForRebuild`); the
+ * refill normally completes 40-80ms after the empty-queue patch. */
+const rebuildHoldMs = 400;
 
 /** Pure: the ids in `next` that were not present in `previous`. */
 export function freshIds(previous, next) {
@@ -52,7 +65,12 @@ export function planQueueExits(
 		if (stripped) strips.set(key, strips.get(key) - 1);
 		const translateY =
 			pressed || stripped ? "0.25rem" : restoring ? "0.5rem" : "-0.5rem";
-		plan.push({ node, offset, translateY });
+		plan.push({
+			node,
+			offset,
+			translateY,
+			fromOpacity: pressed ? pressedOpacity : 1,
+		});
 	}
 	return plan;
 }
@@ -86,6 +104,25 @@ export function settleQueueFrame(previousIds, presentIds, removedNodes, removing
 		reassigned,
 		kept,
 	};
+}
+
+/**
+ * Pure: whether a queue list the morph just removed is the middle of a server-side rebuild
+ * rather than a real removal (flow-critique S1). The agent session has no single-item
+ * removal, so a ✕ clears the whole queue and re-queues the survivors: the client gets an
+ * empty-queue patch and, ~40ms later, the refill. Holding the list across that gap keeps the
+ * survivors on screen, so only the pressed item leaves. A list with a pressed item and at
+ * least one survivor is such a rebuild; a list of pressed items only is the last removal.
+ */
+export function holdsForRebuild(itemIds, pressedIds) {
+	const pressed = itemIds.filter((id) => pressedIds.has(id)).length;
+	return pressed > 0 && pressed < itemIds.length;
+}
+
+/** Pure: the rebuild's refill is complete once every survivor is back on screen (the server
+ * re-queues them one patch at a time). */
+export function rebuildComplete(survivorIds, presentIds) {
+	return survivorIds.every((id) => presentIds.has(id));
 }
 
 /** Ids whose ✕ was pressed and whose POST is in flight (prompt-box.tsx's ✕ handler). */
@@ -147,6 +184,78 @@ function measureQueue(queue, box) {
 	return offsets;
 }
 
+/** The list's box relative to #prompt-box's bottom-left corner (like `measureQueue`). */
+function measureList(queue, box) {
+	const list = queue.querySelector(".prompt-queue-list");
+	if (!(list instanceof HTMLElement)) return undefined;
+	const anchor = box.getBoundingClientRect();
+	const rect = list.getBoundingClientRect();
+	return {
+		left: rect.left - anchor.left,
+		bottom: rect.top - anchor.bottom,
+		width: rect.width,
+		height: rect.height,
+		scrollTop: list.scrollTop,
+	};
+}
+
+/** The rebuild a morph started in `records`: the removed list, with its ✕-pressed items
+ * and the survivor ids the server is about to re-queue (`holdsForRebuild`). */
+function rebuildIn(records, queue) {
+	if (queue.querySelector(".prompt-queue-list")) return undefined;
+	const removing = queueRemoving();
+	for (const record of records) {
+		if (record.target !== queue) continue;
+		for (const node of record.removedNodes) {
+			if (!(node instanceof HTMLElement) || !node.matches(".prompt-queue-list"))
+				continue;
+			const items = keyedNodes(node, queueItemSelector);
+			const pressed = new Set(
+				items
+					.filter(
+						(item) => removing.has(item.id) || item.hasAttribute("data-exit"),
+					)
+					.map((item) => item.id),
+			);
+			const itemIds = items.map((item) => item.id);
+			if (!holdsForRebuild(itemIds, pressed)) continue;
+			return {
+				list: node,
+				items,
+				survivors: itemIds.filter((id) => !pressed.has(id)),
+				pressed,
+			};
+		}
+	}
+	return undefined;
+}
+
+/** A still, inert copy of the list as it was, over the list's old box: the survivors stay
+ * put and the pressed item stays dimmed while the refill lands underneath. */
+function coverList(list, pressed, offset, box) {
+	const cover = list.cloneNode(true);
+	for (const item of keyedNodes(cover, queueItemSelector))
+		if (pressed.has(item.id)) item.style.opacity = String(pressedOpacity);
+	stripCloneAttributes(cover);
+	cover.setAttribute("aria-hidden", "true");
+	cover.inert = true;
+	const anchor = box.getBoundingClientRect();
+	Object.assign(cover.style, {
+		position: "fixed",
+		left: `${anchor.left + offset.left}px`,
+		top: `${anchor.bottom + offset.bottom}px`,
+		width: `${offset.width}px`,
+		height: `${offset.height}px`,
+		margin: "0",
+		boxSizing: "border-box",
+		pointerEvents: "none",
+		zIndex: "90",
+	});
+	document.body.append(cover);
+	cover.scrollTop = offset.scrollTop;
+	return cover;
+}
+
 function watchQueue(queue, box) {
 	let ids = new Set(keyedNodes(queue, queueItemSelector).map((item) => item.id));
 	let offsets = measureQueue(queue, box);
@@ -156,9 +265,14 @@ function watchQueue(queue, box) {
 	// callbacks, so presence is judged once per frame from the live DOM (flow-critique S1).
 	let removedBuffer = [];
 	let frame = 0;
-	// Offsets stay those from before the frame's removals until it settles.
+	let listOffset = measureList(queue, box);
+	// A ✕ rebuild in flight: the queue is frozen under a cover until the refill completes.
+	let rebuild;
+	// Offsets stay those from before the frame's removals (or the rebuild) until it settles.
 	const remeasure = () => {
-		if (!frame) offsets = measureQueue(queue, box);
+		if (frame || rebuild) return;
+		offsets = measureQueue(queue, box);
+		listOffset = measureList(queue, box);
 	};
 	document.addEventListener("pi-ui-queue-restore", () => {
 		restoringUntil = performance.now() + restoreWindowMs;
@@ -193,7 +307,7 @@ function watchQueue(queue, box) {
 					});
 		if (plan.length > 0) {
 			const anchor = box.getBoundingClientRect();
-			for (const { node, offset, translateY } of plan) {
+			for (const { node, offset, translateY, fromOpacity } of plan) {
 				const ghost = ghostExit(
 					node,
 					{
@@ -202,7 +316,7 @@ function watchQueue(queue, box) {
 						width: offset.width,
 						height: offset.height,
 					},
-					{ translateY, ms: duration.sm },
+					{ translateY, fromOpacity, ms: duration.sm },
 				)?.effect?.target;
 				// Stay inside the list's visible box: the ghost is fixed on <body>.
 				if (
@@ -230,10 +344,44 @@ function watchQueue(queue, box) {
 		ids = presentIds;
 		remeasure();
 	};
-	new MutationObserver((records) => {
+	// The refill is complete (or overdue): drop the cover and settle at once, in the same
+	// frame, so only the pressed item leaves (a ghost from its dimmed slot) and the
+	// survivors, never gone from the screen, neither exit nor enter again.
+	const finishRebuild = () => {
+		const { cover, items, timer } = rebuild;
+		rebuild = undefined;
+		clearTimeout(timer);
+		queue.style.visibility = "";
+		cover.remove();
+		cancelAnimationFrame(frame);
+		removedBuffer.push(...items);
+		settle();
+	};
+	const observer = new MutationObserver((records) => {
+		if (rebuild) {
+			const present = new Set(
+				keyedNodes(queue, queueItemSelector).map((item) => item.id),
+			);
+			if (rebuildComplete(rebuild.survivors, present)) finishRebuild();
+			return;
+		}
+		const started = listOffset ? rebuildIn(records, queue) : undefined;
+		if (started) {
+			// The server clears the whole queue and re-queues the survivors one patch at a
+			// time (flow-critique S1): freeze what the user saw until it is back. Still
+			// before paint, so the list never blinks.
+			rebuild = {
+				...started,
+				cover: coverList(started.list, started.pressed, listOffset, box),
+				timer: setTimeout(() => rebuild && finishRebuild(), rebuildHoldMs),
+			};
+			queue.style.visibility = "hidden";
+			return;
+		}
 		removedBuffer.push(...removedMatches(records, queueItemSelector));
 		if (!frame) frame = requestAnimationFrame(settle);
-	}).observe(queue, { childList: true, subtree: true });
+	});
+	observer.observe(queue, { childList: true, subtree: true });
 	// The composer growing (typing, widgets) moves the bottom-anchored queue up, and scrolling
 	// the queue list moves its items.
 	new ResizeObserver(remeasure).observe(box);

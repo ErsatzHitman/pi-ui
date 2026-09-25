@@ -226,9 +226,12 @@
 	}
 
 	/* ✕ pressed: the POST is already on its way; ignore a second tap until the server
-	   removes the item (prompt-motion.js ghosts it downward). */
+	   removes the item. The dim is the press's immediate feedback; the exit ghost starts from
+	   it and drops downward (prompt-motion.js `pressedOpacity`, keep in sync). */
 	.prompt-queue-item[data-exit] {
+		opacity: 0.5;
 		pointer-events: none;
+		transition: opacity var(--duration-sm) var(--ease-out);
 	}
 
 	.prompt-queue-dot {

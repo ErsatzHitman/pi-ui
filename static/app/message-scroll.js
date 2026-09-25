@@ -39,6 +39,8 @@ const chaseStiffness = 400;
 const chaseMinStepPx = 8;
 /** Frame time cap for the chase integrator: a long frame advances one nominal frame. */
 const chaseFrameS = 1 / 60;
+/** The eased tweens' clocks advance at most this much per frame (SS3-05). */
+const tweenFrameCapMs = 1000 / 30;
 /** Set by the #message-list observer when a live `.message[data-enter]` lands; read by the
  * next resize pass's follow and cleared after it (it only shapes that frame's move). */
 let appendPending = false;
@@ -46,6 +48,8 @@ let appendPending = false;
 const followHolds = new Set();
 /** Last observed `.messages-stack` content width, to tell a reflow from appended content. */
 let lastStackWidth;
+/** A new transcript's first resize pass pins its bottom instead of following (PN3-1). */
+let freshStack = false;
 
 // The composer's send-time collapse (prompt.js clearPromptForSend → setComposerSettle):
 // while it animates, the spacer is sized for the settled composer, so the release of the
@@ -57,6 +61,9 @@ let composerSettle; // { height, until }
 // #messages' `@starting-style` reads (messages.css), so the new one continues from it.
 let loadingObserver;
 let enterFromRaf = 0;
+/** A fast switch (the outgoing transcript never dimmed) still enters: a short fade from
+ * this opacity instead of a hard cut, and never the slow switch's dip to 0.5 (SS3-06). */
+const enterFromCap = 0.6;
 
 // Send-time spacer hold (flow-critique #7): the composer's collapse is not given back to
 // the spacer until the transcript has grown into it, so the pinned transcript never steps
@@ -380,11 +387,14 @@ export function scrollBottom(behavior = "auto") {
 		updateScrollControl();
 	};
 	// Late layout (images, enhancement) after the first snap glides instead of stepping.
+	// Like the resize pass: the spacer is resolved first (a send hold must not be snapped
+	// to), and a live append still waiting for that pass keeps its land-and-glide (SS3-03).
 	const followOrSnap = () => {
 		const messages = document.getElementById("messages");
 		if (!(messages instanceof HTMLElement) || !state.pinnedToBottom) return;
 		messages.style.removeProperty("overflow-anchor");
-		followBottom(messages);
+		updatePromptSpacer();
+		followBottom(messages, appendPending);
 		updateScrollControl();
 	};
 	if (behavior === "smooth") {
@@ -457,6 +467,18 @@ export function followBottom(messages, appended = false) {
 	else startChase(messages, messages.scrollTop, 0, target);
 }
 
+/**
+ * Pure (unit-tested): a tween's start time for the frame at `now`, given its previous
+ * frame at `last`. Starts at the first frame (`start` undefined), then is pushed forward
+ * by whatever a frame took beyond `tweenFrameCapMs`, so no single frame (a long task, a
+ * throttled or stale rAF timestamp) advances a tween by more than a nominal frame's worth:
+ * it glides on, never teleports (SS3-05).
+ */
+export function frameClampedStart(start, last, now) {
+	if (start === undefined || last === undefined) return start ?? now;
+	return start + Math.max(0, now - last - tweenFrameCapMs);
+}
+
 /** The `ease` follow: `duration.lg` on `easeOut` from where it is to `to`. */
 function startEase(messages, to) {
 	const run = {
@@ -471,7 +493,7 @@ function startEase(messages, to) {
 	};
 	const step = (now) => {
 		if (follow !== run || !state.pinnedToBottom) return;
-		run.start ??= now;
+		run.start = frameClampedStart(run.start, run.last, now);
 		run.last = now;
 		run.t = Math.min(1, Math.max(0, (now - run.start) / duration.lg));
 		messages.scrollTop = run.from + (run.to - run.from) * easeOut(run.t);
@@ -597,10 +619,11 @@ function startJump(messages) {
 	const distance = target - messages.scrollTop;
 	if (distance <= 0.5) return;
 	if (maskLongJump(messages)) messages.scrollTop = target - messages.clientHeight;
-	const run = { from: messages.scrollTop, start: undefined, raf: 0 };
+	const run = { from: messages.scrollTop, start: undefined, last: undefined, raf: 0 };
 	const step = (now) => {
 		if (jump !== run || !state.pinnedToBottom) return;
-		run.start ??= now;
+		run.start = frameClampedStart(run.start, run.last, now);
+		run.last = now;
 		const t = Math.min(1, Math.max(0, (now - run.start) / duration.xl));
 		const live = messages.scrollHeight - messages.clientHeight;
 		messages.scrollTop = run.from + (live - run.from) * easeOut(t);
@@ -838,10 +861,12 @@ function releaseSpacer(spacer, from) {
 	if (state.pinnedToBottom && motionReady() && !reducedMotion()) {
 		spacer.style.height = `${from}px`;
 		// The clock starts at the first frame (SF2-07): a long frame never collapses it.
-		const run = { from, start: undefined, raf: 0 };
+		const run = { from, start: undefined, last: undefined, raf: 0 };
 		const step = () => {
 			if (spacerRelease !== run) return;
-			run.start ??= performance.now();
+			const now = performance.now();
+			run.start = frameClampedStart(run.start, run.last, now);
+			run.last = now;
 			updatePromptSpacer();
 			if (spacerRelease === run) run.raf = requestAnimationFrame(step);
 		};
@@ -1000,6 +1025,13 @@ export function bindMessageResize() {
 		cancelFollow();
 		cancelJump();
 		lastStackWidth = undefined;
+		freshStack = true;
+		// A session replace (`data-enter`) opens at its latest message before its first
+		// paint (data-init runs before it), never at its top for a frame (PN3-1).
+		if (messages instanceof HTMLElement && messages.hasAttribute("data-enter")) {
+			state.pinnedToBottom = true;
+			messages.scrollTop = messages.scrollHeight - messages.clientHeight;
+		}
 	}
 	messageResizeObserver ??= new ResizeObserver((entries) => {
 		let reflowed = false;
@@ -1015,13 +1047,15 @@ export function bindMessageResize() {
 		if (messages instanceof HTMLElement && state.pinnedToBottom) {
 			// A narrower or wider stack (Sessions or Live Workspace opening) re-wraps the
 			// transcript: that is not new content, so the bottom edge stays put in this
-			// same frame instead of gliding back to it (SP-3).
-			if (reflowed && !jump) {
+			// same frame instead of gliding back to it (SP-3). Nor is a new transcript's
+			// first measurement: it is pinned, not eased or chased into place (PN3-1).
+			if ((reflowed || freshStack) && !jump) {
 				cancelFollow();
 				messages.scrollTop = messages.scrollHeight - messages.clientHeight;
 			} else followBottom(messages, appendPending);
 		}
 		appendPending = false;
+		freshStack = false;
 		updateScrollControl();
 	});
 	if (observedMessageStack) messageResizeObserver.unobserve(observedMessageStack);
@@ -1033,13 +1067,11 @@ export function bindMessageResize() {
 }
 
 /**
- * Publishes the current #messages' opacity as `--messages-enter-from` on #chat-pane, which
- * an incoming #messages' `@starting-style` reads (messages.css, SP-5): once per frame while
- * it is dimmed by `.messages-loading` or still fading in (`data-enter`), else its resting
- * opacity. So a slow switch continues from the dim level, and a fast one (loading never
- * dimmed, or no loading at all: a quick double switch) starts from full opacity instead
- * of dipping to the 0.5 fallback. Written only when it changes: the property is inherited
- * by the whole transcript, so an unchanged value never costs a style pass.
+ * Publishes where an incoming #messages' `@starting-style` starts (messages.css, SP-5) on
+ * #chat-pane, from the current #messages' opacity: once per frame while it is dimmed by
+ * `.messages-loading` or still fading in (`data-enter`), else its resting opacity
+ * (enterFrom). Written only when it changes: the properties are inherited by the whole
+ * transcript, so an unchanged value never costs a style pass.
  */
 function watchSessionLoading(messages) {
 	loadingObserver ??= new MutationObserver(trackEnterFrom);
@@ -1058,11 +1090,13 @@ function trackEnterFrom() {
 		const messages = document.getElementById("messages");
 		const pane = document.getElementById("chat-pane");
 		if (!(messages instanceof HTMLElement) || !(pane instanceof HTMLElement)) return;
-		const value = String(
-			Math.round(Number.parseFloat(getComputedStyle(messages).opacity) * 100) / 100,
-		);
-		if (pane.style.getPropertyValue("--messages-enter-from") !== value)
-			pane.style.setProperty("--messages-enter-from", value);
+		const entry = enterFrom(Number.parseFloat(getComputedStyle(messages).opacity));
+		for (const [name, value] of [
+			["--messages-enter-from", entry.from],
+			["--messages-enter-duration", entry.duration],
+		])
+			if (pane.style.getPropertyValue(name) !== value)
+				pane.style.setProperty(name, value);
 		if (
 			messages.classList.contains("messages-loading") ||
 			messages.hasAttribute("data-enter")
@@ -1070,6 +1104,18 @@ function trackEnterFrom() {
 			enterFromRaf = requestAnimationFrame(tick);
 	};
 	enterFromRaf = requestAnimationFrame(tick);
+}
+
+/**
+ * Pure (unit-tested): the incoming transcript's entry for an outgoing one at `opacity`. A
+ * slow switch continues from the dim level over `--duration-md`; a fast one (loading never
+ * dimmed, or a quick double switch) fades in from `enterFromCap` over `--duration-sm`.
+ */
+export function enterFrom(opacity) {
+	const level = Number.isFinite(opacity) ? Math.round(opacity * 100) / 100 : 1;
+	return level < enterFromCap
+		? { from: String(level), duration: "var(--duration-md)" }
+		: { from: String(enterFromCap), duration: "var(--duration-sm)" };
 }
 
 /**
@@ -1094,13 +1140,28 @@ function settleUnfadedEntry(messages) {
 	);
 }
 
+/** The spacer's CSS `min-height` in px, read once per spacer node. */
+let floorCache; // { spacer, px }
+function spacerFloor(spacer) {
+	if (floorCache?.spacer !== spacer) {
+		const minHeight = globalThis.getComputedStyle?.(spacer).minHeight;
+		floorCache = { spacer, px: Number.parseFloat(minHeight ?? "") || 0 };
+	}
+	return floorCache.px;
+}
+
 function updatePromptSpacer() {
 	const prompt = document.getElementById("prompt-box");
 	const spacer = document.getElementById("messages-prompt-spacer");
 	if (!(prompt instanceof HTMLElement) || !(spacer instanceof HTMLElement)) return;
 	const now = performance.now();
 	if (composerSettle && now >= composerSettle.until) composerSettle = undefined;
-	const needed = promptClearance(prompt.offsetHeight, composerSettle, now);
+	// Never below the spacer's own CSS floor: a hold or a glide aimed under it would be
+	// clamped away and read as a drop, not a glide (SS3-04).
+	const needed = Math.max(
+		spacerFloor(spacer),
+		promptClearance(prompt.offsetHeight, composerSettle, now),
+	);
 	const top = spacer.offsetTop;
 	if (top !== contentTop) {
 		// An accordion moving while a hold is live (holdFollow) is not the reply growing

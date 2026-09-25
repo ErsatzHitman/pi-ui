@@ -63,7 +63,37 @@ function showTooltip(target) {
 		content,
 		now + (!warm && trigger.hasAttribute("data-tooltip-delay") ? tooltipDelayMs : 0),
 	);
-	content.showPopover();
+	openTooltip(trigger, content);
+}
+
+/**
+ * `showPopover()` throws InvalidStateError while another popover is mid show or hide: focus
+ * returning to a trigger from a closing popover's `beforetoggle` (Esc on the model picker)
+ * lands here during that hide. Retry once on the next frame, if the trigger still wants it.
+ */
+function openTooltip(trigger, content) {
+	try {
+		content.showPopover();
+	} catch (error) {
+		if (!(error instanceof DOMException)) throw error;
+		requestAnimationFrame(() => {
+			if (!content.isConnected || content.matches(":popover-open")) return;
+			if (!wantsTooltip(trigger)) return;
+			try {
+				content.showPopover();
+			} catch (retryError) {
+				if (!(retryError instanceof DOMException)) throw retryError;
+				// Still mid transition: skip this show; the next hover or focus retries.
+			}
+		});
+	}
+}
+
+/** The trigger is still hovered or focused the way `bindTooltips` shows tooltips for. */
+function wantsTooltip(trigger) {
+	if (trigger.matches(":hover")) return true;
+	if (!trigger.contains(document.activeElement)) return false;
+	return trigger.matches(":focus-visible") || isUsageTrigger(trigger);
 }
 
 function hideTooltip(target, related) {

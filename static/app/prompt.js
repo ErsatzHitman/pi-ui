@@ -1,5 +1,5 @@
 import { setComposerSettle } from "./message-scroll.js";
-import { duration, easing, reducedMotion } from "./motion.js";
+import { duration, easing, ghostExit, reducedMotion } from "./motion.js";
 
 export function promptInput() {
 	const input = document.getElementById("prompt-input");
@@ -13,37 +13,47 @@ export function setPromptValue(value) {
 	input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-/** How long the placeholder stays hidden once the ghost has started lifting. */
-const placeholderHoldMs = 80;
-/** The empty state starts fading when the user article lands, or after this long. */
-const emptyStateHandoffMs = 150;
-/** The lifted ghost waits this long at most for its user article before it exits. */
-const ghostHoldMs = 1500;
+/** How long the placeholder stays hidden once the ghost has started lifting: until the
+ * ghost has all but faded (it is gone at `duration.md`), then the placeholder's own fade. */
+const placeholderHoldMs = duration.sm;
+/** The empty state waits this long at most for the send's user article before it fades. */
+const emptyStateHoldMs = 1500;
 /** A live-appended user article (messages.tsx markEntering): the send has landed. */
 const userArrivalSelector = "#message-list > .message-user[data-enter]";
 
 /**
  * Send-time clear (Enter, Send click, /copy): the typed text lifts off as a ghost while
- * the composer collapses, all at t=0 with no network wait (flow-spec §6, C5). A send that
- * appends a message hands off on the server's clock, not a timer's: the ghost holds,
- * lifted and dimmed, and the empty state (first message) stays until the user article
- * lands (or briefly), so a slow send never shows a blank transcript. A failed send fades
- * the empty state back (file-transfer.js `pi-ui-prompt-send-failed`).
+ * the composer collapses, all at t=0 with no network wait (flow-spec §6, C5). The ghost is
+ * never held: it lifts and fades out over `duration.md` on every send (steers, queued and
+ * slow sends too), so it can never sit over the settled composer or its placeholder. On the
+ * first message the empty state bridges a slow send instead: it stays until the first
+ * article lands (`emptyStateHoldMs` at most), then fades out as the article rises. A failed
+ * send keeps it (file-transfer.js `pi-ui-prompt-send-failed`).
  */
 export function clearPromptForSend() {
 	const input = promptInput();
 	if (!input) return;
 	const text = input.value;
 	const reduce = reducedMotion();
-	const appends = fadesEmptyState(text);
 	const box = document.getElementById("prompt-box");
 	const boxBefore = box instanceof HTMLElement ? box.offsetHeight : undefined;
-	const ghost = text ? ghostPromptText(input, reduce, appends) : undefined;
-	// Hidden before the value clears, so the placeholder never paints over the ghost.
-	if (ghost) holdPlaceholder(input, ghost.animation);
+	// Placed and the placeholder hidden before the value clears, so the placeholder never
+	// paints over the ghost; the ghost starts once the collapse is measured.
+	const ghost = text ? placePromptGhost(input) : undefined;
+	if (ghost) input.setAttribute("data-placeholder-hold", "");
 	const before = input.offsetHeight;
 	setPromptValue("");
 	const after = input.offsetHeight;
+	if (ghost) {
+		const lift = ghost.animate(promptGhostKeyframes(reduce, before - after), {
+			duration: duration.md,
+			easing: easing.out,
+			fill: "forwards",
+		});
+		const remove = () => ghost.remove();
+		lift.finished.then(remove, remove);
+		releasePlaceholder(input, lift);
+	}
 	// The composer's settled height, for the prompt spacer (message-scroll.js). Read
 	// before the clear, so it holds whether or not the collapse below tweens (reduced
 	// motion steps the whole difference at once).
@@ -55,75 +65,87 @@ export function clearPromptForSend() {
 			easing: easing.out,
 		});
 	}
-	if (appends) awaitSendArrival(ghost, reduce);
+	if (fadesEmptyState(text)) holdEmptyStateForSend(reduce);
 }
 
 /**
- * Waits for the send's user article (one-shot observer on #messages' subtree, since
- * #message-list can be replaced). On arrival, or after `ghostHoldMs`, the ghost exits.
- * The empty state starts fading on arrival or after `emptyStateHandoffMs`, whichever
- * comes first, and fades back in if the send fails.
+ * First message only (a no-op without an empty state): keeps the empty state fully visible
+ * until the send's first article lands (a one-shot observer on #messages' subtree, since
+ * #message-list can be replaced), so a slow send never shows a blank transcript. That
+ * morph removes the node, so it then exits as a ghost at its last painted rect
+ * (tracked per frame: the composer's collapse moves it), fading out over `duration.sm`
+ * while the article rises. After `emptyStateHoldMs` without an article it fades in place.
+ * A failed send keeps it, or fades it back.
  */
-function awaitSendArrival(ghost, reduce) {
+export function holdEmptyStateForSend(reduce = reducedMotion()) {
 	const messages = document.getElementById("messages");
-	const emptyNode = document.querySelector("#messages .messages-empty-state");
-	const empty = emptyNode instanceof HTMLElement ? emptyNode : undefined;
+	const node = document.querySelector("#messages .messages-empty-state");
+	if (!(messages instanceof HTMLElement) || !(node instanceof HTMLElement)) return;
 	const seen = new Set(document.querySelectorAll(userArrivalSelector));
+	const lift = reduce ? "0" : "-0.25rem";
+	let rect = node.getBoundingClientRect();
 	let fade;
 	let settled = false;
-	let fadeTimer;
-	let holdTimer;
-	let observer;
-	const fadeEmpty = () => {
-		clearTimeout(fadeTimer);
-		if (fade || !empty?.isConnected) return;
-		fade = empty.animate(
+	let raf = 0;
+	let capTimer;
+	const track = () => {
+		if (node.isConnected) rect = node.getBoundingClientRect();
+		raf = requestAnimationFrame(track);
+	};
+	raf = requestAnimationFrame(track);
+	const fadeInPlace = () => {
+		if (!node.isConnected) return;
+		fade = node.animate(
 			[
 				{ opacity: 1, transform: "none" },
-				reduce
-					? { opacity: 0 }
-					: { opacity: 0, transform: "translateY(-0.25rem)" },
+				{ opacity: 0, transform: `translateY(${lift})` },
 			],
 			{ duration: duration.sm, easing: easing.out, fill: "forwards" },
 		);
 	};
-	const settle = () => {
-		if (settled) return;
+	const observer = new MutationObserver(() => {
+		// Whatever lands first (an extension card before the user article) removes it.
+		if (!node.isConnected) {
+			arrived();
+			return;
+		}
+		for (const article of document.querySelectorAll(userArrivalSelector)) {
+			if (!seen.has(article)) {
+				arrived();
+				return;
+			}
+		}
+	});
+	const stop = () => {
 		settled = true;
-		observer?.disconnect();
-		clearTimeout(holdTimer);
-		ghost?.exit();
+		observer.disconnect();
+		clearTimeout(capTimer);
+		cancelAnimationFrame(raf);
 	};
 	const failed = () => {
-		settle();
-		clearTimeout(fadeTimer);
-		if (fade && empty?.isConnected) fade.reverse();
-		ghost?.remove();
+		stop();
+		if (fade && node.isConnected) fade.reverse();
 	};
 	// file-transfer.js reports a failure before it reports the submit finished.
 	const finished = () =>
 		setTimeout(() =>
 			document.removeEventListener("pi-ui-prompt-send-failed", failed),
 		);
-	const arrived = () => {
-		settle();
-		fadeEmpty();
+	function arrived() {
+		if (settled) return;
+		stop();
 		document.removeEventListener("pi-ui-prompt-send-failed", failed);
 		document.removeEventListener("pi-ui-prompt-submit-finished", finished);
-	};
-	if (empty) fadeTimer = setTimeout(fadeEmpty, emptyStateHandoffMs);
-	if (messages instanceof HTMLElement) {
-		observer = new MutationObserver(() => {
-			for (const article of document.querySelectorAll(userArrivalSelector)) {
-				if (!seen.has(article)) {
-					arrived();
-					return;
-				}
-			}
-		});
-		observer.observe(messages, { childList: true, subtree: true });
+		if (node.isConnected) fadeInPlace();
+		else ghostExit(node, rect, { translateY: lift, ms: duration.sm });
 	}
-	holdTimer = setTimeout(settle, ghostHoldMs);
+	observer.observe(messages, { childList: true, subtree: true });
+	// No article yet (a very slow server): fade in place; its morph then removes an
+	// already invisible node. A failure after this fades it back.
+	capTimer = setTimeout(() => {
+		stop();
+		fadeInPlace();
+	}, emptyStateHoldMs);
 	document.addEventListener("pi-ui-prompt-send-failed", failed, { once: true });
 	document.addEventListener("pi-ui-prompt-submit-finished", finished, { once: true });
 }
@@ -164,24 +186,34 @@ export function promptGhostStyle(rect, style) {
 }
 
 /**
- * Pure (unit-tested): the ghost's keyframes. `hold`: the lift stops dimmed (0.35), waiting
- * for the send to land; `exit` is one keyframe, so it starts from wherever the lift is.
- * Reduced motion: opacity only.
+ * Pure (unit-tested): the ghost's keyframes, one lift that fades fully out (it is never
+ * held). The textarea collapses from its top by `collapse` px on the same curve (the
+ * composer is bottom-anchored), bringing the widget row above it down through the ghost's
+ * box: the ghost is clipped to the collapsing text box, so its lines slide up under that
+ * row instead of printing over it. Reduced motion: opacity only, and the box has already
+ * collapsed (no height tween), so the clip is fixed there.
  */
-export function promptGhostKeyframes(reduce, hold) {
-	const gone = reduce
-		? { opacity: 0 }
-		: { opacity: 0, transform: "translateY(-0.5rem)" };
-	const held = reduce
-		? { opacity: 0.35 }
-		: { opacity: 0.35, transform: "translateY(-0.5rem)" };
-	return {
-		lift: [{ opacity: 1, transform: "none" }, hold ? held : gone],
-		exit: [gone],
-	};
+export function promptGhostKeyframes(reduce, collapse = 0) {
+	const settled = `inset(${Math.max(0, collapse)}px 0px 0px 0px)`;
+	if (reduce) {
+		return [
+			{ opacity: 1, clipPath: settled },
+			{ opacity: 0, clipPath: settled },
+		];
+	}
+	return [
+		{ opacity: 1, transform: "none", clipPath: "inset(0px 0px 0px 0px)" },
+		{
+			opacity: 0,
+			transform: "translateY(-0.75rem)",
+			// In the ghost's own (lifted) space: the collapse plus the lift.
+			clipPath: `inset(calc(${Math.max(0, collapse)}px + 0.75rem) 0px 0px 0px)`,
+		},
+	];
 }
 
-function ghostPromptText(input, reduce, hold) {
+/** The ghost's layer, a fixed copy of the textarea's text at its rect (not yet animated). */
+function placePromptGhost(input) {
 	const ghost = document.createElement("div");
 	ghost.className = "prompt-ghost";
 	ghost.setAttribute("aria-hidden", "true");
@@ -194,28 +226,16 @@ function ghostPromptText(input, reduce, hold) {
 		promptGhostStyle(input.getBoundingClientRect(), getComputedStyle(input)),
 	);
 	document.body.append(ghost);
-	const keyframes = promptGhostKeyframes(reduce, hold);
-	const timing = { duration: duration.sm, easing: easing.out, fill: "forwards" };
-	const animation = ghost.animate(keyframes.lift, timing);
-	const remove = () => ghost.remove();
-	if (!hold) animation.finished.then(remove, remove);
-	return {
-		animation,
-		remove,
-		exit() {
-			if (!ghost.isConnected) return;
-			ghost.animate(keyframes.exit, timing).finished.then(remove, remove);
-		},
-	};
+	return ghost;
 }
 
 /**
- * Hides only the placeholder while the ghost lifts (messages.css), so the caret and any
- * fast follow-up typing stay visible (flow-critique #23). Released on the ghost's clock,
- * `placeholderHoldMs` after its lift actually starts, not on the send's wall clock.
+ * Releases the placeholder hold (`data-placeholder-hold`, messages.css: only the
+ * placeholder is hidden, so the caret and any fast follow-up typing stay visible,
+ * flow-critique #23) on the ghost's clock, `placeholderHoldMs` after its lift actually
+ * starts (by then it has all but faded), not on the send's wall clock.
  */
-function holdPlaceholder(input, ghostAnimation) {
-	input.setAttribute("data-placeholder-hold", "");
+function releasePlaceholder(input, ghostAnimation) {
 	const release = () =>
 		setTimeout(
 			() => input.removeAttribute("data-placeholder-hold"),

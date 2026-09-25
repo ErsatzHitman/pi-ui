@@ -376,7 +376,12 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 
 export function renderPromptQueue(state: AppStateSnapshot): string {
 	return syncHtml(
-		<div id="prompt-queue" class="prompt-queue" aria-live="polite">
+		<div
+			id="prompt-queue"
+			class="prompt-queue"
+			aria-live="polite"
+			data-preserve-attr="style"
+		>
 			{renderQueuedMessages(state)}
 		</div>,
 	);

@@ -8,6 +8,7 @@ import {
 	closePane,
 	commitPaneMutations,
 	dockedPanes,
+	lockRules,
 	openPane,
 	type Pane,
 	type PaneLayoutState,
@@ -125,8 +126,11 @@ type Recorded = {
 	keyframes: Keyframe[];
 	options: KeyframeAnimationOptions;
 	cancelled: boolean;
+	finished: boolean;
 	duration: number;
 	startTime: CSSNumberish | null;
+	/** Plays the animation to its end (resolves its `finished`). */
+	finish: () => void;
 };
 
 /** A controllable promise (a fake Animation's `ready` / `finished`). */
@@ -139,6 +143,14 @@ function deferred() {
 	});
 	promise.catch(() => {});
 	return { promise, resolve, reject };
+}
+
+/** A constructed stylesheet: remembers the last text any instance was given. */
+class FakeSheet {
+	static text = "";
+	replaceSync(text: string) {
+		FakeSheet.text = text;
+	}
 }
 
 /** Stands in for the browser's CSSTransition so `instanceof` works under bun. */
@@ -174,8 +186,13 @@ function installFakePage(options: {
 	ready?: boolean;
 	reduce?: boolean;
 	stackWidths?: [number, number];
+	/** The stack's [free, reserved] x (default [100, 0]). */
+	stackLefts?: [number, number];
+	/** Adds the centred toolbar cluster as a second FLIP target (x 500 free, 400 reserved). */
+	toolbar?: boolean;
 }) {
 	const [freeWidth, reservedWidth] = options.stackWidths ?? [800, 600];
+	const [freeLeft, reservedLeft] = options.stackLefts ?? [100, 0];
 	const app = new FakeAttributes();
 	app.attributes.set("class", "workspace-canvas app-shell");
 	const paneAnimations = new Map<string, FakeTransition[]>();
@@ -187,13 +204,7 @@ function installFakePage(options: {
 	}
 	const sidebar = new FakeDialog();
 	if (options.sidebarOpen) sidebar.attributes.set("open", "");
-	const chatStyle = new Map<string, string>();
-	const chat = Object.assign(new FakeAttributes(), {
-		style: {
-			setProperty: (name: string, value: string) => chatStyle.set(name, value),
-			removeProperty: (name: string) => chatStyle.delete(name),
-		},
-	});
+	const chat = new FakeAttributes();
 	const reserved = () =>
 		(sidebar.hasAttribute("open") &&
 			app.getAttribute("data-reserve-hold") !== "sessions") ||
@@ -201,34 +212,43 @@ function installFakePage(options: {
 			app.getAttribute("data-reserve-hold") !== "live");
 	const animations: Recorded[] = [];
 	const counts = { rects: 0, getAnimations: 0 };
-	const stack = {
+	const target = (selector: string, box: () => { left: number; width: number }) => ({
 		isConnected: true,
-		matches: (selector: string) => selector === "#messages > .messages-stack",
+		matches: (query: string) =>
+			query.split(",").some((part) => part.trim() === selector),
 		getBoundingClientRect: () => {
 			counts.rects++;
-			return {
-				left: reserved() ? 0 : 100,
-				width: reserved() ? reservedWidth : freeWidth,
-			};
+			return box();
 		},
 		getAnimations: () => {
 			counts.getAnimations++;
 			return [];
 		},
 		animate: (keyframes: Keyframe[], animationOptions: KeyframeAnimationOptions) => {
+			const done = deferred();
 			const recorded: Recorded = {
 				keyframes,
 				options: animationOptions,
 				cancelled: false,
+				finished: false,
 				duration: Number(animationOptions.duration),
 				startTime: null,
+				finish: () => {
+					recorded.finished = true;
+					done.resolve();
+				},
 			};
 			animations.push(recorded);
 			return {
 				get playState() {
-					return recorded.cancelled ? "idle" : "running";
+					if (recorded.cancelled) return "idle";
+					return recorded.finished ? "finished" : "running";
 				},
-				cancel: () => (recorded.cancelled = true),
+				finished: done.promise,
+				cancel: () => {
+					recorded.cancelled = true;
+					done.reject();
+				},
 				effect: {
 					updateTiming: (timing: EffectTiming) =>
 						(recorded.duration = Number(timing.duration)),
@@ -238,7 +258,15 @@ function installFakePage(options: {
 				},
 			};
 		},
-	};
+	});
+	const stack = target("#messages > .messages-stack", () => ({
+		left: reserved() ? reservedLeft : freeLeft,
+		width: reserved() ? reservedWidth : freeWidth,
+	}));
+	const toolbar = target(".toolbar-actions", () => ({
+		left: reserved() ? 400 : 500,
+		width: 100,
+	}));
 	const shell = { getBoundingClientRect: () => ({ width: 1280 }) };
 	const pane = { getAnimations: () => paneAnimations.get("live-workspace") ?? [] };
 	const elements = new Map<string, unknown>([
@@ -253,16 +281,18 @@ function installFakePage(options: {
 	const restores = [
 		patchGlobal("HTMLDialogElement", FakeDialog),
 		patchGlobal("CSSTransition", FakeTransition),
+		patchGlobal("CSSStyleSheet", FakeSheet),
 		patchGlobal("document", {
+			adoptedStyleSheets: [],
 			documentElement: {
 				hasAttribute: (name: string) =>
 					name === "data-motion-ready" && options.ready !== false,
 				classList: { contains: () => false },
 			},
 			getElementById: (id: string) => elements.get(id) ?? null,
-			querySelectorAll: () => [stack],
+			querySelectorAll: () => (options.toolbar ? [stack, toolbar] : [stack]),
 		}),
-		patchGlobal("getComputedStyle", () => ({ fontSize: "16px" })),
+		patchGlobal("getComputedStyle", () => ({ fontSize: "16px", translate: "40px" })),
 		patchGlobal("matchMedia", (query: string) => ({
 			matches: query.includes("reduce") ? options.reduce === true : true,
 		})),
@@ -281,8 +311,8 @@ function installFakePage(options: {
 		app,
 		sidebar,
 		chat,
-		chatStyle,
 		stack,
+		toolbar,
 		animations,
 		counts,
 		/** Gives `id`'s pane a running CSS transition on `property`. */
@@ -365,7 +395,7 @@ test("open('sessions') holds the reserve, locks the column and FLIPs from the vi
 		openPane("sessions", asTargets(page), visual, true);
 		assertEquals(page.app.getAttribute("data-reserve-hold"), "sessions");
 		assertEquals(page.chat.getAttribute("data-pane-lock"), "");
-		assertEquals(page.chatStyle.get("--pane-lock-stack"), "600px");
+		assertEquals(FakeSheet.text.includes(lockRules({ stack: 600 })), true);
 		const [flip] = page.animations;
 		assertEquals(flip?.keyframes, [
 			{ transform: "translateX(0px)" },
@@ -387,7 +417,6 @@ test("open with an unchanged column width sets no lock and measures one layout",
 		page.counts.rects = 0;
 		openPane("sessions", asTargets(page), visual, true);
 		assertFalse(page.chat.writes.includes("data-pane-lock"));
-		assertFalse(page.chatStyle.has("--pane-lock-stack"));
 		// Only the post-open layout is read; the held layout is `visual` itself.
 		assertEquals(page.counts.rects, 1);
 		assertEquals(page.animations[0]?.keyframes, [
@@ -438,7 +467,6 @@ test("release() drops the hold and the width lock and ends the FLIP it started",
 		releasePane();
 		assertFalse(page.app.hasAttribute("data-reserve-hold"));
 		assertFalse(page.chat.hasAttribute("data-pane-lock"));
-		assertFalse(page.chatStyle.has("--pane-lock-stack"));
 		assertEquals(
 			page.animations.map((animation) => animation.cancelled),
 			[true],
@@ -543,7 +571,6 @@ function records(
 function assertSettled(page: ReturnType<typeof installFakePage>) {
 	assertFalse(page.app.hasAttribute("data-reserve-hold"));
 	assertFalse(page.chat.hasAttribute("data-pane-lock"));
-	assertFalse(page.chatStyle.has("--pane-lock-stack"));
 	const open = page.animations.find(
 		(animation) => animation.options.fill === "forwards",
 	);
@@ -664,6 +691,99 @@ test("a reopen mid-close puts the FLIP on the reversed slide's clock before the 
 		assertEquals(page.animations[0]?.startTime, 294);
 		assertEquals(page.animations[0]?.duration, 124);
 		// No frame needed: the content cannot lag the pane by one frame.
+	} finally {
+		await page.restore();
+	}
+});
+
+test("an open that leaves a target at its x animates nothing for it (PN3-4)", async () => {
+	// >=1280: the centred column keeps its x and width with or without the reserve.
+	const page = installFakePage({
+		sidebarOpen: false,
+		stackWidths: [800, 800],
+		stackLefts: [321, 321],
+	});
+	try {
+		const visual = [page.stack.getBoundingClientRect()];
+		page.sidebar.setAttribute("open", "");
+		openPane("sessions", asTargets(page), visual, true);
+		assertEquals(page.animations.length, 0);
+		assertEquals(page.app.getAttribute("data-reserve-hold"), "sessions");
+	} finally {
+		await page.restore();
+	}
+});
+
+test("the width lock is a rule on the column, never a property #chat-pane passes down", () => {
+	assertEquals(
+		lockRules({ stack: 650.5, prompt: 700 }),
+		[
+			"#chat-pane[data-pane-lock] #messages > .messages-stack { max-width: 650.5px; }",
+			"#chat-pane[data-pane-lock] #prompt-box { max-width: 700px; }",
+		].join("\n"),
+	);
+	assertFalse(lockRules({ prompt: 700 }).includes("messages-stack"));
+});
+
+const withToolbar = (page: ReturnType<typeof installFakePage>) => [
+	page.stack as unknown as HTMLElement,
+	page.toolbar as unknown as HTMLElement,
+];
+
+test("a toolbar FLIP suspends the toolbar container, pinning its centring, until the FLIPs end", async () => {
+	const page = installFakePage({ sidebarOpen: true, toolbar: true });
+	try {
+		const visual = [
+			page.stack.getBoundingClientRect(),
+			page.toolbar.getBoundingClientRect(),
+		];
+		page.sidebar.removeAttribute("open");
+		closePane(withToolbar(page), visual, "sessions");
+		assertEquals(page.app.getAttribute("data-pane-flipping"), "");
+		// The translate its container query resolved to in the layout on screen.
+		assertEquals(
+			FakeSheet.text.includes(
+				"#app[data-pane-flipping] .toolbar-actions { translate: 40px; }",
+			),
+			true,
+		);
+		const [stackFlip, toolbarFlip] = page.animations;
+		stackFlip?.finish();
+		await page.settle();
+		assertEquals(page.app.getAttribute("data-pane-flipping"), "");
+		toolbarFlip?.finish();
+		await page.settle();
+		assertFalse(page.app.hasAttribute("data-pane-flipping"));
+	} finally {
+		await page.restore();
+	}
+});
+
+test("an open's toolbar suspension ends with its commit", async () => {
+	const page = installFakePage({ sidebarOpen: false, toolbar: true });
+	try {
+		const visual = [
+			page.stack.getBoundingClientRect(),
+			page.toolbar.getBoundingClientRect(),
+		];
+		page.sidebar.setAttribute("open", "");
+		openPane("sessions", withToolbar(page), visual, true);
+		assertEquals(page.app.getAttribute("data-pane-flipping"), "");
+		releasePane();
+		assertFalse(page.app.hasAttribute("data-pane-flipping"));
+	} finally {
+		await page.restore();
+	}
+});
+
+test("a FLIP of the column alone leaves the toolbar a container", async () => {
+	const page = installFakePage({ sidebarOpen: true });
+	try {
+		const visual = [page.stack.getBoundingClientRect()];
+		page.sidebar.removeAttribute("open");
+		closePane(asTargets(page), visual, "sessions");
+		assertEquals(page.animations.length, 1);
+		assertFalse(page.app.hasAttribute("data-pane-flipping"));
 	} finally {
 		await page.restore();
 	}

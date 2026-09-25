@@ -46,8 +46,10 @@ export type PaneChange =
 	| { kind: "open"; pane: Pane }
 	| { kind: "close"; pane: Pane };
 
+/** `.toolbar-review` moves only with docked Review (the toolbar takes the column beside it):
+ * without a FLIP it popped from under the sliding pane to the pane's edge at the commit. */
 const flipSelector =
-	"#messages > .messages-stack, #prompt-box, .toolbar-actions, .toolbar-end, #session-transition > *";
+	"#messages > .messages-stack, #prompt-box, .toolbar-review, .toolbar-actions, .toolbar-end, #session-transition > *";
 const flipId = "pane-flip";
 const rightPanes: ReadonlySet<Pane> = new Set<Pane>(["sessions", "live"]);
 const paneElementIds: Readonly<Record<Pane, string>> = {
@@ -156,18 +158,71 @@ function flipTargets(): HTMLElement[] {
 	return [...document.querySelectorAll<HTMLElement>(flipSelector)];
 }
 
-/** One target's box, read once per layout. */
-export type PaneRect = { left: number; width: number };
+/**
+ * One target's box, read once per layout. `translate` is the toolbar cluster's resolved
+ * container-query centring, read in the same (clean) layout (see suspendToolbar).
+ */
+export type PaneRect = { left: number; width: number; translate?: string };
+
+const toolbarClusters = ".toolbar-review, .toolbar-actions, .toolbar-end";
+const centredCluster = ".toolbar-actions";
 
 function rects(targets: readonly HTMLElement[]): PaneRect[] {
 	return targets.map((element) => {
 		const { left, width } = element.getBoundingClientRect();
-		return { left, width };
+		// Layout is clean after the rect read, so this style read costs nothing.
+		return element.matches(centredCluster)
+			? { left, width, translate: getComputedStyle(element).translate }
+			: { left, width };
 	});
 }
 
-function lefts(targets: readonly HTMLElement[]): number[] {
-	return targets.map((element) => element.getBoundingClientRect().left);
+/**
+ * Pane motion's own rules. A constructed sheet is no DOM node, so no patch can strip it.
+ * The width lock used to be an inherited custom property on #chat-pane: setting or
+ * clearing it restyled and relaid out the whole transcript (74-107ms per change on a
+ * 120-message session at 1024, twice per open: PN3-6, S4). A rule whose subject is the
+ * column itself invalidates only the column, and an unchanged width keeps the transcript's
+ * cached layout.
+ */
+let motionSheet: CSSStyleSheet | undefined;
+const sheetParts = { lock: "", toolbar: "" };
+
+function writeSheet(part: keyof typeof sheetParts, css: string): void {
+	if (sheetParts[part] === css) return;
+	sheetParts[part] = css;
+	motionSheet ??= new CSSStyleSheet();
+	if (!document.adoptedStyleSheets.includes(motionSheet)) {
+		document.adoptedStyleSheets = [...document.adoptedStyleSheets, motionSheet];
+	}
+	motionSheet.replaceSync(`${sheetParts.lock}\n${sheetParts.toolbar}`);
+}
+
+/**
+ * `.toolbar` is a size container (page.css): a FLIP on one of its clusters made every
+ * slide frame lay the toolbar out again, 8-12ms per frame (PN3-5). While a FLIP runs there,
+ * the toolbar stops being a container and the centred cluster keeps the translate its
+ * container query resolved to in the layout the FLIP was measured in (`frozen`), so the
+ * geometry is identical and nothing moves when the container comes back. That layout is
+ * the one on screen until the FLIPs end: the held layout of an open (released together
+ * with this), the final layout of a close.
+ */
+function suspendToolbar(frozen: string | undefined): void {
+	const app = document.getElementById("app");
+	if (!app) return;
+	writeSheet(
+		"toolbar",
+		frozen === undefined
+			? ""
+			: `#app[data-pane-flipping] ${centredCluster} { translate: ${frozen}; }`,
+	);
+	app.setAttribute("data-pane-flipping", "");
+}
+
+function resumeToolbar(): void {
+	const app = document.getElementById("app");
+	if (app?.hasAttribute("data-pane-flipping"))
+		app.removeAttribute("data-pane-flipping");
 }
 
 /**
@@ -179,6 +234,16 @@ let flips: Animation[] = [];
 function cancelFlips(): void {
 	for (const animation of flips) animation.cancel();
 	flips = [];
+	resumeToolbar();
+}
+
+/** The toolbar comes back once no FLIP is left in flight (a close's end; see suspendToolbar). */
+function resumeWhenSettled(): void {
+	const settled = flips.every(
+		(animation) =>
+			animation.playState === "finished" || animation.playState === "idle",
+	);
+	if (settled) resumeToolbar();
 }
 
 function flipsRunning(): boolean {
@@ -214,24 +279,33 @@ export function lockWidths(
 	return { stack, prompt };
 }
 
+/** Pure: the lock rules for `widths` (unit-tested). The attribute on #chat-pane gates them. */
+export function lockRules(widths: { stack?: number; prompt?: number }): string {
+	const rules: string[] = [];
+	if (widths.stack !== undefined) {
+		rules.push(
+			`#chat-pane[data-pane-lock] #messages > .messages-stack { max-width: ${widths.stack}px; }`,
+		);
+	}
+	if (widths.prompt !== undefined) {
+		rules.push(
+			`#chat-pane[data-pane-lock] #prompt-box { max-width: ${widths.prompt}px; }`,
+		);
+	}
+	return rules.join("\n");
+}
+
 function lockColumns(widths: { stack?: number; prompt?: number }): void {
 	const chat = document.getElementById("chat-pane");
 	if (!chat) return;
-	if (widths.stack !== undefined) {
-		chat.style.setProperty("--pane-lock-stack", `${widths.stack}px`);
-	}
-	if (widths.prompt !== undefined) {
-		chat.style.setProperty("--pane-lock-prompt", `${widths.prompt}px`);
-	}
+	writeSheet("lock", lockRules(widths));
 	chat.setAttribute("data-pane-lock", "");
 }
 
+/** The rules stay in the sheet, inert without the attribute: clearing costs one attribute. */
 function clearLocks(): void {
 	const chat = document.getElementById("chat-pane");
-	if (!chat?.hasAttribute("data-pane-lock")) return;
-	chat.removeAttribute("data-pane-lock");
-	chat.style.removeProperty("--pane-lock-stack");
-	chat.style.removeProperty("--pane-lock-prompt");
+	if (chat?.hasAttribute("data-pane-lock")) chat.removeAttribute("data-pane-lock");
 }
 
 let generation = 0;
@@ -369,12 +443,21 @@ function followSlide(
 	});
 }
 
+/** A FLIP's offsets, or undefined when the target stays put (no animation, no layer). */
+type FlipDelta = { from: number; to: number } | undefined;
+
+/**
+ * `base` is the layout the FLIPs are relative to, the one on screen while they run: its
+ * rects carry the centred toolbar cluster's translate for suspendToolbar.
+ */
 function animateFlips(
 	targets: readonly HTMLElement[],
-	deltas: readonly ({ from: number; to: number } | undefined)[],
+	deltas: readonly FlipDelta[],
 	options: KeyframeAnimationOptions,
+	base: readonly PaneRect[],
 ): Animation[] {
 	const own: Animation[] = [];
+	let toolbar = false;
 	for (const [index, element] of targets.entries()) {
 		const delta = deltas[index];
 		if (!delta) continue;
@@ -385,8 +468,16 @@ function animateFlips(
 				{ ...options, id: flipId },
 			),
 		);
+		toolbar ||= element.matches(toolbarClusters);
 	}
 	flips.push(...own);
+	if (toolbar) {
+		const centred = targets.findIndex((element) => element.matches(centredCluster));
+		suspendToolbar(base[centred]?.translate);
+		for (const animation of own) {
+			animation.finished.then(resumeWhenSettled, () => {});
+		}
+	}
 	return own;
 }
 
@@ -396,8 +487,10 @@ function animateFlips(
  * reserve lands under the opaque pane when the slide ends.
  *
  * Cost (B2): one forced layout (the real post-open layout) in the toggle task. A second one
- * runs only when the column changes width (the lock re-wraps it) or when `visual` is not
- * the held layout (`settled` false: a FLIP, hold or lock was live when it was read).
+ * runs only when the column changes width or when `visual` is not the held layout
+ * (`settled` false: a FLIP, hold or lock was live when it was read). The column is locked
+ * to its final width, so that second layout and the commit reuse the transcript's line
+ * breaks from the first: the one re-wrap an instant toggle also pays (PN3-6).
  */
 export function openPane(
 	pane: Pane,
@@ -419,17 +512,20 @@ export function openPane(
 	const lock = lockWidths(targets, final, settled ? visual : undefined);
 	if (lock) lockColumns(lock);
 	// Settled and unlocked: the held layout is the pre-change layout that `visual` measured.
-	const base = settled && !lock ? visual.map((rect) => rect.left) : lefts(targets);
+	const base = settled && !lock ? visual : rects(targets);
 	const own = animateFlips(
 		targets,
 		targets.map((_, index) => {
-			const left = base[index] ?? 0;
-			return {
-				from: (visual[index]?.left ?? left) - left,
-				to: (final[index]?.left ?? left) - left,
-			};
+			const left = base[index]?.left ?? 0;
+			const from = (visual[index]?.left ?? left) - left;
+			const to = (final[index]?.left ?? left) - left;
+			// A target that neither starts nor ends off its held x (the centred column at
+			// >=1280) gets no FLIP: a no-op animation still promoted the whole transcript to
+			// a layer and re-recorded it on the first slide frame (PN3-4), as closePane skips.
+			return Math.abs(from) < 0.5 && Math.abs(to) < 0.5 ? undefined : { from, to };
 		}),
 		{ duration: duration.paneIn, easing: easing.drawer, fill: "forwards" },
+		base,
 	);
 	followSlide(pane, gen, own, true, slide);
 }
@@ -446,16 +542,17 @@ export function closePane(
 	const gen = ++generation;
 	// Closed mid-open (or while another pane's open is settling): commit that open first.
 	releasePane();
-	const base = lefts(targets);
+	const base = rects(targets);
 	const slide = pane ? paneSlide(pane) : undefined;
 	const own = animateFlips(
 		targets,
 		targets.map((_, index) => {
-			const left = base[index] ?? 0;
+			const left = base[index]?.left ?? 0;
 			const from = (visual[index]?.left ?? left) - left;
 			return Math.abs(from) < 0.5 ? undefined : { from, to: 0 };
 		}),
 		{ duration: duration.paneOut, easing: easing.drawer },
+		base,
 	);
 	if (pane && own.length > 0) followSlide(pane, gen, own, false, slide);
 }

@@ -212,11 +212,20 @@
 		}
 	}
 
-	/* Matches styles/controls.css's systemic `.btn` touch-target floor; these aren't `.btn`. */
+	/* Matches styles/controls.css's systemic `.btn` touch-target floor; these aren't `.btn`.
+	   The height always keeps it. Five 2.75rem tabs outgrow the 286px docked pane and the
+	   320px drawer: there the tabs narrow together (never below the fine-pointer 1.75rem)
+	   so every icon stays whole, instead of the strip scrolling with a half-cut tab at its
+	   edge (PN3-7). Where they fit (the phone sheet), nothing changes. */
 	@media (pointer: coarse) {
-		.live-workspace-tab-button {
+		/* Out-ranks the shared `.segmented-control > button` padding, which would squeeze
+		   a narrowed tab's icon (the svg is max-width: 100%). */
+		.segmented-control > .live-workspace-tab-button {
+			flex-shrink: 1;
 			width: 2.75rem;
+			min-width: 1.75rem;
 			height: 2.75rem;
+			padding-inline: 0;
 		}
 	}
 
