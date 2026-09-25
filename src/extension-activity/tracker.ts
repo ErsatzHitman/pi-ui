@@ -74,6 +74,11 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 		{ statusKeys: Set<string>; working: boolean }
 	>();
 	#runActive = false;
+	/** Widget key → the scope that mounted it, so its later rendered frames
+	 * (which carry no attribution of their own) reach the right activity. */
+	readonly #widgetOwners = new Map<string, InstrumentedScope>();
+	/** Widget key → its latest frame text (applied or still coalescing). */
+	readonly #widgetFrames = new Map<string, string>();
 
 	constructor(options: ExtensionActivityTrackerOptions) {
 		this.#clock = options.clock ?? Date.now;
@@ -104,6 +109,112 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 	}
 
 	uiSignal(scope: InstrumentedScope, signal: UiSignal, now: number): void {
+		switch (signal.kind) {
+			case "widgetMount": {
+				// Its frames arrive later through `observeWidgetFrame`; remember
+				// whose they are. The mount itself is a visible signal (a fast
+				// scope that mounted a widget still gets its card). A different
+				// scope's earlier widget under the same key is replaced here, so
+				// its last frame is settled onto that scope now: its own late
+				// close must not take this mount's frames.
+				this.#releaseWidget(signal.key, scope, now);
+				this.#widgetOwners.set(signal.key, scope);
+				this.#applyUi(scope, signal, now);
+				return;
+			}
+			case "widgetFrame": {
+				this.#widgetOwners.set(signal.key, scope);
+				this.observeWidgetFrame(signal.key, signal.text, now);
+				return;
+			}
+			case "widgetClose": {
+				const owner = this.#widgetOwners.get(signal.key);
+				// A close from a scope whose widget was already replaced by
+				// another scope's mount: that close only removes the newer
+				// widget from the terminal; its own panel was settled then.
+				if (owner && owner.scopeId !== scope.scopeId) return;
+				const finalText = signal.finalText ?? this.#widgetFrames.get(signal.key);
+				this.#flushWidgetFrame(signal.key);
+				this.#resetWidget(signal.key);
+				this.#applyUi(
+					scope,
+					finalText === undefined ? signal : { ...signal, finalText },
+					now,
+				);
+				return;
+			}
+			default:
+				this.#applyUi(scope, signal, now);
+		}
+	}
+
+	/** Whether a scope this tracker saw mounted the widget under `key` — lets the
+	 * owner skip turning a frame into text for widgets nobody tracks. */
+	ownsWidget(key: string): boolean {
+		return this.#widgetOwners.has(key);
+	}
+
+	/**
+	 * One rendered frame (plain text, ANSI already stripped) of the widget
+	 * under `key` — a `(tui, theme) => Component` factory's committed terminal
+	 * surface, or a `string[]` widget's lines. Panels repaint at up to 30 fps
+	 * (Advisor streams at 10 fps, JEV ticks a spinner every 120 ms), so frames
+	 * are coalesced: an identical repaint is ignored and the rest apply at
+	 * most once per `widgetFrameIntervalMs`, latest wins. The latest frame is
+	 * kept as the activity's "Panel (final frame)" output when the widget
+	 * closes (DESIGN-ext-activity.md §2.3's `setWidget` row).
+	 */
+	observeWidgetFrame(key: string, text: string, _now: number): void {
+		if (!this.#widgetOwners.has(key)) return;
+		if (this.#widgetFrames.get(key) === text) return;
+		this.#widgetFrames.set(key, text);
+		const timerKey = widgetFrameTimerKey(key);
+		if (this.#cancelers.has(timerKey)) return;
+		this.#cancelers.set(
+			timerKey,
+			this.#scheduler.schedule(
+				extensionActivityThresholds.widgetFrameIntervalMs,
+				() => {
+					this.#cancelers.delete(timerKey);
+					this.#applyWidgetFrame(key);
+				},
+			),
+		);
+	}
+
+	/** Applies a still-scheduled frame now (before its widget closes). */
+	#flushWidgetFrame(key: string): void {
+		const timerKey = widgetFrameTimerKey(key);
+		if (!this.#cancelers.has(timerKey)) return;
+		this.#cancel(timerKey);
+		this.#applyWidgetFrame(key);
+	}
+
+	#applyWidgetFrame(key: string): void {
+		const owner = this.#widgetOwners.get(key);
+		const text = this.#widgetFrames.get(key);
+		if (!owner || text === undefined) return;
+		this.#applyUi(owner, { kind: "widgetFrame", key, text }, this.#clock());
+	}
+
+	/** Before `scope` mounts under `key`: settles a different scope's widget
+	 * there (its latest frame becomes its final panel), then forgets it. */
+	#releaseWidget(key: string, scope: InstrumentedScope, now: number): void {
+		const previous = this.#widgetOwners.get(key);
+		const frame = this.#widgetFrames.get(key);
+		this.#resetWidget(key);
+		if (!previous || previous.scopeId === scope.scopeId || frame === undefined)
+			return;
+		this.#applyUi(previous, { kind: "widgetClose", key, finalText: frame }, now);
+	}
+
+	#resetWidget(key: string): void {
+		this.#cancel(widgetFrameTimerKey(key));
+		this.#widgetOwners.delete(key);
+		this.#widgetFrames.delete(key);
+	}
+
+	#applyUi(scope: InstrumentedScope, signal: UiSignal, now: number): void {
 		if (scope.timed) {
 			const change = this.#ledger.observeUiInScope(scope.scopeId, signal, now);
 			this.#recordBinding(change, signal);
@@ -245,6 +356,8 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 	cancelAll(now: number, reason: string): void {
 		for (const cancel of this.#cancelers.values()) cancel();
 		this.#cancelers.clear();
+		this.#widgetOwners.clear();
+		this.#widgetFrames.clear();
 		const result = this.#ledger.cancelAll(now, reason);
 		for (const activity of result.cancelled)
 			this.#emit({ kind: "finished", activity });
@@ -306,7 +419,13 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 
 	#emit(change: LedgerChange): void {
 		if (change.kind === "none") return;
-		this.#sink(change);
+		try {
+			this.#sink(change);
+		} catch (error) {
+			// Rendering/persisting a card must never break the extension that
+			// raised the signal, nor escape a timer callback.
+			console.error("Extension activity update failed", error);
+		}
 		if (change.kind === "dropped") this.#boundSignals.delete(change.activityId);
 		if (change.kind === "finished") this.#boundSignals.delete(change.activity.id);
 	}
@@ -315,6 +434,10 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 const channelCarrierKey = "!channel";
 const runGraceTimerKey = "run:grace";
 const selfHealTimerKey = "run:self-heal";
+
+function widgetFrameTimerKey(key: string): string {
+	return `frame:${key}`;
+}
 
 const channelActivityRefs = {
 	"subagents:fleet": {
@@ -383,6 +506,7 @@ function carrierKeyFor(signal: UiSignal): string {
 	switch (signal.kind) {
 		case "status":
 		case "widgetFrame":
+		case "widgetMount":
 		case "widgetClose":
 			return signal.key;
 		case "workingMessage":
@@ -399,7 +523,7 @@ function carrierKeyFor(signal: UiSignal): string {
  * `ScopeOutcome`, per §2.3's transition table: `before_agent_start` →
  * `result.message`, `context`/`context_with_system` → changed messages,
  * `tool_call` → `block`/`reason`, `tool_result` → changed content, `input` →
- * `transform`, and a tool's own `execute()` result. Every other timed event
+ * `transform`, and a tool's own `execute()` failure. Every other timed event
  * (`agent_end`, `turn_end`, …) gets a generic "completed" outcome — a
  * specific mapping can be added the same way without touching the ledger.
  */
@@ -411,16 +535,13 @@ function mapOutcome(scope: InstrumentedScope, outcome: ScopeOutcomeRaw): ScopeOu
 	return { ok: true };
 }
 
+/** A tool's own `execute()` result is already the tool card's output, right
+ * next to this step, so a successful result is never copied into the activity
+ * (no duplicate line on screen, no second copy in the session file); only a
+ * failure is summarized, so the step reads "Failed" with its reason. */
 function mapToolOutcome<Result>(result: Result): ScopeOutcome {
-	if (!isRecord(result)) return { ok: true };
-	const text = extractTextContent(result.content);
-	if (result.isError === true) return { ok: false, error: text ?? "Tool call failed" };
-	if (text === undefined) return { ok: true };
-	return {
-		ok: true,
-		summary: text,
-		output: [{ kind: "tool-content", title: "Tool result", text }],
-	};
+	if (!isRecord(result) || result.isError !== true) return { ok: true };
+	return { ok: false, error: extractTextContent(result.content) ?? "Tool call failed" };
 }
 
 function mapHookOutcome<Result, HookEvent>(

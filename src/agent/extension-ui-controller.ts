@@ -111,6 +111,12 @@ export type ExtensionUiControllerHooks = {
 	 */
 	onCustomPrompt?: (capturing: boolean) => () => void;
 	/**
+	 * Receives each committed frame of a `setWidget(key, (tui, theme) => Component)` widget:
+	 * its key and raw (ANSI-styled) rendered lines. Used by extension-activity tracking to
+	 * keep a panel's live progress and final frame (JEV's card, Advisor's live panel).
+	 */
+	onWidgetFrame?: (key: string, rawLines: readonly string[]) => void;
+	/**
 	 * Mount extension `setFooter`/`setHeader` components as terminal surfaces
 	 * (`extensions.terminalChrome`, see `extensions-config.ts`). Off by default:
 	 * the calls are accepted and ignored, like RPC mode.
@@ -185,6 +191,15 @@ export class ExtensionUiController {
 	) {
 		this.#terminalSurfaces = new TerminalSurfaceController({
 			onUpdate: (surfaces) => this.store.setTerminalSurfaces([...surfaces]),
+			onFrame: hooks.onWidgetFrame
+				? (id, rawLines) => {
+						if (!id.startsWith(widgetSurfaceIdPrefix)) return;
+						hooks.onWidgetFrame?.(
+							id.slice(widgetSurfaceIdPrefix.length),
+							rawLines,
+						);
+					}
+				: undefined,
 			// Round 6 F2 — see `TerminalSurfaceControllerOptions.viewportHint`'s doc comment.
 			viewportHint: () => this.store.clientViewportCells,
 		});
@@ -914,8 +929,10 @@ function normalizeWorkingIndicator(
 }
 
 /** Stable terminal-surface id for a `setWidget(key, (tui, theme) => Component)` mount. */
+const widgetSurfaceIdPrefix = "widget:";
+
 function widgetSurfaceId(key: string): string {
-	return `widget:${key}`;
+	return `${widgetSurfaceIdPrefix}${key}`;
 }
 
 const footerSurfaceId = "footer";

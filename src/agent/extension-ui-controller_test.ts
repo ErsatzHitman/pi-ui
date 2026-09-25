@@ -816,3 +816,43 @@ test("ExtensionUiController strips ANSI styling from extension notices", () => {
 
 	assertEquals(store.snapshot().messages.at(-1)?.text, "RTK: ON");
 });
+
+test("a widget factory's committed frames reach onWidgetFrame with their key and raw lines, other surfaces don't", () => {
+	const store = new AppStore();
+	const frames: { key: string; lines: readonly string[] }[] = [];
+	const controller = new ExtensionUiController(store, {
+		terminalChrome: true,
+		onWidgetFrame: (key, lines) => frames.push({ key, lines }),
+	});
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	ui.setWidget(
+		"jev-decompose",
+		() => staticComponent(["\u001b[1mJev\u001b[0m", "consulting jev"]) as never,
+	);
+	ui.setFooter(() => staticComponent(["footer line"]) as never);
+	assertEquals(frames.length > 0, true);
+	assertEquals(
+		frames.every((frame) => frame.key === "jev-decompose"),
+		true,
+	);
+	assertEquals(frames.at(-1)?.lines.slice(0, 2), [
+		"\u001b[1mJev\u001b[0m",
+		"consulting jev",
+	]);
+});
+
+test("a throwing onWidgetFrame hook never breaks rendering the widget", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store, {
+		onWidgetFrame: () => {
+			throw new Error("hook exploded");
+		},
+	});
+	const ui = controller.context(() => true, fakeRuntimeKey());
+	ui.setWidget("panel", () => staticComponent(["widget line"]) as never);
+	assertEquals(
+		store.snapshot().terminalSurfaces.map((surface) => surface.kind),
+		["widget"],
+	);
+});

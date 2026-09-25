@@ -151,8 +151,11 @@ test("setWidget(key, undefined) after the scope already finished refreshes outpu
 		{ kind: "widgetClose", key: "jev-decompose", finalText: "final card frame" },
 		3400,
 	);
-	assertEquals(late.kind, "updated");
-	if (late.kind !== "updated") throw new Error("unreachable");
+	// Reported as "finished" again (not just "updated") so the owner re-writes
+	// the persisted "finish" entry — otherwise this panel output would be
+	// visible live but lost on reload/resume (DESIGN §2.4: last write wins).
+	assertEquals(late.kind, "finished");
+	if (late.kind !== "finished") throw new Error("unreachable");
 	assertEquals(late.activity.state, "done");
 	assertEquals(late.activity.summary, "Consulted jev");
 	assertEquals(
@@ -434,4 +437,119 @@ test("oldest finished activities are evicted once the in-memory cap is exceeded,
 	const summaries = ledger.list().map((activity) => activity.summary);
 	assertFalse(summaries.includes("run 0"));
 	assertEquals(summaries.includes("run 204"), true);
+});
+
+test("a widget frame arriving after the scope finished changes nothing (no per-frame churn)", () => {
+	const ledger = new ExtensionActivityLedger();
+	const jev = ref("jev", "JEV");
+	ledger.beginTimedScope(hookScope("s1", jev, "tool"), 0);
+	ledger.promoteScope("s1", 750);
+	ledger.endTimedScope("s1", 900, { ok: true });
+	const frame = ledger.observeUiInScope(
+		"s1",
+		{ kind: "widgetFrame", key: "jev-decompose", text: "spinner tick" },
+		1000,
+	);
+	assertEquals(frame.kind, "none");
+});
+
+test("dropped fast scopes never leak their scope index entries", () => {
+	const ledger = new ExtensionActivityLedger();
+	const jev = ref("jev", "JEV");
+	for (let i = 0; i < 5000; i++) {
+		ledger.beginTimedScope(hookScope(`fast-${i}`, jev, "message_end"), i);
+		assertEquals(
+			ledger.endTimedScope(`fast-${i}`, i + 1, { ok: true }).kind,
+			"dropped",
+		);
+	}
+	assertEquals(ledger.list().length, 0);
+	assertEquals(ledger.scopeIndexSize, 0);
+});
+
+test("the scope index stays bounded by the in-memory activity cap", () => {
+	const ledger = new ExtensionActivityLedger();
+	const jev = ref("jev", "JEV");
+	for (let i = 0; i < 450; i++) {
+		ledger.beginTimedScope(hookScope(`s${i}`, jev, "before_agent_start"), i);
+		ledger.promoteScope(`s${i}`, i + 750);
+		ledger.endTimedScope(`s${i}`, i + 800, { ok: true });
+	}
+	assertEquals(ledger.scopeIndexSize <= 200, true);
+});
+
+test("a panel frame's progress is its last meaningful line, not a box border", () => {
+	const ledger = new ExtensionActivityLedger();
+	const advisor = ref("advisor", "Advisor");
+	ledger.beginTimedScope(hookScope("s1", advisor, "agent_settled"), 0);
+	const change = ledger.observeUiInScope(
+		"s1",
+		{
+			kind: "widgetFrame",
+			key: "advisor-live-panel",
+			text: [
+				"╭─ Advisor ─╮",
+				"│ reading diff        │",
+				"│ reviewing 3 files   │",
+				"╰────╯",
+				"",
+			].join("\n"),
+		},
+		10,
+	);
+	if (change.kind !== "pending") throw new Error(`unexpected ${change.kind}`);
+	assertEquals(change.activity.progress, "reviewing 3 files");
+});
+
+test("closing a widget that never produced any text adds no empty panel section", () => {
+	const ledger = new ExtensionActivityLedger();
+	const jev = ref("jev", "JEV");
+	ledger.beginTimedScope(hookScope("s1", jev, "before_agent_start"), 0);
+	ledger.promoteScope("s1", 750);
+	const change = ledger.observeUiInScope(
+		"s1",
+		{ kind: "widgetClose", key: "jev-decompose" },
+		800,
+	);
+	if (change.kind !== "updated") throw new Error(`unexpected ${change.kind}`);
+	assertEquals(
+		change.activity.output.filter((section) => section.kind === "panel"),
+		[],
+	);
+});
+
+test("a fast scope whose only signal was a notice is dropped: notify never creates an activity", () => {
+	const ledger = new ExtensionActivityLedger();
+	const jev = ref("jev", "JEV");
+	// e.g. `/jev status`: a command that only calls `ctx.ui.notify(...)` — the notice
+	// row already shows it, so a card would just duplicate it (DESIGN §2.3 notify row).
+	ledger.beginTimedScope(
+		{
+			scopeId: "c1",
+			extension: jev,
+			trigger: { kind: "command", name: "jev" },
+			title: "/jev",
+		},
+		0,
+	);
+	ledger.observeUiInScope("c1", { kind: "notify", text: "jev: on", type: "info" }, 5);
+	assertEquals(ledger.endTimedScope("c1", 10, { ok: true }).kind, "dropped");
+	assertEquals(ledger.list().length, 0);
+});
+
+test("a fast scope that mounted a widget still shows retroactively (the widget was visible)", () => {
+	const ledger = new ExtensionActivityLedger();
+	const jev = ref("jev", "JEV");
+	ledger.beginTimedScope(hookScope("s1", jev, "tool"), 0);
+	ledger.observeUiInScope("s1", { kind: "widgetMount", key: "jev-decompose" }, 1);
+	const finished = ledger.endTimedScope("s1", 5, { ok: true });
+	assertEquals(finished.kind, "finished");
+	// …and the widget's later close still lands on it, with its final frame.
+	const closed = ledger.observeUiInScope(
+		"s1",
+		{ kind: "widgetClose", key: "jev-decompose", finalText: "FAILED: no credential" },
+		2500,
+	);
+	if (closed.kind !== "finished") throw new Error(`unexpected ${closed.kind}`);
+	assertEquals(closed.activity.output.at(-1)?.text, "FAILED: no credential");
 });

@@ -4,6 +4,7 @@ import type {
 	ExtensionShortcut,
 	ExtensionUIContext,
 	RegisteredCommand,
+	RegisteredTool,
 } from "@earendil-works/pi-coding-agent";
 
 import type {
@@ -272,41 +273,109 @@ function createHookWrapper(
 	};
 }
 
+/**
+ * Wrapper → the function it wraps, for every tool `execute`, command handler
+ * and shortcut handler this module installed. A tool definition object can be
+ * shared by several `Extension` objects (a module-level definition registered
+ * again when the SDK's factory cache re-runs a factory for another runtime),
+ * so a definition met again is re-wrapped from its *original* function, never
+ * stacked: one call must report one scope.
+ */
+const originalByWrapper = new WeakMap<object, unknown>();
+
+function unwrapped<Fn extends object>(fn: Fn): Fn {
+	const original = originalByWrapper.get(fn);
+	// SAFETY: `originalByWrapper` only ever maps a wrapper to the same-typed
+	// function it replaced (`wrapToolExecute`/`instrumentCommand`/`instrumentShortcut`).
+	return original === undefined ? fn : (original as Fn);
+}
+
+/**
+ * Runs `run` for every entry already in `map`, and again for every entry a
+ * later `map.set` stores — the SDK's `registerTool`/`registerCommand`/
+ * `registerShortcut` are plain `Map.set` calls on the `Extension`, and an
+ * extension may register from `session_start` (after this module ran), e.g.
+ * `bash-background.ts` registering its per-session `bash`.
+ */
+function instrumentMapEntries<Key, Value>(
+	map: Map<Key, Value>,
+	run: (key: Key, value: Value) => void,
+): void {
+	for (const [key, value] of map) run(key, value);
+	const nativeSet = map.set.bind(map);
+	Object.defineProperty(map, "set", {
+		value: (key: Key, value: Value) => {
+			try {
+				run(key, value);
+			} catch {
+				// Instrumentation must never change whether a registration succeeds.
+			}
+			return nativeSet(key, value);
+		},
+		writable: true,
+		configurable: true,
+		enumerable: false,
+	});
+}
+
 function instrumentTools(
 	extension: Extension,
 	ref: ExtensionRef,
 	reporter: InstrumentationReporter,
 	clock: Clock,
 ): void {
-	for (const [toolName, registered] of extension.tools) {
-		const definition = registered.definition;
-		const original = definition.execute;
-		definition.execute = async (toolCallId, params, signal, onUpdate, ctx) => {
-			const scope: InstrumentedScope = {
-				scopeId: `tool:${crypto.randomUUID()}`,
-				timed: true,
-				extension: ref,
-				trigger: { kind: "tool", toolName, toolCallId },
-				title: toolName,
-				toolCallId,
-			};
-			report(() => reporter.scopeStart(scope, clock()));
-			try {
-				const result = await original(
-					toolCallId,
-					params,
-					signal,
-					onUpdate,
-					proxyCtx(ctx, scope, reporter, clock),
-				);
-				report(() => reporter.scopeEnd(scope, clock(), { ok: true, result }));
-				return result;
-			} catch (error) {
-				report(() => reporter.scopeEnd(scope, clock(), { ok: false, error }));
-				throw error;
-			}
+	instrumentMapEntries(extension.tools, (toolName, registered) => {
+		wrapToolExecute(registered.definition, toolName, ref, reporter, clock);
+	});
+}
+
+type ToolExecute = RegisteredTool["definition"]["execute"];
+
+function wrapToolExecute(
+	definition: RegisteredTool["definition"],
+	toolName: string,
+	ref: ExtensionRef,
+	reporter: InstrumentationReporter,
+	clock: Clock,
+): void {
+	const original: ToolExecute = unwrapped(definition.execute);
+	// A `function` (not an arrow) so `this` stays whatever the caller bound —
+	// the SDK calls `definition.execute(…)`, so a method-style `execute` that
+	// reads `this` keeps seeing its own definition. Every argument, including
+	// any the SDK adds after `ctx`, is forwarded as-is.
+	const wrapped = async function (
+		this: RegisteredTool["definition"],
+		...args: Parameters<ToolExecute>
+	): ReturnType<ToolExecute> {
+		const [toolCallId, , , , ctx] = args;
+		const scope: InstrumentedScope = {
+			scopeId: `tool:${crypto.randomUUID()}`,
+			timed: true,
+			extension: ref,
+			trigger: { kind: "tool", toolName, toolCallId },
+			title: toolName,
+			toolCallId,
 		};
-	}
+		report(() => reporter.scopeStart(scope, clock()));
+		const forwarded = [...args];
+		if (isExtensionContext(ctx)) forwarded[4] = proxyCtx(ctx, scope, reporter, clock);
+		try {
+			// SAFETY: `forwarded` is `args` with at most `ctx` swapped for a
+			// Proxy of the same object, so it still matches `ToolExecute`'s own
+			// parameter list.
+			const result = await original.apply(
+				this,
+				forwarded as Parameters<ToolExecute>,
+			);
+			report(() => reporter.scopeEnd(scope, clock(), { ok: true, result }));
+			return result;
+		} catch (error) {
+			report(() => reporter.scopeEnd(scope, clock(), { ok: false, error }));
+			throw error;
+		}
+	};
+	originalByWrapper.set(wrapped, original);
+	definition.execute = wrapped;
 }
 
 function instrumentCommands(
@@ -315,9 +384,14 @@ function instrumentCommands(
 	reporter: InstrumentationReporter,
 	clock: Clock,
 ): void {
-	for (const [name, command] of extension.commands) {
-		const original: RegisteredCommand["handler"] = command.handler;
-		command.handler = async (args, ctx) => {
+	instrumentMapEntries(extension.commands, (name, command) => {
+		type CommandHandler = RegisteredCommand["handler"];
+		const original: CommandHandler = unwrapped(command.handler);
+		const wrapped = async function (
+			this: RegisteredCommand,
+			...args: Parameters<CommandHandler>
+		): ReturnType<CommandHandler> {
+			const [, ctx] = args;
 			const scope: InstrumentedScope = {
 				scopeId: `command:${crypto.randomUUID()}`,
 				timed: true,
@@ -326,17 +400,27 @@ function instrumentCommands(
 				title: `/${name}`,
 			};
 			report(() => reporter.scopeStart(scope, clock()));
+			const forwarded = [...args];
+			if (isExtensionContext(ctx))
+				forwarded[1] = proxyCtx(ctx, scope, reporter, clock);
 			try {
-				await original(args, proxyCtx(ctx, scope, reporter, clock));
+				// SAFETY: same reasoning as `wrapToolExecute`'s `forwarded`.
+				const result = await original.apply(
+					this,
+					forwarded as Parameters<CommandHandler>,
+				);
 				report(() =>
 					reporter.scopeEnd(scope, clock(), { ok: true, result: undefined }),
 				);
+				return result;
 			} catch (error) {
 				report(() => reporter.scopeEnd(scope, clock(), { ok: false, error }));
 				throw error;
 			}
 		};
-	}
+		originalByWrapper.set(wrapped, original);
+		command.handler = wrapped;
+	});
 }
 
 function instrumentShortcuts(
@@ -345,9 +429,14 @@ function instrumentShortcuts(
 	reporter: InstrumentationReporter,
 	clock: Clock,
 ): void {
-	for (const [key, shortcut] of extension.shortcuts) {
-		const original: ExtensionShortcut["handler"] = shortcut.handler;
-		shortcut.handler = async (ctx) => {
+	instrumentMapEntries(extension.shortcuts, (key, shortcut) => {
+		type ShortcutHandler = ExtensionShortcut["handler"];
+		const original: ShortcutHandler = unwrapped(shortcut.handler);
+		const wrapped = async function (
+			this: ExtensionShortcut,
+			...args: Parameters<ShortcutHandler>
+		): Promise<Awaited<ReturnType<ShortcutHandler>>> {
+			const [ctx] = args;
 			const scope: InstrumentedScope = {
 				scopeId: `shortcut:${crypto.randomUUID()}`,
 				timed: true,
@@ -356,17 +445,27 @@ function instrumentShortcuts(
 				title: key,
 			};
 			report(() => reporter.scopeStart(scope, clock()));
+			const forwarded = [...args];
+			if (isExtensionContext(ctx))
+				forwarded[0] = proxyCtx(ctx, scope, reporter, clock);
 			try {
-				await original(proxyCtx(ctx, scope, reporter, clock));
+				// SAFETY: same reasoning as `wrapToolExecute`'s `forwarded`.
+				const result = await original.apply(
+					this,
+					forwarded as Parameters<ShortcutHandler>,
+				);
 				report(() =>
 					reporter.scopeEnd(scope, clock(), { ok: true, result: undefined }),
 				);
+				return result;
 			} catch (error) {
 				report(() => reporter.scopeEnd(scope, clock(), { ok: false, error }));
 				throw error;
 			}
 		};
-	}
+		originalByWrapper.set(wrapped, original);
+		shortcut.handler = wrapped;
+	});
 }
 
 /** A predicate wrapper around `typeof value === "function"`, so the runtime
@@ -415,136 +514,94 @@ function proxyUi(
 	reporter: InstrumentationReporter,
 	clock: Clock,
 ): ExtensionUIContext {
+	const signal = (value: UiSignal) =>
+		report(() => reporter.uiSignal(scope, value, clock()));
+	// Every tap forwards the caller's own argument list untouched (no invented
+	// defaults, nothing dropped), so the real UI sees exactly the call the
+	// extension made.
 	return new Proxy(ui, {
 		get(target, property) {
 			if (property === "setStatus") {
-				const setStatus: ExtensionUIContext["setStatus"] = (key, text) => {
-					report(() =>
-						reporter.uiSignal(scope, { kind: "status", key, text }, clock()),
-					);
-					return target.setStatus(key, text);
+				const setStatus: ExtensionUIContext["setStatus"] = (...args) => {
+					const [key, text] = args;
+					signal({ kind: "status", key, text });
+					return target.setStatus(...args);
 				};
 				return setStatus;
 			}
 			if (property === "setWidget") {
+				// `setWidget` is overloaded (string[] vs factory), so each branch
+				// calls the overload its narrowed `content` matches.
 				const setWidget: ExtensionUIContext["setWidget"] = (
 					key,
 					content,
 					options,
 				) => {
 					if (content === undefined) {
-						report(() =>
-							reporter.uiSignal(
-								scope,
-								{ kind: "widgetClose", key },
-								clock(),
-							),
-						);
+						signal({ kind: "widgetClose", key });
 						return target.setWidget(key, content, options);
 					}
 					if (Array.isArray(content)) {
-						report(() =>
-							reporter.uiSignal(
-								scope,
-								{ kind: "widgetFrame", key, text: content.join("\n") },
-								clock(),
-							),
-						);
+						signal({ kind: "widgetFrame", key, text: content.join("\n") });
 						return target.setWidget(key, content, options);
 					}
-					// A `(tui, theme) => Component` factory's rendered text isn't
-					// observable from the raw argument — its committed terminal-surface
-					// frames are tapped separately by the tracker (see tracker.ts).
+					// A `(tui, theme) => Component` factory: its rendered frames are
+					// reported later, from the terminal surface it mounts
+					// (`ExtensionActivityTracker.observeWidgetFrame`).
+					signal({ kind: "widgetMount", key });
 					return target.setWidget(key, content, options);
 				};
 				return setWidget;
 			}
 			if (property === "setWorkingMessage") {
 				const setWorkingMessage: ExtensionUIContext["setWorkingMessage"] = (
-					message,
+					...args
 				) => {
-					report(() =>
-						reporter.uiSignal(
-							scope,
-							{ kind: "workingMessage", text: message },
-							clock(),
-						),
-					);
-					return target.setWorkingMessage(message);
+					signal({ kind: "workingMessage", text: args[0] });
+					return target.setWorkingMessage(...args);
 				};
 				return setWorkingMessage;
 			}
 			if (property === "notify") {
-				const notify: ExtensionUIContext["notify"] = (message, type = "info") => {
-					report(() =>
-						reporter.uiSignal(
-							scope,
-							{ kind: "notify", text: message, type },
-							clock(),
-						),
-					);
-					return target.notify(message, type);
+				const notify: ExtensionUIContext["notify"] = (...args) => {
+					const [message, type] = args;
+					signal({ kind: "notify", text: message, type: type ?? "info" });
+					return target.notify(...args);
 				};
 				return notify;
 			}
 			if (property === "select") {
-				const select: ExtensionUIContext["select"] = (
-					title,
-					options,
-					dialogOptions,
-				) => {
-					report(() =>
-						reporter.uiSignal(scope, { kind: "waiting", title }, clock()),
-					);
-					return target.select(title, options, dialogOptions);
+				const select: ExtensionUIContext["select"] = (...args) => {
+					signal({ kind: "waiting", title: args[0] });
+					return target.select(...args);
 				};
 				return select;
 			}
 			if (property === "confirm") {
-				const confirm: ExtensionUIContext["confirm"] = (
-					title,
-					message,
-					dialogOptions,
-				) => {
-					report(() =>
-						reporter.uiSignal(scope, { kind: "waiting", title }, clock()),
-					);
-					return target.confirm(title, message, dialogOptions);
+				const confirm: ExtensionUIContext["confirm"] = (...args) => {
+					signal({ kind: "waiting", title: args[0] });
+					return target.confirm(...args);
 				};
 				return confirm;
 			}
 			if (property === "input") {
-				const input: ExtensionUIContext["input"] = (
-					title,
-					placeholder,
-					dialogOptions,
-				) => {
-					report(() =>
-						reporter.uiSignal(scope, { kind: "waiting", title }, clock()),
-					);
-					return target.input(title, placeholder, dialogOptions);
+				const input: ExtensionUIContext["input"] = (...args) => {
+					signal({ kind: "waiting", title: args[0] });
+					return target.input(...args);
 				};
 				return input;
 			}
 			if (property === "editor") {
-				const editor: ExtensionUIContext["editor"] = (title, prefill) => {
-					report(() =>
-						reporter.uiSignal(scope, { kind: "waiting", title }, clock()),
-					);
-					return target.editor(title, prefill);
+				const editor: ExtensionUIContext["editor"] = (...args) => {
+					signal({ kind: "waiting", title: args[0] });
+					return target.editor(...args);
 				};
 				return editor;
 			}
 			if (property === "custom") {
-				const custom: ExtensionUIContext["custom"] = (factory, options) => {
-					report(() =>
-						reporter.uiSignal(
-							scope,
-							{ kind: "waiting", title: "custom UI" },
-							clock(),
-						),
-					);
-					return target.custom(factory, options);
+				const custom: ExtensionUIContext["custom"] = (...args) => {
+					signal({ kind: "waiting", title: "custom UI" });
+					return target.custom(...args);
 				};
 				return custom;
 			}

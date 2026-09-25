@@ -101,3 +101,10 @@ test("activityMessageState maps error/cancelled to error, started/working to run
 	assertEquals(activityMessageState(activity({ state: "error" })), "error");
 	assertEquals(activityMessageState(activity({ state: "cancelled" })), "error");
 });
+
+test("formatActivityDuration hides a 0.0s duration, exactly like tool cards do", () => {
+	assertEquals(
+		formatActivityDuration(activity({ startedAt: 0, finishedAt: 20 })),
+		undefined,
+	);
+});

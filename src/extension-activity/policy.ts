@@ -83,6 +83,9 @@ export const extensionActivityThresholds = {
 	 * promotes after this long, faster than a bare hook because a UI signal
 	 * is itself evidence of real work. */
 	uiPromotionMs: 250,
+	/** Coalescing window for live widget frames (a panel can repaint at 10-30
+	 * fps): at most one card patch per widget per window (§4.4 "Realtime"). */
+	widgetFrameIntervalMs: 100,
 	/** A custom `message_start` attaches to an extension's open-or-recently-
 	 * finished activity within this window. */
 	customMessageAttachWindowMs: 15000,

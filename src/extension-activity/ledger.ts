@@ -23,6 +23,10 @@ function newActivityId(): string {
  * see `DESIGN-ext-activity.md` §2.3's transition table rows. */
 export type UiSignal =
 	| { kind: "widgetFrame"; key: string; text: string }
+	/** A `(tui, theme) => Component` factory mounted under `key`. Carries no
+	 * text of its own: its rendered frames arrive later as `widgetFrame`s via
+	 * `ExtensionActivityTracker.observeWidgetFrame`. The ledger ignores it. */
+	| { kind: "widgetMount"; key: string }
 	| { kind: "widgetClose"; key: string; finalText?: string }
 	| { kind: "status"; key: string; text: string | undefined }
 	| { kind: "workingMessage"; text: string | undefined }
@@ -124,6 +128,14 @@ type MutableActivity = {
 	/** Whether this record ever crossed its promotion threshold — an
 	 * unpromoted record is invisible and gets dropped, not finished, on end. */
 	promoted: boolean;
+	/** Whether a visible UI signal (a widget, a status line, a working message,
+	 * a dialog wait) was ever raised for it. A scope that ends before its own
+	 * promotion still shows retroactively when this is set; a notice or custom
+	 * message alone never creates an activity (§2.3) — its own row shows it. */
+	signalled: boolean;
+	/** The timed scope that created this record, if any — lets `#remove`
+	 * drop its `#byScopeId` entry so the index never outgrows the records. */
+	scopeId?: string;
 };
 
 /**
@@ -167,8 +179,10 @@ export class ExtensionActivityLedger {
 			startedAt: now,
 			output: [],
 			promoted: false,
+			signalled: false,
 			anchor: scope.toolCallId ? { toolCallId: scope.toolCallId } : undefined,
 			turnEntryId: scope.turnEntryId,
+			scopeId: scope.scopeId,
 		};
 		this.#insert(record, scope.scopeId, undefined);
 	}
@@ -210,8 +224,7 @@ export class ExtensionActivityLedger {
 		if (!record || isTerminalExtensionActivityState(record.state))
 			return { kind: "none" };
 		if (!record.promoted) {
-			const hadSignal = record.output.length > 0 || record.progress !== undefined;
-			if (!hadSignal) {
+			if (!record.signalled) {
 				this.#remove(id);
 				return { kind: "dropped", activityId: id };
 			}
@@ -237,8 +250,21 @@ export class ExtensionActivityLedger {
 		if (!record) return { kind: "none" };
 		const wasPromoted = record.promoted;
 		const wasTerminal = isTerminalExtensionActivityState(record.state);
+		if (wasTerminal) {
+			// A finished record only still cares about its panel's final frame
+			// (JEV/Advisor close their widget through a captured ctx after the
+			// hook or tool returned). Live frames after that are spinner churn:
+			// the card already shows its summary, so they change nothing.
+			if (signal.kind === "widgetFrame" || signal.kind === "widgetMount")
+				return { kind: "none" };
+			applySignal(record, signal, now);
+			// "finished" (not "updated") so the owner re-writes the persisted
+			// "finish" entry with the panel output — last write wins on replay.
+			return signal.kind === "widgetClose"
+				? { kind: "finished", activity: toPublic(record) }
+				: { kind: "updated", activity: toPublic(record) };
+		}
 		applySignal(record, signal, now);
-		if (wasTerminal) return { kind: "updated", activity: toPublic(record) };
 		if (!record.promoted) return { kind: "pending", activity: toPublic(record) };
 		return wasPromoted
 			? { kind: "updated", activity: toPublic(record) }
@@ -301,6 +327,7 @@ export class ExtensionActivityLedger {
 			startedAt: input.now,
 			output: [],
 			promoted: false,
+			signalled: false,
 		};
 		applySignal(record, input.signal, input.now);
 		this.#insert(record, undefined, key);
@@ -376,6 +403,12 @@ export class ExtensionActivityLedger {
 		this.#byScopeId.clear();
 		this.#byCarrierKey.clear();
 		return { cancelled, dropped };
+	}
+
+	/** Number of timed-scope index entries — diagnostics/tests only. Bounded by
+	 * the records still held (see `#remove`), never by how many hooks ran. */
+	get scopeIndexSize(): number {
+		return this.#byScopeId.size;
 	}
 
 	get(id: string): ExtensionActivity | undefined {
@@ -463,6 +496,9 @@ export class ExtensionActivityLedger {
 	}
 
 	#remove(id: string): void {
+		const record = this.#activities.get(id);
+		if (record?.scopeId !== undefined && this.#byScopeId.get(record.scopeId) === id)
+			this.#byScopeId.delete(record.scopeId);
 		this.#activities.delete(id);
 		const orderIndex = this.#order.indexOf(id);
 		if (orderIndex !== -1) this.#order.splice(orderIndex, 1);
@@ -474,9 +510,6 @@ export class ExtensionActivityLedger {
 			const record = this.#activities.get(id);
 			if (!record || !isTerminalExtensionActivityState(record.state)) continue;
 			this.#remove(id);
-			for (const [key, mappedId] of this.#byScopeId) {
-				if (mappedId === id) this.#byScopeId.delete(key);
-			}
 			for (const [key, mappedId] of this.#byCarrierKey) {
 				if (mappedId === id) this.#byCarrierKey.delete(key);
 			}
@@ -516,13 +549,18 @@ function toPublic(record: MutableActivity): ExtensionActivity {
 }
 
 function applySignal(record: MutableActivity, signal: UiSignal, _now: number): void {
+	if (raisesVisibleSignal(signal)) record.signalled = true;
 	switch (signal.kind) {
 		case "widgetFrame": {
-			record.progress = capProgressLine(signal.text);
+			const line = panelProgressLine(signal.text);
+			if (line !== undefined) record.progress = capProgressLine(line);
 			break;
 		}
+		case "widgetMount":
+			break;
 		case "widgetClose": {
 			const text = signal.finalText ?? record.progress ?? "";
+			if (text.trim() === "") break;
 			record.output = capOutputSections([
 				...record.output,
 				{ kind: "panel", title: "Panel (final frame)", text },
@@ -561,6 +599,23 @@ function applySignal(record: MutableActivity, signal: UiSignal, _now: number): v
 	}
 }
 
+/** Box-drawing and block characters a terminal panel frames itself with. */
+const panelChromePattern = /[─-▟]/g;
+
+/**
+ * The line a live panel frame reports as progress: its last line that still
+ * says something once the panel's border characters are stripped (a framed
+ * card's last raw line is its bottom border). `undefined` for a blank frame.
+ */
+function panelProgressLine(text: string): string | undefined {
+	const lines = text.split("\n");
+	for (let index = lines.length - 1; index >= 0; index -= 1) {
+		const line = (lines[index] ?? "").replace(panelChromePattern, " ").trim();
+		if (/[\p{L}\p{N}]/u.test(line)) return line.replace(/\s{2,}/g, " ");
+	}
+	return undefined;
+}
+
 function appendDedupedStatusLine(
 	output: readonly ExtensionActivityOutput[],
 	text: string,
@@ -582,6 +637,23 @@ function appendDedupedStatusLine(
 	return next;
 }
 
+/** Whether `signal` put something on screen for this activity (see
+ * `MutableActivity.signalled`). */
+function raisesVisibleSignal(signal: UiSignal): boolean {
+	switch (signal.kind) {
+		case "widgetFrame":
+		case "widgetMount":
+		case "waiting":
+			return true;
+		case "status":
+		case "workingMessage":
+			return signal.text !== undefined;
+		case "widgetClose":
+		case "notify":
+			return false;
+	}
+}
+
 function signalCloses(signal: UiSignal): boolean {
 	return (
 		signal.kind === "widgetClose" ||
@@ -591,7 +663,12 @@ function signalCloses(signal: UiSignal): boolean {
 }
 
 function signalTriggerKind(signal: UiSignal): "status" | "widget" | "working" {
-	if (signal.kind === "widgetFrame" || signal.kind === "widgetClose") return "widget";
+	if (
+		signal.kind === "widgetFrame" ||
+		signal.kind === "widgetClose" ||
+		signal.kind === "widgetMount"
+	)
+		return "widget";
 	if (signal.kind === "workingMessage") return "working";
 	return "status";
 }

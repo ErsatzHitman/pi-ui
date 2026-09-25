@@ -10,6 +10,8 @@ import type {
 	ExtensionActivityTrigger,
 	ExtensionActivityView,
 } from "../extension-activity-types.ts";
+import { Icon } from "./icon.tsx";
+import { ChevronRight } from "./icons.ts";
 import type { AppMessage } from "./render-state.ts";
 import { StatusDot } from "./status-dot.tsx";
 import { syncHtml } from "./sync-html.ts";
@@ -124,12 +126,20 @@ function renderActivityDetails(activity: ExtensionActivityView): string {
 						{activity.durationText}
 					</span>
 				)}
+				{activity.output.length > 0 && (
+					<span class="context-chevron">
+						<Icon icon={ChevronRight} class="context-chevron-icon" />
+					</span>
+				)}
+				{/* Inside <summary> so the live progress, and the one-line result once
+				    finished, stay visible while the card is collapsed (§4.2: "the
+				    summary line is always visible … that is the result kept visible"). */}
+				{lineText && (
+					<span class="ext-activity-progress" safe>
+						{lineText}
+					</span>
+				)}
 			</summary>
-			{lineText && (
-				<p class="ext-activity-progress" safe>
-					{lineText}
-				</p>
-			)}
 			{activity.output.length > 0 && (
 				<div
 					class="tool-output-surface ext-activity-output"

@@ -34,12 +34,37 @@ export const fakeActivityTools = {
 } as const;
 
 /** JEV stand-in: a directory extension (`fake-jev/index.js`, slug `fake-jev`), matching
- * JEV's own directory layout. `fake_jev_consult` mounts a widget, updates it three times,
- * and returns text. `before_agent_start` mounts a widget for the duration of a slow hook
- * and appends a system-prompt section — JEV's own shape (`card.ts`, `index.ts`). */
+ * JEV's own directory layout. `fake_jev_consult` mounts a `(tui, theme) => Component` card
+ * the way JEV's `card.ts` does (a framed component repainted by a 40 ms ticker through
+ * `tui.requestRender()`, so its text only ever exists as rendered frames), updates it
+ * three times, returns text, and closes the card 200 ms later through the captured ctx.
+ * `before_agent_start` mounts a string-array widget for the duration of a slow hook and
+ * appends a system-prompt section — JEV's own shape (`card.ts`, `index.ts`). */
 const fakeJevSource = `
 function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function mountCard(ctx, key, state) {
+	let tui;
+	ctx.ui.setWidget(key, (host) => {
+		tui = host;
+		return {
+			render: () => ["+- Fake JEV -+", "| " + state.phase + " |", "+------------+"],
+			invalidate() {},
+		};
+	});
+	const ticker = setInterval(() => tui?.requestRender(), 40);
+	return {
+		update(phase) {
+			state.phase = phase;
+			tui?.requestRender();
+		},
+		close() {
+			clearInterval(ticker);
+			ctx.ui.setWidget(key, undefined);
+		},
+	};
 }
 
 export default function (pi) {
@@ -49,16 +74,16 @@ export default function (pi) {
 		description: "Consults the fake JEV agent",
 		parameters: { type: "object", properties: {} },
 		execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
+			const card = mountCard(ctx, "fake-jev", { phase: "consulting jev (1/3)" });
 			for (let step = 1; step <= 3; step += 1) {
-				ctx.ui.setWidget("fake-jev", [\`consulting jev (\${step}/3)\`]);
-				await sleep(60);
+				card.update("consulting jev (" + step + "/3)");
+				await sleep(120);
 			}
+			card.update("recommendation: use 2 agents");
 			// JEV's own card lingers after the tool returns, closed later through the
 			// captured ctx (card.ts's CARD_LINGER_MS) — the ledger must keep the step
 			// as "done" and only refresh its output when this later close arrives.
-			setTimeout(() => {
-				ctx.ui.setWidget("fake-jev", undefined);
-			}, 200);
+			setTimeout(() => card.close(), 200);
 			return { content: [{ type: "text", text: "jev: use 2 agents" }], details: {} };
 		},
 	});
@@ -155,8 +180,17 @@ export default function (pi) {
 		// appearing retroactively as "done" (a hook faster than the threshold
 		// still shows once it has raised a UI signal, per the ledger's
 		// endTimedScope rule, but never passes through a visible working moment).
+		// Advisor's live panel is a component factory repainted at 10 fps
+		// (loop/overlay.ts), so its text only ever exists as rendered frames.
+		const panel = { line: "reviewing… (1/9)" };
+		let tui;
+		ctx.ui.setWidget("fake-advisor-auto", (host) => {
+			tui = host;
+			return { render: () => ["Advisor", panel.line], invalidate() {} };
+		});
 		for (let line = 1; line <= 9; line += 1) {
-			ctx.ui.setWidget("fake-advisor-auto", [\`reviewing… (\${line}/9)\`]);
+			panel.line = "reviewing… (" + line + "/9)";
+			tui?.requestRender();
 			await sleep(110);
 		}
 		pi.sendMessage({

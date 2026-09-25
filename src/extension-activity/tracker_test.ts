@@ -495,7 +495,10 @@ test("a tool scope's outcome maps content to a summary/output section, and isErr
 	const finished = changes.at(-1);
 	assertExists(finished);
 	if (finished?.kind !== "finished") throw new Error("expected finished");
-	assertEquals(finished.activity.summary, "42");
+	// The tool card right above already shows the result; the step never copies
+	// it (no duplicate summary line, no second copy in the session file).
+	assertEquals(finished.activity.summary, undefined);
+	assertEquals(finished.activity.output, []);
 
 	const errorScope = hookScope({
 		scopeId: "hook:err",
@@ -706,4 +709,135 @@ test("a tool_result hook that echoes its input content back unchanged is a no-op
 
 	const rewritten = run({ content: [{ type: "text", text: "A red square." }] });
 	assertEquals(rewritten.summary, "Modified tool result");
+});
+
+test("a factory widget's rendered frames are coalesced into progress and kept as its final frame", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 50 });
+	const toolScope = hookScope({
+		scopeId: "tool:jev",
+		trigger: { kind: "tool", toolName: "jev_decompose", toolCallId: "c1" },
+		title: "jev_decompose",
+		toolCallId: "c1",
+	});
+	tracker.scopeStart(toolScope, 0);
+	const promotion = timers[0];
+	assertExists(promotion);
+	promotion.run();
+
+	// A `(tui, theme) => Component` factory: nothing to read from the call itself.
+	tracker.uiSignal(toolScope, { kind: "widgetMount", key: "jev-decompose" }, 1);
+	assertEquals(tracker.ownsWidget("jev-decompose"), true);
+	assertEquals(tracker.ownsWidget("someone-else"), false);
+	const before = changes.length;
+
+	// Three frames inside one coalescing window -> one scheduled flush, latest wins.
+	tracker.observeWidgetFrame("jev-decompose", "Jev\nconsulting jev (1)", 10);
+	tracker.observeWidgetFrame("jev-decompose", "Jev\nconsulting jev (2)", 20);
+	tracker.observeWidgetFrame("jev-decompose", "Jev\nconsulting jev (3)", 30);
+	const frameTimers = timers.filter((timer) => timer.delayMs === 100);
+	assertEquals(frameTimers.length, 1);
+	assertEquals(changes.length, before);
+	frameTimers[0]?.run();
+	const flushed = changes.at(-1);
+	if (flushed?.kind !== "updated")
+		throw new Error(`expected updated, got ${flushed?.kind}`);
+	assertEquals(flushed.activity.progress, "consulting jev (3)");
+
+	// An identical repaint (a spinner tick that changed nothing) schedules nothing.
+	tracker.observeWidgetFrame("jev-decompose", "Jev\nconsulting jev (3)", 40);
+	assertEquals(timers.filter((timer) => timer.delayMs === 100).length, 1);
+
+	tracker.scopeEnd(toolScope, 60, {
+		ok: true,
+		result: { content: [{ type: "text", text: "jev: no recommendation" }] },
+	});
+	// JEV closes its card through the captured ctx after the tool returned.
+	tracker.observeWidgetFrame("jev-decompose", "Jev\nfailed: no credential", 70);
+	tracker.uiSignal(toolScope, { kind: "widgetClose", key: "jev-decompose" }, 2600);
+	const closed = changes.at(-1);
+	if (closed?.kind !== "finished")
+		throw new Error(`expected finished, got ${closed?.kind}`);
+	const panel = closed.activity.output.find((section) => section.kind === "panel");
+	assertEquals(panel?.text, "Jev\nfailed: no credential");
+	assertEquals(tracker.ownsWidget("jev-decompose"), false);
+});
+
+test("a string-array widget update is coalesced the same way as a factory frame", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 0 });
+	const scope = hookScope();
+	tracker.scopeStart(scope, 0);
+	timers[0]?.run();
+	for (let tick = 0; tick < 10; tick += 1) {
+		tracker.uiSignal(
+			scope,
+			{ kind: "widgetFrame", key: "panel", text: `line ${tick}` },
+			tick,
+		);
+	}
+	const frameTimers = timers.filter((timer) => timer.delayMs === 100);
+	assertEquals(frameTimers.length, 1);
+	frameTimers[0]?.run();
+	const updates = changes.filter((change) => change.kind === "updated");
+	assertEquals(updates.length, 1);
+	const last = updates.at(-1);
+	if (last?.kind !== "updated") throw new Error("unreachable");
+	assertEquals(last.activity.progress, "line 9");
+});
+
+test("a frame for a widget no instrumented scope mounted is ignored", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 0 });
+	tracker.observeWidgetFrame("unknown", "text", 0);
+	assertEquals(timers.length, 0);
+	assertEquals(changes.length, 0);
+});
+
+test("a throwing sink never escapes a timer callback or a reporter call", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const tracker = new ExtensionActivityTracker({
+		sink: () => {
+			throw new Error("sink exploded");
+		},
+		scheduler,
+		clock: () => 0,
+	});
+	const scope = hookScope();
+	tracker.scopeStart(scope, 0);
+	timers[0]?.run();
+	tracker.scopeEnd(scope, 900, { ok: true, result: undefined });
+	assertEquals(tracker.list()[0]?.state, "done");
+});
+
+test("a late close from an older mount under the same key never steals the newer mount's frame", () => {
+	const { scheduler } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 0 });
+	// JEV's tool consult mounts card A, then its `context` hook mounts card B under
+	// the same widget key before A's lingering close fires (both real JEV paths).
+	const toolScope = hookScope({ scopeId: "tool:a", title: "jev_decompose" });
+	const hookScopeB = hookScope({ scopeId: "hook:b", title: "context" });
+	tracker.scopeStart(toolScope, 0);
+	tracker.uiSignal(toolScope, { kind: "widgetMount", key: "jev-decompose" }, 1);
+	tracker.observeWidgetFrame("jev-decompose", "card A: failed", 2);
+	tracker.scopeEnd(toolScope, 3, { ok: true, result: undefined });
+	tracker.scopeStart(hookScopeB, 10);
+	tracker.uiSignal(hookScopeB, { kind: "widgetMount", key: "jev-decompose" }, 11);
+	tracker.observeWidgetFrame("jev-decompose", "card B: failed", 12);
+	tracker.scopeEnd(hookScopeB, 13, { ok: true, result: undefined });
+
+	tracker.uiSignal(toolScope, { kind: "widgetClose", key: "jev-decompose" }, 2500);
+	tracker.uiSignal(hookScopeB, { kind: "widgetClose", key: "jev-decompose" }, 2510);
+	const panels = new Map<string, string | undefined>();
+	for (const change of changes) {
+		if (change.kind !== "finished") continue;
+		const panel = change.activity.output.find((section) => section.kind === "panel");
+		if (panel) panels.set(change.activity.title, panel.text);
+	}
+	assertEquals(panels.get("context"), "card B: failed");
+	assertEquals(panels.get("jev_decompose"), "card A: failed");
 });

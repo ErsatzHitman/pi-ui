@@ -22,7 +22,11 @@ export function toExtensionActivityView(
  * formatted exactly like a tool card's duration (§4.2). */
 export function formatActivityDuration(activity: ExtensionActivity): string | undefined {
 	if (activity.finishedAt === undefined) return undefined;
-	return formatDuration(Math.max(0, activity.finishedAt - activity.startedAt));
+	const duration = formatDuration(
+		Math.max(0, activity.finishedAt - activity.startedAt),
+	);
+	// Same rule as `toolEndMeta`: a "0.0s" badge says nothing.
+	return duration === "0.0s" ? undefined : duration;
 }
 
 /** The message's one-line text: the result summary once there is one, else

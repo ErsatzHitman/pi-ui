@@ -149,6 +149,7 @@ import { defaultTerminalColumns } from "./terminal-surface/headless-terminal.ts"
 import { resolveTranscriptTheme } from "./terminal-surface/theme.ts";
 import {
 	contentToText,
+	stripAnsi,
 	formatToolResult,
 	formatToolStart,
 	toolEndMeta,
@@ -481,6 +482,21 @@ export class RuntimeController {
 			onChannel: (channel, payload) => {
 				this.liveWorkspace.recordChannel(channel, payload);
 				this.publishLiveWorkspace({ channels: true });
+			},
+			// JEV's card and Advisor's live panel are `(tui, theme) => Component`
+			// widgets: their text only exists as rendered frames, so the foreground
+			// tracker (widgets only mount for the foreground runtime) reads them here.
+			onWidgetFrame: (key, rawLines) => {
+				const tracker = extensionActivityTrackers.get(this.runtime.session);
+				if (!tracker?.ownsWidget(key)) return;
+				tracker.observeWidgetFrame(
+					key,
+					rawLines
+						.map((line) => stripAnsi(line).trimEnd())
+						.join("\n")
+						.trimEnd(),
+					Date.now(),
+				);
 			},
 			onCustomPrompt: (capturing) => {
 				const release = this.liveWorkspace.trackCustomPrompt(capturing);

@@ -16,6 +16,7 @@
 	}
 
 	.ext-activity-summary {
+		flex-wrap: wrap;
 		border-radius: var(--radius-md);
 		transition: background-color 160ms var(--ease-out);
 	}
@@ -49,10 +50,14 @@
 		color: var(--text-muted);
 	}
 
+	/* The second line of the summary row: live progress, then the kept result. */
 	.ext-activity-progress {
-		margin: 0.375rem 0 0;
+		overflow: hidden;
+		flex-basis: 100%;
 		color: var(--text-muted);
-		font-size: var(--text-sm);
+		font: var(--text-sm) / 1.4 var(--font-sans);
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.ext-activity-section {

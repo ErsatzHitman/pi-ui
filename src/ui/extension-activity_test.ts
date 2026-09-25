@@ -238,3 +238,42 @@ test("the chip row adds a +N overflow chip past two working activities", () => {
 		false,
 	);
 });
+
+test("the result line lives inside <summary>, so it stays visible while the card is collapsed", () => {
+	const html = renderMessage(
+		activityMessage("extension-activity", {
+			activities: [
+				activity({
+					state: "done",
+					summary: "A red square.",
+					finishedAt: 8000,
+					durationText: "8.0s",
+					output: [
+						{
+							kind: "returned-message",
+							title: "Sent to model",
+							text: "A red square.",
+							hidden: true,
+						},
+					],
+				}),
+			],
+		}),
+	);
+	const summary = html.slice(html.indexOf("<summary"), html.indexOf("</summary>"));
+	assertStringIncludes(summary, 'class="ext-activity-progress"');
+	assertStringIncludes(summary, "A red square.");
+	// A card with collapsible output shows the same chevron every context card does.
+	assertStringIncludes(summary, "context-chevron");
+});
+
+test("a card with no output has nothing to expand, so it shows no chevron", () => {
+	const html = renderMessage(
+		activityMessage("extension-activity", {
+			activities: [activity({ progress: "describing 1 image" })],
+		}),
+	);
+	const summary = html.slice(html.indexOf("<summary"), html.indexOf("</summary>"));
+	assertStringIncludes(summary, "describing 1 image");
+	assertStringExcludes(html, "context-chevron");
+});

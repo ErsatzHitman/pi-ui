@@ -155,6 +155,12 @@ export type TerminalSurfaceControllerOptions = {
 	/** Called with the full current surface list after every coalesced frame commit or disposal. */
 	onUpdate: (surfaces: readonly TerminalSurface[]) => void;
 	/**
+	 * Called with one surface's raw (still ANSI-styled) rendered lines after each of its
+	 * coalesced frame commits — lets an observer read what a component actually drew (the
+	 * extension-activity tracker keeps a panel's latest frame). Errors are swallowed.
+	 */
+	onFrame?: (id: string, rawLines: readonly string[]) => void;
+	/**
 	 * The requesting client's last reported whole-viewport terminal-cell grid
 	 * (`AppStore.clientViewportCells`, via `POST /extensions/terminal/viewport`
 	 * — `static/app/terminal-keys.js`'s `reportViewportCells`), read fresh on
@@ -549,6 +555,13 @@ export class TerminalSurfaceController {
 			revision: mount.revision,
 		});
 		this.#publish();
+		if (this.options.onFrame) {
+			try {
+				this.options.onFrame(id, rawLines);
+			} catch {
+				// An observer must never break rendering the surface itself.
+			}
+		}
 	}
 
 	#publish(): void {

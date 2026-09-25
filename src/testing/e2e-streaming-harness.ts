@@ -20,7 +20,10 @@ import { mkdir, rm } from "node:fs/promises";
 
 import { makeTempDir } from "#testing/temp";
 
-import { RuntimeController } from "../agent/runtime-controller.ts";
+import {
+	RuntimeController,
+	type RuntimeControllerActivationOptions,
+} from "../agent/runtime-controller.ts";
 import { DatastarClientHub } from "../server/datastar-client-hub.ts";
 import { AppStore } from "../state/app-store.ts";
 import { UiRenderer } from "../ui/ui-renderer.ts";
@@ -50,6 +53,8 @@ export type StreamingHarnessOptions = Readonly<{
 	 * created — e.g. to drop extra fixture extensions into
 	 * `${agentDir}/extensions/` so the real SDK loader discovers them. */
 	beforeCreate?: (agentDir: string) => Promise<void>;
+	/** Extra `RuntimeController` options, e.g. the `extensions.activity*` switches. */
+	controllerOptions?: RuntimeControllerActivationOptions;
 }>;
 
 export async function createStreamingHarness(
@@ -77,7 +82,11 @@ export async function createStreamingHarness(
 		const hub = new DatastarClientHub();
 		const renderer = new UiRenderer(store, hub);
 
-		controller = await RuntimeController.create(store, cwd, {});
+		controller = await RuntimeController.create(
+			store,
+			cwd,
+			options.controllerOptions ?? {},
+		);
 		// Narrow once, outside the closures below: TS can't carry the post-assignment
 		// narrowing of a captured `let` through an arrow function boundary.
 		const readyController = controller;

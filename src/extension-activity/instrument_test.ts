@@ -372,3 +372,194 @@ test("identifyToolOwner resolves an extension-registered tool and ignores built-
 		undefined,
 	);
 });
+
+/** Transparency edge cases: `this`-binding, extra arguments, a missing ctx, a
+ * tool definition shared by two runtimes, and late (post-instrumentation)
+ * registration — see `DESIGN-ext-activity.md` §2.2. */
+const edgeFixtureSource = `
+const sharedTool = {
+	name: "shared_tool",
+	label: "Shared",
+	description: "A module-level definition object, reused by every factory call",
+	parameters: { type: "object", properties: {} },
+	marker: "definition-this",
+	async execute(toolCallId, _params, _signal, _onUpdate, ctx, ...extra) {
+		ctx?.ui?.setWidget?.("edge-panel", () => ({ render: () => ["x"], invalidate() {} }));
+		return {
+			content: [{ type: "text", text: String(this.marker) }],
+			details: { extra, ctxType: typeof ctx },
+		};
+	},
+};
+
+export default function (pi) {
+	pi.registerTool(sharedTool);
+	pi.registerCommand("edge-cmd", {
+		description: "Edge command",
+		marker: "command-this",
+		handler: async function (_args, ctx) {
+			ctx.ui.notify("plain notice");
+			return this.marker;
+		},
+	});
+	pi.on("session_start", async () => {
+		pi.registerTool({
+			name: "late_tool",
+			label: "Late",
+			description: "Registered from session_start, after instrumentation",
+			parameters: { type: "object", properties: {} },
+			execute: async (_id, _params, _signal, _onUpdate, ctx) => {
+				ctx.ui.setStatus("late-status", "on");
+				return { content: [{ type: "text", text: "late" }], details: {} };
+			},
+		});
+	});
+}
+`;
+
+async function loadEdgeFixture(): Promise<Extension> {
+	const root = await makeTempDir({ prefix: "instrument-edge-test-" });
+	const agentDir = `${root}/agent`;
+	const cwd = `${root}/workspace`;
+	await mkdir(`${agentDir}/extensions`, { recursive: true });
+	await mkdir(cwd, { recursive: true });
+	await Bun.write(`${agentDir}/extensions/edge.js`, edgeFixtureSource);
+	const result = await discoverAndLoadExtensions([], cwd, agentDir);
+	assertEquals(result.errors, []);
+	const extension = result.extensions[0];
+	assertExists(extension);
+	return extension;
+}
+
+function recordingUiCtx(calls: unknown[]): ExtensionContext {
+	const ui = {
+		notify(...args: unknown[]) {
+			calls.push({ notify: args });
+		},
+		setWidget(...args: unknown[]) {
+			calls.push({ setWidget: args });
+		},
+		setStatus(...args: unknown[]) {
+			calls.push({ setStatus: args });
+		},
+	};
+	return { ui, mode: "tui", hasUI: true } as unknown as ExtensionContext;
+}
+
+test("a tool's execute keeps its definition as `this`, forwards extra arguments, and tolerates a missing ctx", async () => {
+	const extension = await loadEdgeFixture();
+	const { reporter, log } = recordingReporter();
+	instrumentExtensions([extension], reporter, resolveExtensionRef, () => 0);
+	const definition = extension.tools.get("shared_tool")?.definition;
+	assertExists(definition);
+	const execute = definition.execute as (...args: unknown[]) => Promise<{
+		content: { text: string }[];
+		details: { extra: unknown[]; ctxType: string };
+	}>;
+
+	// Called exactly as `wrapToolDefinition` calls it: as a method of the definition.
+	const withCtx = await execute.call(
+		definition,
+		"call-1",
+		{},
+		undefined,
+		undefined,
+		recordingUiCtx([]),
+		"extra-1",
+		"extra-2",
+	);
+	assertEquals(withCtx.content[0]?.text, "definition-this");
+	assertEquals(withCtx.details.extra, ["extra-1", "extra-2"]);
+
+	const withoutCtx = await execute.call(definition, "call-2", {}, undefined, undefined);
+	assertEquals(withoutCtx.details.ctxType, "undefined");
+	assertEquals(
+		log
+			.filter((entry) => entry.event === "end")
+			.map((entry) => entry.scope.toolCallId),
+		["call-1", "call-2"],
+	);
+});
+
+test("a factory setWidget is reported as a widget mount with the real call forwarded untouched", async () => {
+	const extension = await loadEdgeFixture();
+	const { reporter, log } = recordingReporter();
+	instrumentExtensions([extension], reporter, resolveExtensionRef, () => 0);
+	const definition = extension.tools.get("shared_tool")?.definition;
+	assertExists(definition);
+	const calls: unknown[] = [];
+	await definition.execute("call-1", {}, undefined, undefined, recordingUiCtx(calls));
+	const signal = log.find((entry) => entry.event === "signal");
+	if (signal?.event !== "signal") throw new Error("expected a signal entry");
+	assertEquals(signal.signal, { kind: "widgetMount", key: "edge-panel" });
+	assertEquals(calls.length, 1);
+});
+
+test("a command handler keeps its `this`, its return value, and the exact ui arguments it passed", async () => {
+	const extension = await loadEdgeFixture();
+	const { reporter, log } = recordingReporter();
+	instrumentExtensions([extension], reporter, resolveExtensionRef, () => 0);
+	const command = extension.commands.get("edge-cmd");
+	assertExists(command);
+	const calls: unknown[] = [];
+	const handler = command.handler as (...args: unknown[]) => Promise<unknown>;
+	const result = await handler.call(command, "", recordingUiCtx(calls));
+	assertEquals(result, "command-this");
+	// `notify(message)` reaches the real UI with no invented `type` argument…
+	assertEquals(calls, [{ notify: ["plain notice"] }]);
+	// …while the activity still records it as the "info" it defaults to.
+	const signal = log.find((entry) => entry.event === "signal");
+	if (signal?.event !== "signal") throw new Error("expected a signal entry");
+	assertEquals(signal.signal, { kind: "notify", text: "plain notice", type: "info" });
+});
+
+test("a tool registered after instrumentation (e.g. from session_start) is instrumented too", async () => {
+	const extension = await loadEdgeFixture();
+	const { reporter, log } = recordingReporter();
+	instrumentExtensions([extension], reporter, resolveExtensionRef, () => 0);
+	const sessionStart = extension.handlers.get("session_start")?.slice()[0];
+	assertExists(sessionStart);
+	await sessionStart({ type: "session_start" }, recordingUiCtx([]));
+	const late = extension.tools.get("late_tool");
+	assertExists(late);
+	await late.definition.execute("late-1", {}, undefined, undefined, recordingUiCtx([]));
+	const toolStart = log.find(
+		(entry) => entry.event === "start" && entry.scope.trigger.kind === "tool",
+	);
+	assertExists(toolStart);
+	assertEquals(toolStart.scope.toolCallId, "late-1");
+});
+
+test("a tool definition shared by two instrumented runtimes is wrapped once, never twice", async () => {
+	const extension = await loadEdgeFixture();
+	const { reporter: firstReporter, log: firstLog } = recordingReporter();
+	const { reporter: secondReporter, log: secondLog } = recordingReporter();
+	instrumentExtensions([extension], firstReporter, resolveExtensionRef, () => 0);
+	// A second runtime's `Extension` object whose factory registered the same
+	// module-level definition (the SDK's factory cache makes this possible).
+	const secondRuntimeExtension: Extension = {
+		...extension,
+		handlers: new Map(),
+		tools: new Map(extension.tools),
+		commands: new Map(),
+		shortcuts: new Map(),
+	};
+	instrumentExtensions(
+		[secondRuntimeExtension],
+		secondReporter,
+		resolveExtensionRef,
+		() => 0,
+	);
+	const definition = secondRuntimeExtension.tools.get("shared_tool")?.definition;
+	assertExists(definition);
+	const result = await definition.execute(
+		"call-1",
+		{},
+		undefined,
+		undefined,
+		recordingUiCtx([]),
+	);
+	assertEquals(result.content[0], { type: "text", text: "definition-this" });
+	const starts = [...firstLog, ...secondLog].filter((entry) => entry.event === "start");
+	assertEquals(starts.length, 1);
+});

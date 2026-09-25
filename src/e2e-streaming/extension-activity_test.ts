@@ -6,6 +6,7 @@
 // drives the exact same signals against a real browser. The model is the scripted faux
 // provider; nothing here reaches a real model.
 import { test } from "bun:test";
+import { readFileSync } from "node:fs";
 
 import { assertEquals, assertExists, assertStringIncludes } from "#testing/assertions";
 import { createStreamingHarness, waitForCondition } from "#testing/e2e-streaming-harness";
@@ -197,20 +198,41 @@ test("a JEV-style tool step keeps its panel output after the widget closes on a 
 		assertExists(doneTool);
 		assertEquals(doneTool.state, "success");
 
-		// The widget closes 200ms after the tool returns (JEV's own lingering-card
-		// shape) — the step must still be "done", and its output must pick up the
-		// final panel frame instead of losing it.
+		// The card is a `(tui, theme) => Component` factory (JEV's real shape): its
+		// rendered frames drove the step's live progress…
+		assertStringIncludes(doneTool.activities?.[0]?.progress ?? "", "consulting jev");
+		// …and it closes 200ms after the tool returns (JEV's lingering card) — the
+		// step must still be "done", and its output must pick up the final rendered
+		// frame instead of losing it.
 		await waitForCondition(
 			() => {
 				const step = jevTool()?.activities?.[0];
 				return (
 					step?.state === "done" &&
-					(step.output ?? []).some((section) =>
-						section.text.includes("consulting jev (3/3)"),
+					(step.output ?? []).some(
+						(section) =>
+							section.kind === "panel" &&
+							section.text.includes("recommendation: use 2 agents"),
 					)
 				);
 			},
 			{ message: "fake_jev_consult step never picked up the final panel frame" },
+		);
+		// That late panel is persisted too (a re-written "finish" entry), so it
+		// survives a reload or resume, not just the live transcript.
+		const sessionPath = harness.store.currentSessionPath;
+		assertExists(sessionPath);
+		await waitForCondition(
+			() =>
+				readFileSync(sessionPath, "utf8")
+					.split("\n")
+					.some(
+						(line) =>
+							line.includes(extensionActivityEntryType) &&
+							line.includes('"phase":"finish"') &&
+							line.includes("recommendation: use 2 agents"),
+					),
+			{ message: "the late panel frame was never persisted" },
 		);
 	} finally {
 		await harness.dispose();
@@ -241,6 +263,20 @@ test("an Advisor-style auto-review shows a standalone card and the display:true 
 		assertExists(card);
 		const progress = card.activities?.[0]?.progress ?? card.activities?.[0]?.summary;
 		assertStringIncludes(progress ?? "", "reviewing");
+		// The live panel is a component factory (Advisor's real shape): its last
+		// rendered frame is kept as the card's output after the widget closes.
+		await waitForCondition(
+			() =>
+				(
+					activityCard(harness.store.messages, "fake-advisor")?.activities?.[0]
+						?.output ?? []
+				).some(
+					(section) =>
+						section.kind === "panel" &&
+						section.text.includes("reviewing… (9/9)"),
+				),
+			{ message: "the advisor panel's final frame was never kept" },
+		);
 
 		// `display:true` custom messages still render as their own row, unchanged.
 		await waitForCondition(
@@ -349,6 +385,77 @@ test("an activity that finishes while its session is backgrounded is recorded in
 				),
 			{ message: "the finished step is missing after returning to the session" },
 		);
+	} finally {
+		await harness.dispose();
+	}
+}, 30_000);
+
+test("extensions.activityPersist=false keeps the live card but writes no activity entry", async () => {
+	const harness = await createStreamingHarness({
+		beforeCreate: writeFakeActivityExtensionFiles,
+		controllerOptions: { extensionsActivityPersist: false },
+	});
+	try {
+		assertEquals(
+			await harness.controller.prompt(
+				fakeDirectives.text(fakeActivityMarkers.visionHook),
+			),
+			true,
+		);
+		await waitForCondition(
+			() =>
+				activityCard(harness.store.messages, "fake-vision")?.activities?.[0]
+					?.state === "done",
+			{ message: "fake-vision card never finished" },
+		);
+		await waitForCondition(
+			() =>
+				harness.store.messages.some((message) =>
+					message.text.includes(
+						`Fake reply: ${fakeActivityMarkers.visionHook}`,
+					),
+				),
+			{ message: "assistant reply did not arrive" },
+		);
+		const sessionPath = harness.store.currentSessionPath;
+		assertExists(sessionPath);
+		assertEquals(
+			readFileSync(sessionPath, "utf8").includes(extensionActivityEntryType),
+			false,
+		);
+	} finally {
+		await harness.dispose();
+	}
+}, 30_000);
+
+test("extensions.activityTracking=false leaves every extension exactly as loaded: no cards, no chips", async () => {
+	const harness = await createStreamingHarness({
+		beforeCreate: writeFakeActivityExtensionFiles,
+		controllerOptions: { extensionsActivityTracking: false },
+	});
+	try {
+		assertEquals(
+			await harness.controller.prompt(
+				fakeDirectives.text(fakeActivityMarkers.visionHook),
+			),
+			true,
+		);
+		await waitForCondition(
+			() =>
+				harness.store.messages.some((message) =>
+					message.text.includes(
+						`Fake reply: ${fakeActivityMarkers.visionHook}`,
+					),
+				),
+			{ message: "assistant reply did not arrive" },
+		);
+		assertEquals(
+			harness.store.messages.some(
+				(message) => message.role === "extension-activity" || message.extension,
+			),
+			false,
+		);
+		assertEquals(harness.store.extensionActivityChips, []);
 	} finally {
 		await harness.dispose();
 	}
