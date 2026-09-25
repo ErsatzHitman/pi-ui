@@ -519,6 +519,23 @@ test("a pinned progress element keeps its one-line bar inside the summary strip"
 	});
 	assertStringIncludes(html, "piui-summary");
 	assertStringIncludes(html, "piui-progress-track");
+	// Motion: the fill width is driven by a --progress custom property (animated via
+	// transform in CSS), never an inline width.
+	assertStringExcludes(html, "width:");
+
+	const quarter = renderPiUiElement(
+		element({
+			id: "quarter",
+			kind: "progress",
+			placement: "inline",
+			data: { current: 1, total: 4 },
+		}),
+	);
+	assertStringIncludes(
+		quarter,
+		'<span class="piui-progress-value" style="--progress: 25">',
+	);
+	assertStringExcludes(quarter, "width:");
 });
 
 test("an inline widget with many lines starts collapsed", () => {
@@ -542,6 +559,11 @@ test("an inline widget with many lines starts collapsed", () => {
 	);
 	assertStringIncludes(long, "<details");
 	assertStringIncludes(long, "7 lines");
+	// The user's open/closed choice must survive Datastar morphs.
+	assertStringIncludes(
+		long,
+		'<details class="piui-widget-lines-collapsible" data-preserve-attr="open">',
+	);
 });
 
 test("roster rows render detail and per-row actions replying with the row id", () => {

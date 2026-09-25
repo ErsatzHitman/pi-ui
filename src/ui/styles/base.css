@@ -60,7 +60,7 @@
 		cursor: pointer;
 	}
 
-	:where(button, [role="button"], [role^="menuitem"]) {
+	:where(button, summary, label, [role="button"], [role^="menuitem"], [role="option"]) {
 		-webkit-tap-highlight-color: transparent;
 	}
 
@@ -117,15 +117,43 @@
 	}
 
 	@media (prefers-reduced-motion: reduce) {
+		/* stylelint-disable declaration-no-important -- reduced-motion safety boundary: base-layer !important is the only thing that outranks component transitions */
 		*,
 		*::before,
 		*::after {
-			/* stylelint-disable declaration-no-important -- reduced-motion safety boundary */
 			scroll-behavior: auto !important;
 			animation-duration: 0.01ms !important;
 			animation-iteration-count: 1 !important;
 			transition-duration: 0.01ms !important;
-			/* stylelint-enable declaration-no-important */
 		}
+
+		/* Gentler, not zero: these surfaces keep a short fade so appear/disappear stays
+		   legible; their scale/translate offsets snap (only opacity is transitioned).
+		   Zero specificity + later source order beats the `*` rule above. Dialogs must not
+		   get `allow-discrete`, or a closed dialog would linger on screen. */
+		:where(.toast, .dialog, .alert-dialog) {
+			transition-property: opacity !important;
+			transition-duration: var(--duration-sm) !important;
+		}
+
+		/* Tooltips list display/overlay by position, so their behavior list is restated
+		   to keep the exit fade (otherwise the popover vanishes on hide). */
+		:where([data-slot="tooltip-content"]) {
+			transition-property: opacity, display, overlay !important;
+			transition-behavior: normal, allow-discrete, allow-discrete !important;
+			transition-duration: var(--duration-sm) !important;
+		}
+
+		/* The warm row stays instant: reduced motion must never add a fade that full motion skips. */
+		:where([data-slot="tooltip-content"][data-instant]:popover-open) {
+			transition-duration: 0ms !important;
+		}
+
+		/* A loader is status, not decoration: keep it turning, slower. */
+		.icon-spin {
+			animation-duration: 1.6s !important;
+			animation-iteration-count: infinite !important;
+		}
+		/* stylelint-enable declaration-no-important */
 	}
 }

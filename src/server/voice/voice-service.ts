@@ -1,4 +1,5 @@
 import type { GroqTranscriber } from "./groq-transcriber.ts";
+import { cleanTranscript } from "./transcript-cleanup.ts";
 import type { VoiceConfig } from "./voice-config.ts";
 
 export type VoiceErrorCode =
@@ -99,7 +100,7 @@ export function createVoiceService(options: CreateVoiceServiceOptions): VoiceSer
 
 			inFlight += 1;
 			try {
-				return await transcriber.transcribe({
+				const result = await transcriber.transcribe({
 					audio: input.audio,
 					apiKey,
 					model: config.model,
@@ -108,6 +109,15 @@ export function createVoiceService(options: CreateVoiceServiceOptions): VoiceSer
 					prompt: config.prompt,
 					signal: input.signal,
 				});
+				if (!result.ok) return result;
+				return {
+					ok: true,
+					text: cleanTranscript(result.text, {
+						removeFillerWords: config.removeFillerWords,
+						// The configured language is stronger evidence than Whisper's guess.
+						language: config.language || result.language,
+					}),
+				};
 			} finally {
 				inFlight -= 1;
 			}

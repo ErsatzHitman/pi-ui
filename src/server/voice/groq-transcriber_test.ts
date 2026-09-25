@@ -38,7 +38,7 @@ test("sends the request shape Groq expects: URL, bearer, multipart fields, filen
 	assertEquals(request?.fields.model, "whisper-large-v3-turbo");
 	assertEquals(request?.fields.language, "en");
 	assertEquals(request?.fields.prompt, "pi-ui");
-	assertEquals(request?.fields.response_format, "json");
+	assertEquals(request?.fields.response_format, "verbose_json");
 	assertEquals(request?.fields.temperature, "0");
 	assertEquals(request?.file?.name, "voice.webm");
 	// The multipart part's own Content-Type header is Bun's, sniffed from the
@@ -487,4 +487,20 @@ test("a non-JSON 200 never logs the response body either", async () => {
 	} finally {
 		console.error = originalError;
 	}
+});
+
+test("passes through the language Whisper detected in a verbose_json response", async () => {
+	server = startFakeGroqServer();
+	server.respond(() => ({
+		json: { text: "hello", language: "English", duration: 1.2, segments: [] },
+	}));
+	const transcriber = createGroqTranscriber();
+	const result = await transcriber.transcribe({
+		audio: audioFile(),
+		apiKey: "k",
+		model: "whisper-large-v3-turbo",
+		baseUrl: server.url,
+		signal: new AbortController().signal,
+	});
+	assertEquals(result, { ok: true, text: "hello", language: "English" });
 });

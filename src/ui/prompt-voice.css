@@ -19,8 +19,13 @@
 	.prompt-voice-button {
 		color: var(--text-muted);
 	}
-	.prompt-voice-button:is(:hover, :focus-visible) {
+	.prompt-voice-button:focus-visible {
 		color: var(--text);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.prompt-voice-button:hover {
+			color: var(--text);
+		}
 	}
 	.prompt-voice-button[data-voice-blocked]:not([data-voice-blocked=""]) {
 		opacity: 0.5;
@@ -55,8 +60,8 @@
 		opacity: 1;
 		translate: 0 0;
 		transition:
-			opacity 150ms var(--ease-out),
-			translate 150ms var(--ease-out);
+			opacity var(--duration-md) var(--ease-out),
+			translate var(--duration-md) var(--ease-out);
 	}
 	@starting-style {
 		.prompt-surface:not([data-prompt-initial]) .prompt-voice-panel {
@@ -83,7 +88,7 @@
 		border-radius: inherit;
 		background: var(--status-error);
 		content: "";
-		animation: ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+		animation: ping 1.4s var(--ease-pulse) infinite;
 	}
 
 	/* The microphone is already released once recording stops. */
@@ -118,7 +123,7 @@
 		height: 2rem;
 		color: var(--text);
 		mask-image: linear-gradient(to right, transparent, black 12%);
-		transition: opacity 180ms var(--ease-out);
+		transition: opacity var(--duration-md) var(--ease-out);
 	}
 	.prompt-surface[data-voice-state="paused"] .prompt-voice-wave {
 		opacity: 0.45;
@@ -152,8 +157,8 @@
 		opacity: 1;
 		translate: 0 0;
 		transition:
-			opacity 150ms var(--ease-out),
-			translate 150ms var(--ease-out);
+			opacity var(--duration-md) var(--ease-out),
+			translate var(--duration-md) var(--ease-out);
 	}
 	@starting-style {
 		.prompt-surface:not([data-prompt-initial]) .prompt-voice-control {

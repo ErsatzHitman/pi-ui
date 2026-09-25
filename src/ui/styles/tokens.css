@@ -73,8 +73,22 @@
 		--text-3xl: 1.25rem;
 		--text-4xl: 1.5rem;
 
-		/* Motion */
-		--ease-out: cubic-bezier(0, 0, 0.3, 1);
+		/* Motion: curves. --ease-out: enter/exit, press, reveal (the default).
+		   --ease-in-out: on-screen morphs. --ease-drawer: edge-anchored sheets and
+		   drawers. --ease-pulse: looping `ping` status pulses only. Colour/hover
+		   transitions use the `ease` keyword; spinners and progress use `linear`;
+		   blinks/frame cycles use `step-end`. Never `ease-in` on UI. */
+		--ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+		--ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+		--ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+		--ease-pulse: cubic-bezier(0, 0, 0.2, 1);
+
+		/* Motion: durations. UI ceiling is --duration-xl; loops/loaders are exempt. */
+		--duration-xs: 80ms; /* hint reveals, tooltip exit, dim release */
+		--duration-sm: 120ms; /* hover/colour, press, focus border, backdrop, tooltip enter */
+		--duration-md: 160ms; /* small enters, icon swaps, modal enter, crossfades, sheet exit */
+		--duration-lg: 200ms; /* drawer/sheet enter, toast enter */
+		--duration-xl: 250ms; /* usage-ring morph */
 
 		/* Elevation */
 		--shadow-sm: 0 1px 2px -1px oklch(20% 0 none / 10%);

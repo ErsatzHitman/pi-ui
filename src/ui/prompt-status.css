@@ -71,7 +71,16 @@
 		inset: 0;
 		opacity: 0;
 		animation-iteration-count: infinite;
-		animation-timing-function: steps(1, jump-none);
+		animation-timing-function: step-end;
+	}
+
+	/* The reduced-motion kill switch ends every frame's animation with no fill,
+	 * which would hide them all; show the first frame statically instead (the
+	 * same as the server's single-frame fallback). */
+	@media (prefers-reduced-motion: reduce) {
+		.working-indicator-frame:first-child {
+			opacity: 1;
+		}
 	}
 	@keyframes working-indicator-cycle-2 {
 		0%,
@@ -304,7 +313,7 @@
 		height: 1rem;
 		rotate: -90deg;
 		opacity: 0.6;
-		transition: opacity 130ms ease;
+		transition: opacity var(--duration-sm) ease;
 	}
 	.usage-indicator:is(:hover, :focus) .usage-ring {
 		opacity: 1;
@@ -319,7 +328,7 @@
 		color: var(--text);
 	}
 	.usage-ring-value {
-		transition: stroke-dashoffset 250ms cubic-bezier(0.77, 0, 0.175, 1);
+		transition: stroke-dashoffset var(--duration-xl) var(--ease-in-out);
 	}
 
 	@media (width >= 40rem) {
@@ -389,7 +398,12 @@
 		font-size: var(--text-xs);
 		text-underline-offset: 2px;
 	}
-	.update-release-link:is(:hover, :focus-visible) {
+	.update-release-link:focus-visible {
 		color: var(--text);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.update-release-link:hover {
+			color: var(--text);
+		}
 	}
 }

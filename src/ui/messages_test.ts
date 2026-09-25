@@ -194,6 +194,11 @@ test("custom messages with details render a nested collapsible with escaped text
 	assertStringIncludes(html, "Details");
 	assertStringIncludes(html, "&lt;script&gt;");
 	assertStringExcludes(html, "<script>");
+	// The nested disclosure keeps its open state across morphs.
+	assertStringIncludes(
+		html,
+		'class="context-details context-details-nested" data-preserve-attr="open"',
+	);
 });
 
 test("a custom message without a customType falls back to a generic label", () => {

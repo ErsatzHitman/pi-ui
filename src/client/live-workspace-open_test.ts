@@ -47,6 +47,8 @@ function installFakeLiveWorkspace(
 				? String(options.initiallyOpen)
 				: null,
 		dispatchEvent: record(appEvents),
+		setAttribute() {},
+		toggleAttribute() {},
 	};
 	const pane = { querySelector: () => ({ focus() {} }), contains: () => false };
 	const shell = { getBoundingClientRect: () => ({ width: layout.shellWidthPx }) };

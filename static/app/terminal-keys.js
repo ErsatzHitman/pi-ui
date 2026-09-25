@@ -467,6 +467,19 @@ async function flushInput(surfaceId) {
 
 export function sendInput(surfaceId, data) {
 	if (!surfaceId || !data) return;
+	// Restart the caret blink so it stays solid while typing, as native terminals do.
+	// Looked up through `gridFor`, never by interpolating the id into a selector.
+	gridFor(surfaceId)
+		?.querySelector(".terminal-surface-body")
+		?.getAnimations?.({ subtree: true })
+		.filter(
+			(animation) =>
+				animation instanceof CSSAnimation &&
+				animation.animationName === "terminal-surface-caret-blink",
+		)
+		.forEach((animation) => {
+			animation.currentTime = 0;
+		});
 	// Keys typed while a post is in flight are batched into the next one, in order.
 	queuedInput.set(surfaceId, (queuedInput.get(surfaceId) ?? "") + data);
 	if (!sendingSurfaces.has(surfaceId)) void flushInput(surfaceId);

@@ -222,6 +222,7 @@ export function renderExtensionActivityChips(
 					data-variant="activity"
 					data-activity-chip-id={chip.id}
 					data-activity-chip-state={chip.state}
+					data-activity-chip-actionable={chip.anchorMessageId ? "" : undefined}
 					aria-label={`${chip.extensionLabel} working${
 						chip.progress ? `: ${chip.progress}` : ""
 					}`}
@@ -229,7 +230,7 @@ export function renderExtensionActivityChips(
 						chip.anchorMessageId
 							? `document.querySelector(${JSON.stringify(
 									`[data-message-id="${chip.anchorMessageId}"]`,
-								)})?.scrollIntoView({behavior:"smooth",block:"center"})`
+								)})?.scrollIntoView({behavior:window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true ? "instant" : "smooth",block:"center"})`
 							: undefined
 					}
 				>

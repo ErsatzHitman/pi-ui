@@ -14,20 +14,10 @@
 		height: 0.875rem;
 		grid-area: 1 / 1;
 	}
-	.prompt-surface:not([data-prompt-initial]) .prompt-action-icons > svg {
-		transition:
-			display 150ms allow-discrete,
-			translate 150ms var(--ease-out);
-	}
+
+	/* The send/abort swap is instant: Enter-send is keyboard-initiated and runs 100+ times a day. */
 	.prompt-action-icon-exit {
 		display: none;
-		translate: 0 -2rem;
-	}
-
-	@starting-style {
-		.prompt-surface:not([data-prompt-initial]) .prompt-action-icon-enter {
-			translate: 0 2rem;
-		}
 	}
 	.prompt-abort-icon rect {
 		fill: currentColor;

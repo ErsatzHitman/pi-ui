@@ -1,7 +1,6 @@
 const dismissMs = 4000;
-/** Matches the CSS transition duration in `misc.css`'s `.toast` rule, as a
- * fallback for browsers/paths where `transitionend` never fires (reduced
- * motion, a backgrounded tab). */
+/** Fallback longer than the CSS exit (160ms, `misc.css`'s `.toast[data-dismissing]`)
+ * for paths where `transitionend` never fires (e.g. a backgrounded tab). */
 const transitionFallbackMs = 400;
 
 function region() {
@@ -24,17 +23,14 @@ export function showToast(message) {
 	toast.setAttribute("role", "status");
 	toast.textContent = message;
 	toast.addEventListener("click", () => dismiss(toast));
+	// `.toast`'s `@starting-style` animates the entry on insertion.
 	host.append(toast);
-	// Start hidden (see `.toast`'s base `opacity: 0`) and let that paint before
-	// animating in, so the transition actually runs instead of being skipped.
-	requestAnimationFrame(() => toast.classList.add("toast-visible"));
 	setTimeout(() => dismiss(toast), dismissMs);
 }
 
 function dismiss(toast) {
 	if (!toast.isConnected || toast.dataset.dismissing) return;
 	toast.dataset.dismissing = "true";
-	toast.classList.remove("toast-visible");
 	toast.addEventListener("transitionend", () => toast.remove(), { once: true });
 	setTimeout(() => toast.remove(), transitionFallbackMs);
 }

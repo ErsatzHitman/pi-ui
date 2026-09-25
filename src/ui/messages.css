@@ -26,13 +26,15 @@
 			left top,
 			right top;
 		mask-repeat: no-repeat;
-		transition: opacity 120ms var(--ease-out) 80ms;
+		transition: opacity var(--duration-xs) var(--ease-out);
 	}
 	#messages.messages-empty {
 		padding-block: 2rem 8rem;
 	}
 	#messages.messages-loading {
 		opacity: 0.5;
+		transition-duration: var(--duration-sm);
+		transition-delay: 80ms; /* guard: fast switches never dim */
 	}
 	#messages.messages-loading .recent-session:disabled {
 		opacity: 1;
@@ -148,9 +150,15 @@
 		padding: 0.5rem;
 		text-align: start;
 	}
-	.recent-session:is(:hover, :focus-visible) {
+	.recent-session:is(:focus-visible, :active) {
 		background: var(--surface-control);
 		outline: 0;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.recent-session:hover {
+			background: var(--surface-control);
+			outline: 0;
+		}
 	}
 	.recent-session-main {
 		min-width: 0;
@@ -308,8 +316,10 @@
 		text-decoration-color: var(--border);
 		text-underline-offset: 2px;
 	}
-	.message-link:hover {
-		text-decoration-color: currentColor;
+	@media (hover: hover) and (pointer: fine) {
+		.message-link:hover {
+			text-decoration-color: currentColor;
+		}
 	}
 
 	.message-file {
@@ -507,9 +517,11 @@
 		width: 0.875rem;
 		height: 0.875rem;
 		rotate: 180deg;
-		transition: rotate 150ms var(--ease-out);
+		transition: rotate var(--duration-md) var(--ease-out);
 	}
-	.context-details[open] .context-chevron-icon {
+
+	/* Direct summary only, so an open parent doesn't force a nested chevron open. */
+	.context-details[open] > .context-summary .context-chevron-icon {
 		rotate: 90deg;
 	}
 	.context-output {
@@ -777,7 +789,7 @@
 			> .message-tool:not(:has(~ :is(.message-assistant, .message-user)))
 			.tool-status-pulse {
 			opacity: 1;
-			animation: ping 1s var(--ease-out) infinite;
+			animation: ping 1s var(--ease-pulse) infinite;
 		}
 	}
 

@@ -88,7 +88,7 @@ export function renderLlamaDialogContent(dialog: AppLlamaDialog | undefined): st
 							>
 								<div
 									class="dialog-progress-value"
-									style={`width: ${(dialog.progress.ratio ?? 0) * 100}%`}
+									style={`--progress: ${(dialog.progress.ratio ?? 0) * 100}`}
 								/>
 							</div>
 						</div>

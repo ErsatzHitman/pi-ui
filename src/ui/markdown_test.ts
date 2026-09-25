@@ -221,6 +221,22 @@ test("code source is escaped in the copy attribute", async () => {
 	}
 });
 
+test("the code copy button preserves only its copy state across morphs", async () => {
+	const markdown = "```text\nconst x = 1;\n```";
+	for (const html of [
+		renderMarkdownStreaming(markdown),
+		await renderMarkdownFinal(markdown),
+	]) {
+		assertIncludes(html, 'data-preserve-attr="data-copy-state"');
+		// aria-label is server-owned; preserving it would pin a stale "Copied" label.
+		const preserved = /data-copy-code[^>]*data-preserve-attr="([^"]*)"/.exec(
+			html,
+		)?.[1];
+		assertEqual(preserved, "data-copy-state");
+		assertNotIncludes(preserved ?? "", "aria-label");
+	}
+});
+
 test("code blocks keep dollar sequences literal", async () => {
 	const markdown =
 		"ZZBEFOREZZ\n\n```text\nvalue $` and $' and $& end\n```\n\nZZAFTERZZ\n";

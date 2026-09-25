@@ -94,6 +94,41 @@ test("workspace files expose native preview and source controls", () => {
 	assertStringIncludes(html, 'aria-label="File preview"');
 });
 
+test("the command menu and hotkeys dialogs keep their open state across morphs", () => {
+	for (const id of ["command-dialog", "hotkeys-dialog"]) {
+		const openTag = new RegExp(`<dialog id="${id}"[^>]*>`).exec(html)?.[0] ?? "";
+		assertStringIncludes(openTag, 'data-preserve-attr="open"');
+	}
+});
+
+test("the llama progress bar and update copy button carry their motion hooks", () => {
+	const page = renderPage({
+		...appRenderSnapshot({
+			llamaDialog: {
+				models: [],
+				progress: { label: "Loading model", ratio: 0.25 },
+			},
+			updateAvailable: {
+				currentVersion: "1.0.0",
+				latestVersion: "1.1.0",
+				releaseUrl: "https://example.com/release",
+				upgradeCommand: "bun add -g pi-ui",
+			},
+		}),
+		messages: [],
+	});
+	// Progress fills scale from a --progress custom property, not an inline width.
+	assertStringIncludes(
+		page,
+		'<div class="dialog-progress-value" style="--progress: 25">',
+	);
+	assertFalse(page.includes('style="width:'));
+
+	const updateCopy =
+		/<button[^>]*aria-label="Copy upgrade command"[^>]*>/.exec(page)?.[0] ?? "";
+	assertStringIncludes(updateCopy, 'data-preserve-attr="data-copy-state"');
+});
+
 test("configured sidebar width is applied before styles", () => {
 	assertStringIncludes(html, "--session-sidebar-preferred-width: 288px");
 	const custom = renderPage(

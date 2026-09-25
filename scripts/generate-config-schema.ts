@@ -337,6 +337,13 @@ const schema = Type.Object(
 								"Vocabulary/spelling hint sent with each transcription.",
 						}),
 					),
+					removeFillerWords: Type.Optional(
+						Type.Boolean({
+							default: defaultVoiceConfig.removeFillerWords,
+							description:
+								"Remove filler sounds (hmm, uh, um…) and repeated-word stutters from transcripts.",
+						}),
+					),
 					maxSeconds: Type.Optional(
 						Type.Integer({
 							minimum: voiceMaxSecondsMin,

@@ -132,6 +132,14 @@ function startTargetScroll(position) {
 		0,
 		Math.min(target, messages.scrollHeight - messages.clientHeight),
 	);
+	// gg/G travel the whole transcript: jump instantly under reduced motion.
+	if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true) {
+		messages.scrollTop = fixedTarget;
+		target = undefined;
+		animation = undefined;
+		if (position === "bottom") scrollBottom();
+		return;
+	}
 	const duration = Math.max(
 		stepDurationMs,
 		20 * Math.log(Math.max(Math.abs(fixedTarget - start), 1)),
@@ -148,7 +156,8 @@ function startTargetScroll(position) {
 		lastFrame = now;
 		elapsedTotal += elapsed;
 		const progress = Math.min(1, elapsedTotal / duration);
-		current.scrollTop = start + (fixedTarget - start) * progress;
+		// Cubic ease-out: the jump starts fast and settles onto the target.
+		current.scrollTop = start + (fixedTarget - start) * (1 - (1 - progress) ** 3);
 		if (progress >= 1) {
 			target = undefined;
 			animation = undefined;

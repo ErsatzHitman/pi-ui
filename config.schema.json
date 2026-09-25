@@ -492,6 +492,11 @@
 					"default": "",
 					"description": "Vocabulary/spelling hint sent with each transcription."
 				},
+				"removeFillerWords": {
+					"type": "boolean",
+					"default": true,
+					"description": "Remove filler sounds (hmm, uh, um…) and repeated-word stutters from transcripts."
+				},
 				"maxSeconds": {
 					"type": "integer",
 					"minimum": 10,

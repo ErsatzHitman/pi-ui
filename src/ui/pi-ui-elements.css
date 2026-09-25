@@ -45,6 +45,11 @@
 		justify-content: space-between;
 	}
 
+	/* Full-width row: a softer press than the `.btn` 0.98, which reads as the row jumping. */
+	.piui-widgets-summary:not(:disabled):active {
+		scale: 0.99;
+	}
+
 	/*
 	 * O8: `--surface-code` (not `--surface-muted`) so a PIUI widget card reads as the same
 	 * surface as the terminal cards it sits next to (`terminal-surface.css`'s `.terminal-surface-grid`)
@@ -87,7 +92,7 @@
 		content: "▸";
 		display: inline-block;
 		margin-inline-end: 0.25rem;
-		transition: transform 0.15s var(--ease-out);
+		transition: transform var(--duration-md) var(--ease-out);
 	}
 	.piui-widget-lines-collapsible[open] summary::before {
 		transform: rotate(90deg);
@@ -109,12 +114,16 @@
 		background: var(--surface-control);
 		overflow: hidden;
 	}
+
+	/* Full-width fill slid by `--progress` (0-100): translate composites, width would lay out. */
 	.piui-progress-value {
 		display: block;
+		width: 100%;
 		height: 100%;
 		border-radius: inherit;
 		background: var(--accent, var(--status-success));
-		transition: width 0.2s ease;
+		translate: calc((clamp(0, var(--progress, 0), 100) - 100) * 1%) 0;
+		transition: translate var(--duration-lg) linear;
 	}
 	.piui-progress-indeterminate {
 		flex: 1;
@@ -292,8 +301,15 @@
 		padding: 0.375rem 0.5rem;
 		cursor: pointer;
 	}
-	.piui-option-row:hover {
+
+	/* Hover is pointer-only (it sticks on touch); `:active` is the tap feedback. */
+	.piui-option-row:active {
 		background: var(--surface-muted);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.piui-option-row:hover {
+			background: var(--surface-muted);
+		}
 	}
 	.piui-option-row:has(input:focus-visible) {
 		outline: 2px solid var(--action-primary);
@@ -419,6 +435,20 @@
 			border-end-end-radius: 0;
 			border-end-start-radius: 0;
 			padding-block-end: max(1rem, env(safe-area-inset-bottom));
+		}
+
+		/* Bottom-pinned sheet rises from the edge it lives on. (0,3,0) beats the generic modal
+		   fade/scale in overlays.css, so it only slides. No exit: close stays instant. */
+		.dialog.piui-sheet:modal {
+			transition: translate var(--duration-lg) var(--ease-drawer);
+		}
+		@starting-style {
+			/* stylelint-disable-next-line max-nesting-depth -- @starting-style must be scoped to the phone breakpoint */
+			.dialog.piui-sheet:modal {
+				opacity: 1;
+				scale: 1;
+				translate: 0 100%;
+			}
 		}
 	}
 }

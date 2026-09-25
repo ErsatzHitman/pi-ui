@@ -86,8 +86,10 @@
 		border-radius: var(--radius-md);
 		padding: 0.5rem;
 	}
-	.hotkeys-row:hover {
-		background: var(--surface-control);
+	@media (hover: hover) and (pointer: fine) {
+		.hotkeys-row:hover {
+			background: var(--surface-control);
+		}
 	}
 	.hotkeys-row-clickable {
 		width: 100%;
@@ -97,7 +99,7 @@
 
 	/* A keyboard-focused row reads like a hovered one; the ring sits inside the
 	   row so the dialog's scroll container never clips it. */
-	.hotkeys-row-clickable:focus-visible {
+	.hotkeys-row-clickable:is(:focus-visible, :active) {
 		outline-offset: -2px;
 		background: var(--surface-control);
 	}
@@ -116,8 +118,10 @@
 		font-size: var(--text-xs);
 		font-weight: 500;
 	}
-	.hotkeys-section-heading:hover {
-		background: none;
+	@media (hover: hover) and (pointer: fine) {
+		.hotkeys-section-heading:hover {
+			background: none;
+		}
 	}
 
 	.font-card {
@@ -130,11 +134,13 @@
 		text-align: start;
 		cursor: pointer;
 		transition:
-			border-color 150ms var(--ease-out),
-			scale 150ms var(--ease-out);
+			border-color var(--duration-sm) ease,
+			scale var(--duration-sm) var(--ease-out);
 	}
-	.font-card:hover {
-		border-color: var(--focus-ring);
+	@media (hover: hover) and (pointer: fine) {
+		.font-card:hover {
+			border-color: var(--focus-ring);
+		}
 	}
 	.font-card:active {
 		scale: 0.985;
@@ -192,8 +198,8 @@
 		background: var(--surface-raised);
 		text-align: start;
 		transition:
-			border-color 130ms ease,
-			scale 130ms var(--ease-out);
+			border-color var(--duration-sm) ease,
+			scale var(--duration-sm) var(--ease-out);
 	}
 	.code-theme-preview {
 		display: block;
@@ -235,8 +241,10 @@
 		box-shadow: 0 1px 2px oklch(0% 0 none / 35%);
 	}
 
-	.code-theme-card:hover {
-		border-color: var(--focus-ring);
+	@media (hover: hover) and (pointer: fine) {
+		.code-theme-card:hover {
+			border-color: var(--focus-ring);
+		}
 	}
 
 	.code-theme-card:active {
@@ -262,6 +270,7 @@
 	}
 
 	@media (prefers-reduced-motion: reduce) {
+		.font-card:active,
 		.code-theme-card:active {
 			scale: 1;
 		}

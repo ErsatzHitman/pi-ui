@@ -141,6 +141,7 @@ export function renderHotkeysDialog(state: AppStateSnapshot): string {
 			aria-labelledby="hotkeys-dialog-title"
 			data-signals__ifmissing={JSON.stringify({ _hotkeysQuery: "" })}
 			data-on:toggle="if (evt.newState === 'open') $_hotkeysQuery = ''"
+			data-preserve-attr="open"
 			closedby="any"
 		>
 			<div class="hotkeys-dialog-panel">
