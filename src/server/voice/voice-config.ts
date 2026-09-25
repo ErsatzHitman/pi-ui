@@ -10,6 +10,8 @@ export type VoiceConfig = Readonly<{
 	language: string;
 	/** Vocabulary/spelling hint sent with each transcription. */
 	prompt: string;
+	/** Strip "hmm", "uh", "um"… and 3+ word stutters from transcripts (Handy's filler removal). */
+	removeFillerWords: boolean;
 	maxSeconds: number;
 	baseUrl: string;
 }>;
@@ -19,6 +21,7 @@ export const defaultVoiceConfig: VoiceConfig = {
 	model: "whisper-large-v3-turbo",
 	language: "",
 	prompt: "",
+	removeFillerWords: true,
 	maxSeconds: 300,
 	baseUrl: "https://api.groq.com/openai/v1",
 };
@@ -51,6 +54,9 @@ export function parseVoiceConfig(value: JsonValue | undefined): VoiceConfig {
 			isString(value.prompt) && value.prompt.length <= voicePromptMaxLength
 				? value.prompt
 				: defaultVoiceConfig.prompt,
+		removeFillerWords: isBoolean(value.removeFillerWords)
+			? value.removeFillerWords
+			: defaultVoiceConfig.removeFillerWords,
 		maxSeconds:
 			isNumber(value.maxSeconds) && Number.isInteger(value.maxSeconds)
 				? clamp(value.maxSeconds, voiceMaxSecondsMin, voiceMaxSecondsMax)

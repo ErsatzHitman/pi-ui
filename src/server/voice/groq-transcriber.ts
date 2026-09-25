@@ -14,7 +14,7 @@ export type GroqErrorCode =
 	| "provider-unreachable";
 
 export type GroqTranscribeResult =
-	| { ok: true; text: string }
+	| { ok: true; text: string; language?: string }
 	| {
 			ok: false;
 			status: number;
@@ -90,7 +90,7 @@ export function createGroqTranscriber(
 			const deadline = now() + requestTimeoutMs;
 			const first = await attempt(request, deadline, fetchImpl, appVersion);
 			if (first.kind === "abort") throw first.error;
-			if (first.kind === "ok") return { ok: true, text: first.text };
+			if (first.kind === "ok") return okResult(first);
 			if (!first.retryable || request.signal.aborted) return toResult(first);
 
 			const delayMs = retryDelayMs(first.retryAfterSeconds);
@@ -99,14 +99,14 @@ export function createGroqTranscriber(
 
 			const second = await attempt(request, deadline, fetchImpl, appVersion);
 			if (second.kind === "abort") throw second.error;
-			if (second.kind === "ok") return { ok: true, text: second.text };
+			if (second.kind === "ok") return okResult(second);
 			return toResult(second);
 		},
 	};
 }
 
 type AttemptOutcome =
-	| { kind: "ok"; text: string }
+	| { kind: "ok"; text: string; language?: string }
 	| { kind: "abort"; error: unknown }
 	| {
 			kind: "fail";
@@ -116,6 +116,14 @@ type AttemptOutcome =
 			retryAfterSeconds?: number;
 			retryable: boolean;
 	  };
+
+function okResult(
+	outcome: Extract<AttemptOutcome, { kind: "ok" }>,
+): GroqTranscribeResult {
+	return outcome.language === undefined
+		? { ok: true, text: outcome.text }
+		: { ok: true, text: outcome.text, language: outcome.language };
+}
 
 function toResult(
 	outcome: Extract<AttemptOutcome, { kind: "fail" }>,
@@ -187,7 +195,12 @@ async function attempt(
 			);
 			return providerErrorOutcome();
 		}
-		if (isRecord(body) && isString(body.text)) return { kind: "ok", text: body.text };
+		if (isRecord(body) && isString(body.text)) {
+			// `verbose_json` adds the language Whisper detected; filler cleanup uses it.
+			return isString(body.language) && body.language.trim()
+				? { kind: "ok", text: body.text, language: body.language.trim() }
+				: { kind: "ok", text: body.text };
+		}
 		// Field names only: the body of a 200 may hold the transcript under some other key,
 		// and transcripts are never logged.
 		logProviderFailure(
@@ -308,7 +321,8 @@ function buildMultipartBody(request: GroqTranscribeRequest): FormData {
 	});
 	form.append("file", file);
 	form.append("model", request.model);
-	form.append("response_format", "json");
+	// `verbose_json` (not `json`) so the response carries the detected `language`.
+	form.append("response_format", "verbose_json");
 	form.append("temperature", "0");
 	const language = request.language?.trim();
 	if (language) form.append("language", effectiveLanguage(language));
