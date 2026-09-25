@@ -99,6 +99,12 @@
 		max-width: calc(100vw - 2rem);
 		padding: 0;
 	}
+
+	/* Side-by-side providers + models needs room for the model name next to its badges;
+	   at 22rem the name was cut to two or three characters. */
+	.model-popover:has(.model-command[data-multi-pane="true"]) {
+		width: 34rem;
+	}
 	.model-pane {
 		max-height: 17.5rem;
 		margin-block-start: 0.25rem;
@@ -236,6 +242,9 @@
 			inset-inline: auto 0;
 			width: 22rem;
 			max-width: 100%;
+		}
+		#model-select-popover:has(.model-command[data-multi-pane="true"]) {
+			width: 34rem;
 		}
 	}
 }
