@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { setDefaultTimeout, test } from "bun:test";
 import { rm } from "node:fs/promises";
 
 import { assertEquals } from "#testing/assertions";
@@ -13,6 +13,10 @@ import {
 	readWorkspaceGitGraph,
 	readWorkspaceGitGraphCommit,
 } from "./workspace-git-graph.ts";
+
+// These tests spawn real git processes (init, commits, clones); under full-suite
+// parallel load that can exceed Bun's 5s default without anything being wrong.
+setDefaultTimeout(30_000);
 
 test("git graph log parsing reads hash, parents, refs and subject", () => {
 	assertEquals(
