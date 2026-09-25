@@ -11,6 +11,7 @@ import type {
 } from "./instrument.ts";
 import {
 	ExtensionActivityLedger,
+	raisesVisibleSignal,
 	type LedgerChange,
 	type ScopeOutcome,
 	type UiSignal,
@@ -79,6 +80,8 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 	readonly #widgetOwners = new Map<string, InstrumentedScope>();
 	/** Widget key → its latest frame text (applied or still coalescing). */
 	readonly #widgetFrames = new Map<string, string>();
+	/** Timed scopes whose promotion a visible UI signal already moved up. */
+	readonly #expeditedScopes = new Set<string>();
 
 	constructor(options: ExtensionActivityTrackerOptions) {
 		this.#clock = options.clock ?? Date.now;
@@ -104,6 +107,7 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 	scopeEnd(scope: InstrumentedScope, now: number, outcome: ScopeOutcomeRaw): void {
 		if (!scope.timed) return;
 		this.#cancel(scope.scopeId);
+		this.#expeditedScopes.delete(scope.scopeId);
 		const mapped = mapOutcome(scope, outcome);
 		this.#emit(this.#ledger.endTimedScope(scope.scopeId, now, mapped));
 	}
@@ -217,6 +221,9 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 	#applyUi(scope: InstrumentedScope, signal: UiSignal, now: number): void {
 		if (scope.timed) {
 			const change = this.#ledger.observeUiInScope(scope.scopeId, signal, now);
+			if (change.kind === "pending" && raisesVisibleSignal(signal)) {
+				this.#expediteScopePromotion(scope.scopeId);
+			}
 			this.#recordBinding(change, signal);
 			this.#emit(change);
 			return;
@@ -358,6 +365,7 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 		this.#cancelers.clear();
 		this.#widgetOwners.clear();
 		this.#widgetFrames.clear();
+		this.#expeditedScopes.clear();
 		const result = this.#ledger.cancelAll(now, reason);
 		for (const activity of result.cancelled)
 			this.#emit({ kind: "finished", activity });
@@ -385,15 +393,26 @@ export class ExtensionActivityTracker implements InstrumentationReporter {
 		this.#cancelers.clear();
 	}
 
-	#scheduleScopePromotion(scopeId: string): void {
-		const cancel = this.#scheduler.schedule(
-			extensionActivityThresholds.hookPromotionMs,
-			() => {
-				this.#cancelers.delete(scopeId);
-				if (!this.#ledger.isScopePending(scopeId)) return;
-				this.#emit(this.#ledger.promoteScope(scopeId, this.#clock()));
-			},
-		);
+	/** A visible UI signal (a widget, status or working message) is itself
+	 * evidence of real work, so the scope promotes `uiPromotionMs` after its
+	 * first one instead of waiting out `hookPromotionMs` (§2.3's `setWidget`
+	 * row: "Joins the scope's activity (promotes after uiPromotionMs=250)"). */
+	#expediteScopePromotion(scopeId: string): void {
+		if (this.#expeditedScopes.has(scopeId)) return;
+		this.#expeditedScopes.add(scopeId);
+		this.#cancel(scopeId);
+		this.#scheduleScopePromotion(scopeId, extensionActivityThresholds.uiPromotionMs);
+	}
+
+	#scheduleScopePromotion(
+		scopeId: string,
+		delayMs: number = extensionActivityThresholds.hookPromotionMs,
+	): void {
+		const cancel = this.#scheduler.schedule(delayMs, () => {
+			this.#cancelers.delete(scopeId);
+			if (!this.#ledger.isScopePending(scopeId)) return;
+			this.#emit(this.#ledger.promoteScope(scopeId, this.#clock()));
+		});
 		this.#cancelers.set(scopeId, cancel);
 	}
 

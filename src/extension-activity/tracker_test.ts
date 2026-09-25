@@ -5,6 +5,7 @@ import { assertEquals, assertExists } from "#testing/assertions";
 import type { ExtensionRef } from "../extension-activity-types.ts";
 import type { InstrumentedScope, ScopeOutcomeRaw } from "./instrument.ts";
 import type { LedgerChange } from "./ledger.ts";
+import { extensionActivityThresholds } from "./policy.ts";
 import { ExtensionActivityTracker, type Scheduler } from "./tracker.ts";
 
 const ref: ExtensionRef = {
@@ -840,4 +841,36 @@ test("a late close from an older mount under the same key never steals the newer
 	}
 	assertEquals(panels.get("context"), "card B: failed");
 	assertEquals(panels.get("jev_decompose"), "card A: failed");
+});
+
+test("a visible UI signal inside a scope promotes it after uiPromotionMs, not hookPromotionMs", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink, changes } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 0 });
+	const scope = hookScope({ scopeId: "tool:jev", title: "jev_decompose" });
+	tracker.scopeStart(scope, 0);
+	tracker.uiSignal(scope, { kind: "widgetMount", key: "jev-decompose" }, 5);
+	tracker.uiSignal(scope, { kind: "status", key: "jev", text: "consulting" }, 6);
+	const live = timers.filter((timer) => !timer.cancelled);
+	assertEquals(
+		live.map((timer) => timer.delayMs),
+		[extensionActivityThresholds.uiPromotionMs],
+	);
+	live[0]?.run();
+	const promoted = changes.at(-1);
+	if (promoted?.kind !== "created") throw new Error(`unexpected ${promoted?.kind}`);
+	assertEquals(promoted.activity.state, "working");
+});
+
+test("a notify inside a scope does not expedite its promotion", () => {
+	const { scheduler, timers } = fakeScheduler();
+	const { sink } = sinkRecorder();
+	const tracker = new ExtensionActivityTracker({ sink, scheduler, clock: () => 0 });
+	const scope = hookScope();
+	tracker.scopeStart(scope, 0);
+	tracker.uiSignal(scope, { kind: "notify", text: "hi", type: "info" }, 5);
+	assertEquals(
+		timers.filter((timer) => !timer.cancelled).map((timer) => timer.delayMs),
+		[extensionActivityThresholds.hookPromotionMs],
+	);
 });

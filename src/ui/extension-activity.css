@@ -21,6 +21,14 @@
 		transition: background-color 160ms var(--ease-out);
 	}
 
+	/* Hook names like `before_agent_start` have no break opportunity; at phone
+	   width they would run under the state label instead of truncating. */
+	.ext-activity-summary .context-title {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
 	.message-ext-activity[data-activity-state="working"] .ext-activity-summary,
 	.ext-activity-step[data-activity-state="working"] .ext-activity-summary {
 		background: var(--status-active-surface);
@@ -173,12 +181,10 @@
 
 @layer utilities {
 	/* Minimal mode keeps the activity card visible as a one-line summary rather
-	   than hiding it like earlier tool rows (§4.4, Q4's default). */
-	[data-minimal-mode] .message-ext-activity {
-		padding-left: 0;
-	}
-
-	/* messages.css hides every earlier .message-tool row in minimal mode; an
+	   than hiding it like earlier tool rows (§4.4, Q4's default). It keeps the
+	   timeline padding so its dot sits on the rail, like the "completed N steps"
+	   row, instead of over the extension badge.
+	   messages.css hides every earlier .message-tool row in minimal mode; an
 	   activity card carries that class for the timeline rail but stays. */
 	[data-minimal-mode]
 		#message-list

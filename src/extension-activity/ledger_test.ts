@@ -553,3 +553,31 @@ test("a fast scope that mounted a widget still shows retroactively (the widget w
 	if (closed.kind !== "finished") throw new Error(`unexpected ${closed.kind}`);
 	assertEquals(closed.activity.output.at(-1)?.text, "FAILED: no credential");
 });
+
+test("a panel's final frame becomes the kept one-line result, not a stale live line", () => {
+	const ledger = new ExtensionActivityLedger();
+	const jev = ref("jev", "JEV");
+	ledger.beginTimedScope(hookScope("s1", jev, "tool"), 0);
+	ledger.observeUiInScope("s1", { kind: "widgetMount", key: "jev-decompose" }, 1);
+	ledger.observeUiInScope(
+		"s1",
+		{ kind: "widgetFrame", key: "jev-decompose", text: "│ consulting jev (2/3) │" },
+		2,
+	);
+	ledger.endTimedScope("s1", 5, { ok: true });
+	const closed = ledger.observeUiInScope(
+		"s1",
+		{
+			kind: "widgetClose",
+			key: "jev-decompose",
+			finalText: [
+				"┌─ jev ─┐",
+				"│ recommendation: use 2 agents │",
+				"└───────┘",
+			].join("\n"),
+		},
+		2500,
+	);
+	if (closed.kind !== "finished") throw new Error(`unexpected ${closed.kind}`);
+	assertEquals(closed.activity.progress, "recommendation: use 2 agents");
+});

@@ -561,6 +561,11 @@ function applySignal(record: MutableActivity, signal: UiSignal, _now: number): v
 		case "widgetClose": {
 			const text = signal.finalText ?? record.progress ?? "";
 			if (text.trim() === "") break;
+			// The panel's last meaningful line is the card's kept one-line result;
+			// the live line may be a stale spinner frame from before it finished.
+			const line =
+				signal.finalText === undefined ? undefined : panelProgressLine(text);
+			if (line !== undefined) record.progress = capProgressLine(line);
 			record.output = capOutputSections([
 				...record.output,
 				{ kind: "panel", title: "Panel (final frame)", text },
@@ -639,7 +644,7 @@ function appendDedupedStatusLine(
 
 /** Whether `signal` put something on screen for this activity (see
  * `MutableActivity.signalled`). */
-function raisesVisibleSignal(signal: UiSignal): boolean {
+export function raisesVisibleSignal(signal: UiSignal): boolean {
 	switch (signal.kind) {
 		case "widgetFrame":
 		case "widgetMount":
