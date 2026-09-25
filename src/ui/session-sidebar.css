@@ -32,10 +32,10 @@
 		flex-shrink: 0;
 		place-items: center end;
 		transition:
-			width 120ms ease-out,
-			margin-inline-end 120ms ease-out,
-			opacity 120ms ease-out,
-			scale 120ms ease-out;
+			width var(--duration-sm) var(--ease-out),
+			margin-inline-end var(--duration-sm) var(--ease-out),
+			opacity var(--duration-sm) var(--ease-out),
+			scale var(--duration-sm) var(--ease-out);
 	}
 	.session-status-empty {
 		width: 0;
@@ -47,7 +47,12 @@
 		grid-area: 1 / 1;
 	}
 	.status-dot-layer {
-		transition: opacity 500ms ease-out;
+		transition: opacity var(--duration-md) ease;
+	}
+
+	/* Fading the pulse ball out mid-ping flashes its --text colour over the result dot. */
+	.status-dot-layer.tool-status-pulse {
+		transition: none;
 	}
 	.status-dot-running {
 		color: var(--text-muted);
@@ -58,8 +63,23 @@
 	.status-hidden {
 		opacity: 0;
 	}
-	.status-pulse {
-		animation: ping 1s var(--ease-out) infinite;
+	@media (prefers-reduced-motion: no-preference) {
+		.status-pulse {
+			animation: ping 1s var(--ease-pulse) infinite;
+		}
+
+		/* Several sessions can run at once in the always-visible sidebar: pulse calmer. */
+		.session-sidebar-status .status-pulse {
+			animation-duration: 2s;
+		}
+	}
+
+	/* Without the loop the pulse layer would sit at full opacity in currentColor and
+	   hide the running colour; the static active dot carries the state instead. */
+	@media (prefers-reduced-motion: reduce) {
+		.status-pulse {
+			opacity: 0;
+		}
 	}
 
 	.session-subtitle-content {
@@ -128,22 +148,29 @@
 	.session-row-actions > * {
 		grid-area: 1 / 1;
 	}
-	.session-row-shortcut {
-		transition: opacity 150ms ease;
-	}
+
+	/* No opacity transition (not even `.btn`’s): j/k and arrow steps move :focus-within,
+	   so the trash icon and the kbd hint swap on the same frame. */
 	.session-row-delete {
 		opacity: 0;
 		pointer-events: none;
-		transition: opacity 150ms ease;
+		transition-property: background-color, border-color, color, scale;
 	}
-	:where(.session-sidebar-row, [role="menuitem"]):is(:hover, :focus-within)
-		.session-row-shortcut {
+	:where(.session-sidebar-row, [role="menuitem"]):focus-within .session-row-shortcut {
 		opacity: 0;
 	}
-	:where(.session-sidebar-row, [role="menuitem"]):is(:hover, :focus-within)
-		.session-row-delete {
+	:where(.session-sidebar-row, [role="menuitem"]):focus-within .session-row-delete {
 		opacity: 1;
 		pointer-events: auto;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		:where(.session-sidebar-row, [role="menuitem"]):hover .session-row-shortcut {
+			opacity: 0;
+		}
+		:where(.session-sidebar-row, [role="menuitem"]):hover .session-row-delete {
+			opacity: 1;
+			pointer-events: auto;
+		}
 	}
 
 	/* There is no hover on touch, and the row button covers the full row, so
@@ -168,12 +195,15 @@
 	.session-delete-button {
 		flex-shrink: 0;
 
-		&:is(:hover, :focus) {
+		&:focus {
 			background: oklch(from var(--status-danger) l c h / 20%);
 			color: var(--status-danger);
 		}
-		&:hover {
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.session-delete-button:hover {
 			background: oklch(from var(--status-danger) l c h / 30%);
+			color: var(--status-danger);
 		}
 	}
 
@@ -285,11 +315,20 @@
 		height: 100%;
 		border-radius: var(--radius-md);
 	}
-	.session-sidebar-row-button:is(:hover, :focus-visible),
+
+	/* :active stands in for the gated hover as tap feedback on touch. */
+	.session-sidebar-row-button:is(:focus-visible, :active),
 	.session-sidebar-row-button:is([data-active="true"], [aria-current="true"]) {
 		background: var(--surface-control);
 		color: var(--text);
 		outline: 0;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.session-sidebar-row-button:hover {
+			background: var(--surface-control);
+			color: var(--text);
+			outline: 0;
+		}
 	}
 	.session-sidebar-row-content {
 		position: relative;
@@ -381,15 +420,15 @@
 		.session-sidebar[data-animate-open][open] {
 			translate: 0 0;
 			transition:
-				translate 160ms cubic-bezier(0.23, 1, 0.32, 1),
-				display 160ms allow-discrete,
-				overlay 160ms allow-discrete;
+				translate var(--duration-lg) var(--ease-drawer),
+				display var(--duration-lg) allow-discrete,
+				overlay var(--duration-lg) allow-discrete;
 		}
 		.session-sidebar[data-animate-open][open]::backdrop {
 			transition:
-				background-color 120ms cubic-bezier(0.23, 1, 0.32, 1),
-				display 120ms allow-discrete,
-				overlay 120ms allow-discrete;
+				opacity var(--duration-lg) var(--ease-out),
+				display var(--duration-lg) allow-discrete,
+				overlay var(--duration-lg) allow-discrete;
 		}
 	}
 	@starting-style {
@@ -397,7 +436,7 @@
 			translate: calc(100% + var(--workspace-inset)) 0;
 		}
 		.session-sidebar[data-animate-open][open]::backdrop {
-			background: transparent;
+			opacity: 0;
 		}
 	}
 }

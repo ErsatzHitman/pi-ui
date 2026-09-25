@@ -299,7 +299,11 @@ function bindWorkspaceKeyboardNavigation(): void {
 		if (!path.includes(fileViewRoot)) return;
 		event.preventDefault();
 		fileViewRoot.scrollBy({
-			behavior: "smooth",
+			// An explicit `smooth` ignores the CSS reduced-motion kill switch, so check it here.
+			behavior:
+				window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
+					? "instant"
+					: "smooth",
 			top: event.code === "KeyJ" ? 100 : -100,
 		});
 	});

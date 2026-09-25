@@ -216,6 +216,14 @@ test("prompt chips are buttons with an aria-label naming the extension and progr
 	assertStringIncludes(html, "m-42");
 });
 
+test("only a chip with an anchor message is marked actionable (drives its press feedback)", () => {
+	const anchored = renderExtensionActivityChips([chip({ anchorMessageId: "m-42" })]);
+	assertStringIncludes(anchored, "data-activity-chip-actionable");
+
+	const unanchored = renderExtensionActivityChips([chip()]);
+	assertStringExcludes(unanchored, "data-activity-chip-actionable");
+});
+
 test("no chips renders nothing", () => {
 	assertEquals(renderExtensionActivityChips([]), "");
 });

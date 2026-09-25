@@ -777,7 +777,10 @@ function renderContextMessage(message: AppMessage): string {
 						</div>
 					)}
 					{isCustom && message.details && (
-						<details class="context-details context-details-nested">
+						<details
+							class="context-details context-details-nested"
+							data-preserve-attr="open"
+						>
 							<summary class="context-summary context-summary-nested">
 								<span class="context-title">Details</span>
 								<span class="context-chevron">

@@ -57,6 +57,7 @@ export function renderUpdatePopover(update: AvailableUpdate): string {
 					data-size="icon-xs"
 					type="button"
 					data-copy-code
+					data-preserve-attr="data-copy-state"
 					aria-label="Copy upgrade command"
 				>
 					<Icon icon={Copy} class="code-copy-icon code-copy-icon-idle" />

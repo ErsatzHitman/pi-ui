@@ -123,9 +123,17 @@
 		text-align: start;
 		font-size: var(--text-xs);
 	}
-	.review-branch-row:hover {
+
+	/* :active stands in for the gated hover as tap feedback on touch. */
+	.review-branch-row:active {
 		background: var(--surface-control);
 		color: var(--text);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.review-branch-row:hover {
+			background: var(--surface-control);
+			color: var(--text);
+		}
 	}
 	.review-branch-row[aria-current="true"] {
 		color: var(--text);
@@ -234,8 +242,10 @@
 	.review-close {
 		color: var(--text-muted);
 	}
-	.review-close:hover {
-		color: var(--text);
+	@media (hover: hover) and (pointer: fine) {
+		.review-close:hover {
+			color: var(--text);
+		}
 	}
 	.review-diff-canvas {
 		position: relative;
@@ -299,7 +309,6 @@
 	#workspace-review .workspace-mode-control {
 		width: 100%;
 		border-radius: var(--radius-sm);
-		interpolate-size: allow-keywords;
 	}
 	#workspace-review .workspace-mode-control > .workspace-mode-button {
 		display: flex;
@@ -314,11 +323,9 @@
 		inline-size: max-content;
 		margin-inline-start: 0.5rem;
 		overflow: clip;
-		transition:
-			inline-size 100ms var(--ease-out),
-			margin-inline-start 100ms var(--ease-out),
-			opacity 80ms var(--ease-out),
-			visibility 100ms;
+
+		/* Snaps: focus-files/focus-git is keyboard-initiated and the hint's size is layout. */
+		transition: none;
 	}
 	#workspace-files-sidebar:has(.review-sidebar-panel:focus-within)
 		.workspace-mode-button[data-workspace-mode="files"]
@@ -423,10 +430,18 @@
 		color: var(--text-muted);
 		text-align: start;
 	}
-	.review-graph-row:hover,
+
+	/* :active stands in for the gated hover as tap feedback on touch. */
+	.review-graph-row:active,
 	.review-graph-row[aria-pressed="true"] {
 		background: var(--surface-control);
 		color: var(--text);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.review-graph-row:hover {
+			background: var(--surface-control);
+			color: var(--text);
+		}
 	}
 	.review-graph-working {
 		color: var(--status-warning);
@@ -579,8 +594,13 @@
 		color: var(--text);
 		font-family: var(--font-mono);
 	}
-	.review-graph-parent-link:hover:not(:disabled) {
+	.review-graph-parent-link:not(:disabled):active {
 		background: var(--surface-control);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.review-graph-parent-link:hover:not(:disabled) {
+			background: var(--surface-control);
+		}
 	}
 	.review-graph-parent-link:disabled {
 		color: var(--text-muted);
@@ -647,10 +667,17 @@
 		text-align: left;
 	}
 
-	.workspace-tree-context-menu-item:is(:hover, :focus-visible) {
+	.workspace-tree-context-menu-item:is(:focus-visible, :active) {
 		background: light-dark(var(--surface-control), var(--surface-muted));
 		color: var(--text);
 		outline: none;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.workspace-tree-context-menu-item:hover {
+			background: light-dark(var(--surface-control), var(--surface-muted));
+			color: var(--text);
+			outline: none;
+		}
 	}
 
 	.workspace-tree-context-menu-item-destructive {

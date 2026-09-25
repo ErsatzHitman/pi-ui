@@ -68,9 +68,18 @@ export function closeSessionSidebarAction(): string {
  * next load — the same split `pi-ui-live-workspace-preferences` event already uses for `tab`
  * and `ratio`. Opening the pane (the guard only ever fires when `$_liveWorkspaceOpen` ends up
  * `true`, never on a close) also closes Sessions, keeping the two mutually exclusive.
+ *
+ * `animateExpression` decides whether this open/close slides: `#app[data-live-workspace-animate]`
+ * gates the pane's transitions (live-workspace.css). It defaults to instant, because keybinds,
+ * Escape and the command palette are keyboard-initiated; only pointer-driven overlay toggles
+ * pass `pointerOverlayAnimate` (or `"true"`) — the same split as the Sessions drawer.
  */
-function setLiveWorkspaceOpenAction(valueExpression: string): string {
+function setLiveWorkspaceOpenAction(
+	valueExpression: string,
+	animateExpression = "false",
+): string {
 	return `
+		document.getElementById('app')?.toggleAttribute('data-live-workspace-animate', ${animateExpression});
 		$_liveWorkspaceOpen = ${valueExpression};
 		if ($_liveWorkspaceOpen) { ${closeSessionSidebarAction()} }
 		document.body.dispatchEvent(new CustomEvent(
@@ -80,12 +89,20 @@ function setLiveWorkspaceOpenAction(valueExpression: string): string {
 	`;
 }
 
-export function toggleLiveWorkspaceAction(): string {
-	return setLiveWorkspaceOpenAction("!$_liveWorkspaceOpen");
+/**
+ * Animate only a pointer click (not a keyboard-activated button, which matches `:focus-visible`)
+ * on the floating sheet/drawer: when the pane is grid-docked (`position: relative`) a close
+ * would otherwise jump it to drawer geometry and slide it out, so docked toggles snap.
+ */
+export const pointerOverlayAnimate =
+	"!el.matches(':focus-visible') && getComputedStyle(document.getElementById('live-workspace')).position !== 'relative'";
+
+export function toggleLiveWorkspaceAction(animate = "false"): string {
+	return setLiveWorkspaceOpenAction("!$_liveWorkspaceOpen", animate);
 }
 
-export function closeLiveWorkspaceAction(): string {
-	return setLiveWorkspaceOpenAction("false");
+export function closeLiveWorkspaceAction(animate = "false"): string {
+	return setLiveWorkspaceOpenAction("false", animate);
 }
 
 function toggleKeybindHintsAction(): string {
@@ -101,7 +118,7 @@ export function toggleToolOutputAction(): string {
 }
 
 function toggleToolbarAction(): string {
-	return `document.body.setAttribute('data-toolbar-animated', ''); document.body.toggleAttribute('data-toolbar-hidden'); @post('${endpoints.toolbar}', { payload: { toolbarHidden: document.body.hasAttribute('data-toolbar-hidden') } })`;
+	return `document.body.toggleAttribute('data-toolbar-hidden'); @post('${endpoints.toolbar}', { payload: { toolbarHidden: document.body.hasAttribute('data-toolbar-hidden') } })`;
 }
 
 export const commandActions = {

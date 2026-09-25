@@ -88,9 +88,11 @@
 		text-transform: lowercase;
 	}
 
-	.theme-lab-mode > button:hover,
-	.theme-lab-section-tabs > button:hover {
-		color: var(--text);
+	@media (hover: hover) and (pointer: fine) {
+		.theme-lab-mode > button:hover,
+		.theme-lab-section-tabs > button:hover {
+			color: var(--text);
+		}
 	}
 
 	.theme-lab-mode > button.theme-lab-tab-active,
@@ -108,9 +110,11 @@
 		color: var(--text-muted);
 	}
 
-	.theme-lab-icon-button:hover {
-		background: var(--surface-muted);
-		color: var(--text);
+	@media (hover: hover) and (pointer: fine) {
+		.theme-lab-icon-button:hover {
+			background: var(--surface-muted);
+			color: var(--text);
+		}
 	}
 
 	.theme-lab-icon-button > svg {
@@ -198,8 +202,10 @@
 		font: var(--text-3xs)/1 var(--font-mono);
 	}
 
-	.theme-lab-value:hover {
-		border-color: var(--border);
+	@media (hover: hover) and (pointer: fine) {
+		.theme-lab-value:hover {
+			border-color: var(--border);
+		}
 	}
 
 	.theme-lab-value:focus {

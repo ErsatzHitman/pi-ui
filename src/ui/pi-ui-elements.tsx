@@ -1,4 +1,4 @@
-import { closeSessionSidebarAction } from "../commands/actions.ts";
+import { closeSessionSidebarAction, pointerOverlayAnimate } from "../commands/actions.ts";
 import {
 	isPiUiSheetElement,
 	type PiUiAction,
@@ -172,10 +172,12 @@ function renderRosterSummary(element: PiUiElement): string {
 /**
  * Opens the Live Workspace pane to the Extensions tab, where the full element renders. Sessions
  * and Live Workspace are mutually exclusive (PLAN-ux.md "sidebar-exclusive"), so this closes
- * Sessions too if it happens to be open.
+ * Sessions too if it happens to be open. Sets `data-live-workspace-animate` itself, like
+ * `toggleLiveWorkspaceAction`, so whether it slides never depends on how the pane last toggled.
  */
 function openLiveWorkspaceExtensionsAction(): string {
-	return `$_liveWorkspaceOpen = true;
+	return `document.getElementById('app')?.toggleAttribute('data-live-workspace-animate', ${pointerOverlayAnimate});
+		$_liveWorkspaceOpen = true;
 		${closeSessionSidebarAction()}
 		$liveWorkspacePreferences.tab = 'extensions';
 		document.body.dispatchEvent(new CustomEvent(
@@ -346,7 +348,7 @@ function renderWidgetLines(value: JsonValue | undefined): string {
 	);
 	if (lines.length <= widgetCollapseLineThreshold) return syncHtml(list);
 	return syncHtml(
-		<details class="piui-widget-lines-collapsible">
+		<details class="piui-widget-lines-collapsible" data-preserve-attr="open">
 			<summary class="fine-print">{lines.length} lines</summary>
 			{list}
 		</details>,
@@ -368,7 +370,7 @@ function renderProgress(element: PiUiElement): string {
 		<div class="piui-progress">
 			{ratio !== undefined ? (
 				<span class="piui-progress-track">
-					<span class="piui-progress-value" style={`width: ${ratio}%`} />
+					<span class="piui-progress-value" style={`--progress: ${ratio}`} />
 				</span>
 			) : (
 				<span class="piui-progress-indeterminate" />

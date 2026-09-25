@@ -18,8 +18,8 @@
 		backdrop-filter: blur(4px);
 		pointer-events: none;
 		transition:
-			opacity 100ms ease-out,
-			display 100ms allow-discrete;
+			opacity var(--duration-sm) var(--ease-out),
+			display var(--duration-sm) allow-discrete;
 	}
 
 	.file-drop-overlay.file-drop-active {
@@ -38,11 +38,22 @@
 		font-size: var(--text-base);
 		box-shadow: var(--shadow-lg);
 		scale: 0.95;
-		transition: scale 100ms ease-out;
+		transition: scale var(--duration-sm) var(--ease-out);
 	}
 
 	.file-drop-card.file-drop-card-active {
 		scale: 1;
+	}
+
+	/* The overlay flips display and gains its active class in one tick, so without a
+	   starting style the entry fade and scale-in never play (only the exit did). */
+	@starting-style {
+		.file-drop-overlay.file-drop-active {
+			opacity: 0;
+		}
+		.file-drop-card.file-drop-card-active {
+			scale: 0.95;
+		}
 	}
 	.file-drop-icon {
 		width: 2rem;
@@ -76,9 +87,6 @@
 		min-height: 0;
 		grid-template-rows: minmax(0, 1fr);
 		overflow: hidden;
-		transition:
-			width 150ms var(--ease-out),
-			margin-inline-start 150ms var(--ease-out);
 	}
 
 	.command-medium {
@@ -153,7 +161,6 @@
 		grid-column: 1 / -1;
 		grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
 		align-items: center;
-		interpolate-size: allow-keywords;
 		margin-inline: var(--workspace-inset);
 		margin-block-start: max(var(--workspace-inset), env(safe-area-inset-top));
 		padding-inline: calc(var(--workspace-inset) + env(safe-area-inset-left))
@@ -162,30 +169,21 @@
 		opacity: 1;
 		translate: 0;
 	}
-	body[data-toolbar-animated] .toolbar {
-		transition:
-			display 150ms,
-			block-size 150ms var(--ease-out),
-			margin-block-start 150ms var(--ease-out),
-			opacity 150ms var(--ease-out),
-			translate 150ms var(--ease-out);
-		transition-behavior: allow-discrete;
-	}
-	@starting-style {
-		body[data-toolbar-animated] .toolbar {
-			block-size: 0;
-			margin-block-start: 0;
-			opacity: 0;
-			translate: 0 -1.75rem;
-		}
-	}
 	.toolbar .btn[data-variant="ghost"] {
 		color: var(--text-muted);
 	}
-	.toolbar
-		.btn:is([data-variant="secondary"], [data-variant="ghost"]:not(:disabled):hover) {
+
+	/* Split from the gated ghost hover below, which drops this part's specificity from
+	   (0,5,0) to (0,3,0); no rule in between competes with it. */
+	.toolbar .btn:is([data-variant="secondary"]) {
 		background: var(--selection);
 		color: var(--text);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.toolbar .btn:is([data-variant="ghost"]:not(:disabled):hover) {
+			background: var(--selection);
+			color: var(--text);
+		}
 	}
 	@media (hover: hover) and (pointer: fine) {
 		body[data-toolbar-hidden] .toolbar {
@@ -254,7 +252,7 @@
 		background: var(--focus-ring);
 	}
 
-	.is-resizing :is(#workspace-shell, #chat-pane, #workspace-review, #live-workspace) {
+	.is-resizing :is(#workspace-shell, #workspace-review, #live-workspace) {
 		transition: none;
 	}
 

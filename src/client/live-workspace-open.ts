@@ -24,8 +24,13 @@ function isOverlayOpen(): boolean {
 	return getComputedStyle(pane).position !== "relative";
 }
 
-/** Mirrors what `closeLiveWorkspaceAction()` (commands/actions.ts) does from a `data-on` handler. */
+/**
+ * Mirrors what `closeLiveWorkspaceAction()` (commands/actions.ts) does from a `data-on` handler.
+ * Only reached through the Back gesture while the pane floats as an overlay, so it slides out
+ * (`data-live-workspace-animate`, see live-workspace.css) like a pointer close.
+ */
 function closeLiveWorkspace(): void {
+	document.getElementById("app")?.setAttribute("data-live-workspace-animate", "");
 	document
 		.getElementById("app")
 		?.dispatchEvent(

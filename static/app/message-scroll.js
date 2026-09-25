@@ -269,6 +269,14 @@ export function shouldRearmAfterScroll(wasPinned, previousTop, scrollTop, distan
 }
 
 export function scrollBottom(behavior = "auto") {
+	// A CSS `scroll-behavior` can't override an explicit smooth scroll, so honour
+	// reduced motion here.
+	if (
+		behavior === "smooth" &&
+		window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
+	) {
+		behavior = "instant";
+	}
 	clearBottomScrollTimers();
 	anchor = undefined;
 	historyLoading = false;

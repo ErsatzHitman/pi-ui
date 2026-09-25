@@ -179,9 +179,15 @@
 		font: var(--text-base)/1.25 var(--font-mono);
 		text-align: start;
 	}
-	.workspace-browser-directory:is(:hover, :focus-visible) {
+	.workspace-browser-directory:is(:focus-visible, :active) {
 		background: var(--surface-muted);
 		outline: 0;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.workspace-browser-directory:hover {
+			background: var(--surface-muted);
+			outline: 0;
+		}
 	}
 	.workspace-browser-directory-icon {
 		width: 1rem;

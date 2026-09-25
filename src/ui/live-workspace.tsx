@@ -2,6 +2,7 @@ import type { DelegateLedgerEntry } from "../agent/delegate-ledger-reader.ts";
 import type { WorkflowJournalSummary } from "../agent/workflow-journal-reader.ts";
 import {
 	closeLiveWorkspaceAction,
+	pointerOverlayAnimate,
 	toggleLiveWorkspaceAction,
 } from "../commands/actions.ts";
 import {
@@ -128,7 +129,7 @@ export function renderLiveWorkspaceToggle(_state: AppStateSnapshot): string {
 			aria-pressed="false"
 			data-attr:aria-pressed="$_liveWorkspaceOpen ? 'true' : 'false'"
 			aria-keyshortcuts={keybindAria("toggle-live-workspace")}
-			data-on:click={toggleLiveWorkspaceAction()}
+			data-on:click={toggleLiveWorkspaceAction(pointerOverlayAnimate)}
 			data-on:keydown__window={keybindAction(
 				"toggle-live-workspace",
 				toggleLiveWorkspaceAction(),
@@ -161,7 +162,7 @@ export function renderLiveWorkspace(
 				aria-hidden="true"
 				hidden
 				data-attr:hidden="!$_liveWorkspaceOpen"
-				data-on:click={closeLiveWorkspaceAction()}
+				data-on:click={closeLiveWorkspaceAction("true")}
 			/>
 			<section
 				id="live-workspace"
@@ -289,7 +290,9 @@ export function renderLiveWorkspace(
 							class="btn live-workspace-close"
 							data-variant="ghost"
 							data-size="icon-xs"
-							data-on:click={closeLiveWorkspaceAction()}
+							data-on:click={closeLiveWorkspaceAction(
+								pointerOverlayAnimate,
+							)}
 							aria-label="Hide Live Workspace"
 						>
 							<Icon icon={X} />
@@ -739,7 +742,7 @@ function renderUsageTab(usage: AppUsage): string {
 					>
 						<div
 							class="live-workspace-meter-fill"
-							style={`width: ${Math.min(100, Math.max(0, contextPercent))}%`}
+							style={`--progress: ${Math.min(100, Math.max(0, contextPercent))}`}
 						/>
 					</div>
 				</div>

@@ -360,6 +360,9 @@ test("the usage tab renders a context meter and per-window quota limits", () => 
 	assertStringIncludes(html, "$1.230");
 	assertStringIncludes(html, 'role="meter"');
 	assertStringIncludes(html, 'aria-valuenow="42"');
+	// Motion: the meter fill scales from a --progress custom property, not an inline width.
+	assertStringIncludes(html, 'style="--progress: ');
+	assertFalse(html.includes('style="width:'));
 	assertStringIncludes(html, "Weekly limit");
 	assertStringIncludes(html, "5h window");
 	assertStringIncludes(html, "60% used · resets in 2h");

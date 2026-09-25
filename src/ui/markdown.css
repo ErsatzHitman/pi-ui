@@ -67,8 +67,8 @@
 	}
 	.code-copy-icon {
 		transition:
-			opacity 100ms ease-out,
-			scale 100ms ease-out;
+			opacity var(--duration-sm) var(--ease-out),
+			scale var(--duration-sm) var(--ease-out);
 	}
 	.code-copy-icon-done {
 		position: absolute;
@@ -199,8 +199,13 @@
 		background: oklch(from var(--text) l c h / 3%);
 	}
 
-	.markdown-content .table-container tbody tr:is(:hover, :focus-within) td {
+	.markdown-content .table-container tbody tr:is(:focus-within, :active) td {
 		background: oklch(from var(--text) l c h / 7%);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.markdown-content .table-container tbody tr:hover td {
+			background: oklch(from var(--text) l c h / 7%);
+		}
 	}
 
 	.markdown-content :where(ul, ol) {
