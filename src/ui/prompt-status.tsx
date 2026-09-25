@@ -45,7 +45,7 @@ export function renderPromptStatus(state: AppStateSnapshot): string {
 			{state.extensionWorkingVisible &&
 				activityText &&
 				!state.extensionWorkingActivityId && (
-					<span class="prompt-working-status">
+					<span id="prompt-working-status" class="prompt-working-status">
 						<span class="prompt-working-content">
 							{renderWorkingIndicator(state.extensionWorkingIndicator)}
 							<span safe>{activityText}</span>
@@ -56,6 +56,7 @@ export function renderPromptStatus(state: AppStateSnapshot): string {
 				.filter((status) => !status.activityId)
 				.map((status) => (
 					<span
+						id={`extension-status-${encodeURIComponent(status.key)}`}
 						class="extension-status"
 						data-extension-status={status.key}
 						safe

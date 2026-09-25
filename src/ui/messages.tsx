@@ -41,6 +41,25 @@ function preservesFinalizedMessageDom(message: AppMessage): boolean {
 	);
 }
 
+/** One-shot entry marker for a live-appended message (flow-spec §6). Every message
+ * renderer returns one root `<article …>`; the marker goes on that root only. An empty
+ * render (an extension-activity message with no activity) stays empty. */
+export function markEntering(html: string): string {
+	if (!html) return html;
+	if (!html.startsWith("<article")) {
+		throw new Error("markEntering: expected an <article> root");
+	}
+	return html.replace("<article", "<article data-enter");
+}
+
+export type RenderMessagesOptions = {
+	/** The one live-appended message to mark `data-enter` (first message of a chat). */
+	enteringId?: string;
+	/** Mark `#messages` itself `data-enter`: a session replace fades the new transcript in
+	 * (flow-critique #2/#3). Never set for code-theme replaces, reconnects or full views. */
+	enter?: boolean;
+};
+
 export function renderMessages(
 	messages: readonly AppMessage[],
 	emptyHint: AppKeybindHint,
@@ -48,11 +67,13 @@ export function renderMessages(
 	sessions: readonly AppSessionSummary[] = [],
 	authenticated = true,
 	sessionCatalogLoading = false,
+	options: RenderMessagesOptions = {},
 ): string {
 	return syncHtml(
 		<main
 			id="messages"
 			class={messages.length === 0 ? "messages-empty" : undefined}
+			data-enter={options.enter === true}
 			data-show="!$_sessionTransitionVisible"
 			data-class:messages-loading="
 				$_sessionLoading ||
@@ -96,7 +117,11 @@ export function renderMessages(
 								authenticated,
 								sessionCatalogLoading,
 							)
-						: messages.map(renderMessage)}
+						: messages.map((message) =>
+								message.id === options.enteringId
+									? markEntering(renderMessage(message))
+									: renderMessage(message),
+							)}
 				</div>
 				<button
 					id="messages-trim"
@@ -122,6 +147,32 @@ export function renderMessages(
 
 export function renderOlderMessagesPatch(messages: readonly AppMessage[]): string {
 	return messages.map(renderMessage).join("");
+}
+
+/**
+ * Bridges send → first token (flow-decisions §10.1): a transient "thinking..." row in the
+ * minimal-mode activity style, appended live after a user message while the turn waits
+ * for its first response article (ui-renderer.ts owns its lifetime). It enters with the
+ * transcript `data-enter` recipe and is retired in place by message-scroll.js
+ * `retirePending()` (a crossfade under the incoming article). No `data-message-id`: it is
+ * not a message, and is never part of a history render. Not `.message-thought` either:
+ * minimal mode's "hide every earlier activity row" rule must not snap it away before the
+ * crossfade; `.message + .message` already gives it the thought row's exact offset.
+ */
+export function renderPendingResponse(): string {
+	return syncHtml(
+		<article
+			id="message-pending"
+			class="message message-narrative thought-foreground message-pending"
+			data-enter
+			aria-hidden="true"
+		>
+			<div class="tool-timeline-item minimal-activity">
+				<StatusDot class="tool-state-dot" state="running" label="Thinking" />
+				<p class="minimal-activity-label">thinking...</p>
+			</div>
+		</article>,
+	);
 }
 
 export function renderOlderMessagesTriggerPatch(active: boolean): string {
@@ -674,7 +725,7 @@ function renderErrorMessage(message: AppMessage): string {
 			data-message-id={message.id}
 			role="alert"
 		>
-			<details class="context-details" data-preserve-attr="open">
+			<details class="context-details" data-preserve-attr="open style">
 				<summary class="context-summary">
 					<span class="tool-state-dot status-dot" aria-hidden="true">
 						<span class="tool-status-ball tool-status-error" />
@@ -742,7 +793,11 @@ function renderContextMessage(message: AppMessage): string {
 			the extension already opted in by setting `display`, so the point of the
 			message is to be read, not hidden behind a click (r2-audit M2). Compaction
 			and skill/summary context stay collapsed by default, as before. */}
-			<details class="context-details" data-preserve-attr="open" open={isCustom}>
+			<details
+				class="context-details"
+				data-preserve-attr="open style"
+				open={isCustom}
+			>
 				<summary class="context-summary">
 					<span class="tool-state-dot status-dot" aria-hidden="true">
 						<span
@@ -779,7 +834,7 @@ function renderContextMessage(message: AppMessage): string {
 					{isCustom && message.details && (
 						<details
 							class="context-details context-details-nested"
-							data-preserve-attr="open"
+							data-preserve-attr="open style"
 						>
 							<summary class="context-summary context-summary-nested">
 								<span class="context-title">Details</span>

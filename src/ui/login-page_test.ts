@@ -118,3 +118,11 @@ test("password mode refills an escaped username after a failed attempt", () => {
 	assertStringExcludes(html, 'value=""><b>x');
 	assertStringIncludes(html, 'value="&#34;><b>x"');
 });
+
+test("a submitted login dims its button and ignores a second submit, and bfcache un-sticks it", () => {
+	const html = renderLoginPage({ next: "/", loginPath: "/session/login" });
+	assertStringIncludes(html, "onsubmit=");
+	assertStringIncludes(html, "this.dataset.pending !== undefined) return false;");
+	assertStringIncludes(html, ".login-card[data-pending] .btn");
+	assertStringIncludes(html, "addEventListener('pageshow'");
+});

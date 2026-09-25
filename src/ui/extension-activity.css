@@ -39,6 +39,9 @@
 		color: var(--text-muted);
 		font-size: var(--text-2xs);
 		text-transform: uppercase;
+
+		/* Eases with `.ext-activity-summary`'s fill (same 160ms) when the state flips. */
+		transition: color var(--duration-md) ease;
 	}
 
 	.message-ext-activity[data-activity-state="working"] .ext-activity-state,
@@ -132,9 +135,13 @@
 		gap: 0.25rem;
 	}
 
+	/* Keyed chips (id per activity) fade and grow in from their leading edge once per real
+	   insertion: WAAPI on `transform` in static/app/prompt-motion.js, so it composes with the
+	   press `scale` transition here and a morph that moves a chip never replays it. */
 	.ext-activity-chip {
 		cursor: default;
 		border: 0;
+		transform-origin: 0 50%;
 		transition: scale var(--duration-sm) var(--ease-out);
 	}
 

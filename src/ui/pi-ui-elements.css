@@ -438,9 +438,20 @@
 		}
 
 		/* Bottom-pinned sheet rises from the edge it lives on. (0,3,0) beats the generic modal
-		   fade/scale in overlays.css, so it only slides. No exit: close stays instant. */
+		   fade/scale in overlays.css, so it only slides. Exit retraces it: slides back down
+		   (overrides D5's fade/scale closed state, (0,1,0)). */
 		.dialog.piui-sheet:modal {
 			transition: translate var(--duration-lg) var(--ease-drawer);
+		}
+		.dialog.piui-sheet:not([open]) {
+			opacity: 1;
+			scale: 1;
+			translate: 0 100%;
+			pointer-events: none;
+			transition:
+				translate var(--duration-md) var(--ease-drawer),
+				display var(--duration-md) allow-discrete,
+				overlay var(--duration-md) allow-discrete;
 		}
 		@starting-style {
 			/* stylelint-disable-next-line max-nesting-depth -- @starting-style must be scoped to the phone breakpoint */

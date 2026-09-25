@@ -44,8 +44,9 @@ function openWorkspaceDialogAction(
 	return `${closeCommandDialog ? "document.getElementById('command-dialog')?.close(); " : ""}$_workspaceAction = '${action}'; document.getElementById('workspace-dialog').showModal()`;
 }
 
+/** Arms the pane choreography first (flow-critique #1: src/client/pane-motion.ts). */
 export function toggleWorkspaceReviewAction(): string {
-	return "$_workspaceReviewOpen = !$_workspaceReviewOpen";
+	return "window.piUi.paneMotion?.arm('review', !$_workspaceReviewOpen); $_workspaceReviewOpen = !$_workspaceReviewOpen";
 }
 
 /**
@@ -62,24 +63,18 @@ export function closeSessionSidebarAction(): string {
 }
 
 /**
- * Sets `$_liveWorkspaceOpen` and persists the new value as the saved preference (A#15):
+ * Sets `$_liveWorkspaceOpen` and persists it as the saved preference (A#15):
  * `$_liveWorkspaceOpen` is the live, instantly-applied signal the pane's CSS reads, while
  * `$liveWorkspacePreferences.open` is what's posted to the backend and seeds the signal on the
- * next load — the same split `pi-ui-live-workspace-preferences` event already uses for `tab`
- * and `ratio`. Opening the pane (the guard only ever fires when `$_liveWorkspaceOpen` ends up
- * `true`, never on a close) also closes Sessions, keeping the two mutually exclusive.
- *
- * `animateExpression` decides whether this open/close slides: `#app[data-live-workspace-animate]`
- * gates the pane's transitions (live-workspace.css). It defaults to instant, because keybinds,
- * Escape and the command palette are keyboard-initiated; only pointer-driven overlay toggles
- * pass `pointerOverlayAnimate` (or `"true"`) — the same split as the Sessions drawer.
+ * next load. Opening also closes Sessions (the two share the right-hand slot). The class flip
+ * and the Sessions close land in one task, so pane-motion.ts sees a single mutation batch and
+ * crossfades the swap in place. Its synchronous `arm` runs first, before anything changes
+ * (flow-critique #1). Every trigger animates (motion round 2); there is no pointer/keyboard
+ * gate any more.
  */
-function setLiveWorkspaceOpenAction(
-	valueExpression: string,
-	animateExpression = "false",
-): string {
+function setLiveWorkspaceOpenAction(valueExpression: string): string {
 	return `
-		document.getElementById('app')?.toggleAttribute('data-live-workspace-animate', ${animateExpression});
+		window.piUi.paneMotion?.arm('live', ${valueExpression});
 		$_liveWorkspaceOpen = ${valueExpression};
 		if ($_liveWorkspaceOpen) { ${closeSessionSidebarAction()} }
 		document.body.dispatchEvent(new CustomEvent(
@@ -89,20 +84,12 @@ function setLiveWorkspaceOpenAction(
 	`;
 }
 
-/**
- * Animate only a pointer click (not a keyboard-activated button, which matches `:focus-visible`)
- * on the floating sheet/drawer: when the pane is grid-docked (`position: relative`) a close
- * would otherwise jump it to drawer geometry and slide it out, so docked toggles snap.
- */
-export const pointerOverlayAnimate =
-	"!el.matches(':focus-visible') && getComputedStyle(document.getElementById('live-workspace')).position !== 'relative'";
-
-export function toggleLiveWorkspaceAction(animate = "false"): string {
-	return setLiveWorkspaceOpenAction("!$_liveWorkspaceOpen", animate);
+export function toggleLiveWorkspaceAction(): string {
+	return setLiveWorkspaceOpenAction("!$_liveWorkspaceOpen");
 }
 
-export function closeLiveWorkspaceAction(animate = "false"): string {
-	return setLiveWorkspaceOpenAction("false", animate);
+export function closeLiveWorkspaceAction(): string {
+	return setLiveWorkspaceOpenAction("false");
 }
 
 function toggleKeybindHintsAction(): string {

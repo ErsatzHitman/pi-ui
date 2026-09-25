@@ -1,3 +1,4 @@
+import { duration, easing, reducedMotion } from "../../static/app/motion.js";
 import {
 	formatAdaptiveDateTime,
 	formatExpandedDateTime,
@@ -48,6 +49,47 @@ function renderRefBadge(ref: GitGraphRef): HTMLElement {
 	return badge;
 }
 
+/**
+ * Pure (unit-tested): hashes present in `next` but not `previous`. Empty on the first load
+ * (no stagger on a functional lane graph) and from the unloaded placeholder, so only commits
+ * that arrive while the graph is on screen are new.
+ */
+export function newCommitHashes(
+	previous: Pick<WorkspaceGitGraphSnapshot, "revision" | "rows"> | undefined,
+	next: Pick<WorkspaceGitGraphSnapshot, "rows">,
+): Set<string> {
+	if (!previous || previous.revision === unloadedRevision || previous.rows.length === 0)
+		return new Set();
+	const before = new Set(previous.rows.map((row) => row.hash));
+	return new Set(next.rows.map((row) => row.hash).filter((hash) => !before.has(hash)));
+}
+
+/**
+ * Unit-tested: empties the commit sheet only once its slide-out has finished, and only if
+ * nothing reopened it meanwhile, so it leaves with its content still visible. One pending
+ * clear at a time: a reopen cancels it, and a later close restarts it, so a stale timer from
+ * an earlier close never blanks a sheet that is still sliding out.
+ */
+export function createDetailClearer(
+	detail: Pick<HTMLElement, "hidden" | "replaceChildren">,
+	isOpen: () => boolean,
+	ms: number,
+) {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const cancel = () => {
+		if (timer !== undefined) clearTimeout(timer);
+		timer = undefined;
+	};
+	const schedule = () => {
+		cancel();
+		timer = setTimeout(() => {
+			timer = undefined;
+			if (!isOpen() && detail.hidden) detail.replaceChildren();
+		}, ms);
+	};
+	return { cancel, schedule };
+}
+
 /** Lower sorts first: the current branch and main lead, tags trail. */
 function refPriority(ref: GitGraphRef): number {
 	if (ref.current) return 0;
@@ -81,6 +123,7 @@ export function createWorkspaceGitGraph(
 	let snapshot: WorkspaceGitGraphSnapshot | undefined;
 	let selectedHash: string | undefined;
 	let detailOpen = false;
+	const detailClearer = createDetailClearer(detail, () => detailOpen, duration.md + 40);
 	const detailCache = new Map<string, WorkspaceGitGraphCommitDetail>();
 	let detailRequest = 0;
 	// Rows "Load more" asked for. Live refreshes (the workspace watcher, e.g. every file
@@ -148,12 +191,27 @@ export function createWorkspaceGitGraph(
 
 	function show(next: WorkspaceGitGraphSnapshot): void {
 		if (snapshot?.revision === next.revision) return;
+		const previous = snapshot;
 		snapshot = next;
 		if (selectedHash && !next.rows.some((row) => row.hash === selectedHash)) {
 			selectedHash = undefined;
 			closeDetail();
 		}
 		render();
+		// Commits that arrived while the graph is on screen fade in. Every refresh rebuilds
+		// every row, so the entry is keyed by hash here, not by node insertion; render() alone
+		// (a resize) never animates.
+		const fresh = newCommitHashes(previous, next);
+		if (fresh.size > 0 && rowsHost.checkVisibility()) {
+			const reduce = reducedMotion();
+			for (const button of rowButtons())
+				if (fresh.has(button.dataset.hash ?? ""))
+					button.animate([{ opacity: 0 }, { opacity: 1 }], {
+						duration: reduce ? duration.sm : duration.md,
+						easing: easing.out,
+						fill: "backwards",
+					});
+		}
 	}
 
 	function render(): void {
@@ -261,7 +319,11 @@ export function createWorkspaceGitGraph(
 	function selectBranchTip(branch: GitGraphBranch): void {
 		const row = rowButtons().find((button) => button.dataset.hash === branch.hash);
 		if (!row) return;
-		row.scrollIntoView({ block: "center" });
+		// An explicit `smooth` ignores the CSS reduced-motion kill switch, so check it here.
+		row.scrollIntoView({
+			block: "center",
+			behavior: reducedMotion() ? "instant" : "smooth",
+		});
 		void toggleSelection(branch.hash);
 	}
 
@@ -412,6 +474,7 @@ export function createWorkspaceGitGraph(
 		}
 		selectedHash = hash;
 		detailOpen = true;
+		detailClearer.cancel();
 		syncPressedState();
 		await showDetail(hash);
 	}
@@ -494,7 +557,10 @@ export function createWorkspaceGitGraph(
 					const row = rowButtons().find(
 						(button) => button.dataset.hash === parentHash,
 					);
-					row?.scrollIntoView({ block: "center" });
+					row?.scrollIntoView({
+						block: "center",
+						behavior: reducedMotion() ? "instant" : "smooth",
+					});
 					if (parentHash) void toggleSelection(parentHash);
 				});
 				parents.append(parentButton);
@@ -533,7 +599,9 @@ export function createWorkspaceGitGraph(
 	function closeDetail(): void {
 		detailOpen = false;
 		detail.hidden = true;
-		detail.replaceChildren();
+		// The sheet slides out with its content (workspace-review.css); empty it only once it
+		// has left, and only if nothing reopened it meanwhile.
+		detailClearer.schedule();
 	}
 
 	function loadingParagraph(message: string): HTMLElement {
@@ -616,6 +684,7 @@ export function createWorkspaceGitGraph(
 		rowsHost.removeEventListener("keydown", handleKeydown);
 		resize.disconnect();
 		if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
+		detailClearer.cancel();
 	}
 
 	return { applySnapshot, dispose, focusSelected };

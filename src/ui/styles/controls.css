@@ -312,6 +312,19 @@
 			color: var(--text-muted);
 			font-size: var(--text-xs);
 			font-weight: 500;
+
+			/* Round 2: the selected pill crossfades (colour: `ease`) and a press registers on
+			   touch, where hover is gated. No sliding pill (tens/day: near-imperceptible tier).
+			   0.97, not .btn's 0.98: 28px segments need the larger delta to read. */
+			transition:
+				background-color var(--duration-sm) ease,
+				color var(--duration-sm) ease,
+				box-shadow var(--duration-sm) ease,
+				scale var(--duration-sm) var(--ease-out);
+		}
+
+		& > button:not(:disabled):active {
+			scale: 0.97;
 		}
 
 		& > button[aria-pressed="true"] {

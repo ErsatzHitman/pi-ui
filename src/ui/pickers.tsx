@@ -589,7 +589,8 @@ function renderSessionRow(
 			role="menuitem"
 			tabindex="-1"
 			aria-current={current ? "true" : undefined}
-			data-preserve-attr="class"
+			data-preserve-attr="class data-deleting"
+			data-attr:data-deleting={`$_sessionDeletingPath === ${JSON.stringify(session.path)}`}
 			data-keep-command-open
 			data-indicator:_session-loading
 			data-attr:aria-disabled="$_sessionTransitionStatus === 'loading' ? 'true' : 'false'"
@@ -637,8 +638,9 @@ function renderSessionRow(
 						aria-label={`Abort ${current ? "current" : "background"} session ${session.title}`}
 						data-on:click__stop={
 							current
-								? `@post('${endpoints.abort}', { payload: {} })`
+								? `el.setAttribute('data-aborting', ''); @post('${endpoints.abort}', { payload: {} })`
 								: `
+						el.setAttribute('data-aborting', '');
 						$backgroundSessionPath = ${JSON.stringify(session.path)};
 						@post('${endpoints.sessionsBackgroundAbort}', {
 						payload: { backgroundSessionPath: $backgroundSessionPath },

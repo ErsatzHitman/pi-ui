@@ -1,6 +1,10 @@
 @layer components {
+	/* Send ⇄ Stop crossfade on the two persistent svgs (the fat morph only swaps their
+	   classes). Background/colour share the same 160ms so the square never sits on the old
+	   fill. blur(2px) masks the overlap (animate/RECIPES "Masking a crossfade"). */
 	.prompt-action {
 		line-height: 1;
+		transition-duration: var(--duration-md);
 	}
 	.prompt-action-icons {
 		position: absolute;
@@ -13,11 +17,22 @@
 		width: 0.875rem;
 		height: 0.875rem;
 		grid-area: 1 / 1;
+		transition:
+			opacity var(--duration-md) var(--ease-out),
+			scale var(--duration-md) var(--ease-out),
+			filter var(--duration-md) var(--ease-out);
 	}
 
-	/* The send/abort swap is instant: Enter-send is keyboard-initiated and runs 100+ times a day. */
 	.prompt-action-icon-exit {
-		display: none;
+		opacity: 0;
+		scale: 0.95;
+		filter: blur(2px);
+	}
+
+	/* Abort pressed: acknowledge at t0, until the server morph (which strips the attribute). */
+	#prompt-action[data-aborting] .prompt-abort-icon {
+		opacity: 0.5;
+		scale: 0.95;
 	}
 	.prompt-abort-icon rect {
 		fill: currentColor;

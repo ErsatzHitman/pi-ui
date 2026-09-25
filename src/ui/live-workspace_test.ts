@@ -1,6 +1,10 @@
 import { test } from "bun:test";
 
-import { assertFalse, assertStringIncludes } from "#testing/assertions";
+import {
+	assertFalse,
+	assertStringExcludes,
+	assertStringIncludes,
+} from "#testing/assertions";
 
 import {
 	emptyLiveWorkspaceSnapshot,
@@ -504,4 +508,46 @@ test("clicking the bell while it is already on (from another device) asks THIS b
 	if (check === -1 || toggle === -1 || check > toggle) {
 		throw new Error("expected the permission check to come before the toggle");
 	}
+});
+
+test("every pane trigger animates: no pointer/keyboard gate, and each arms the engine first", () => {
+	const html =
+		renderLiveWorkspace(snapshot(), {}, emptyUsage) +
+		renderLiveWorkspaceToggle(appRenderSnapshot({}));
+	assertStringExcludes(html, "data-live-workspace-animate");
+	assertStringExcludes(html, ":focus-visible");
+	assertStringIncludes(html, "window.piUi.paneMotion?.arm('live', false)");
+	assertStringIncludes(
+		html,
+		"window.piUi.paneMotion?.arm('live', !$_liveWorkspaceOpen)",
+	);
+	// The (hidden) docked resize separator keeps its a11y wiring.
+	assertStringIncludes(html, 'id="live-workspace-separator"');
+	assertStringIncludes(html, 'role="separator"');
+});
+
+test("Live Workspace rows are id-keyed so a morph inserts only the new row (B8)", () => {
+	const html = renderLiveWorkspaceData(
+		snapshot({
+			activeTools: [{ toolCallId: "call 1", toolName: "bash", startedAt: 1 }],
+			agents: [
+				{
+					id: "agent:one",
+					kind: "channel-entry",
+					source: "test",
+					label: "scout",
+					status: "running",
+					depth: 0,
+				},
+			],
+			activity: [
+				{ id: "a-1", at: 1, kind: "tool", text: "ran bash", background: false },
+			],
+		}),
+		{},
+		emptyUsage,
+	);
+	assertStringIncludes(html, 'id="lw-tool-call%201"');
+	assertStringIncludes(html, 'id="lw-agent-agent%3Aone"');
+	assertStringIncludes(html, 'id="lw-activity-a-1"');
 });

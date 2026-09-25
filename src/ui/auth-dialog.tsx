@@ -2,6 +2,18 @@ import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppAuthDialog, AppAuthProvider } from "../state/app-store.ts";
 import { syncHtml } from "./sync-html.ts";
 
+/**
+ * Phase change inside an open dialog: the panel settles in. The header id changes per phase,
+ * so idiomorph inserts a fresh header and `data-init` runs once per phase; in-phase status
+ * and progress patches morph the same header without re-running it. A content patch that
+ * lands before showModal() (the first phase of an open) is skipped: overlays.css already
+ * animates the dialog itself. `#auth-dialog-content` is id-stable, so WAAPI survives morphs.
+ */
+const AUTH_PHASE_ENTER =
+	"el.closest('dialog')?.open && window.piUi?.motion?.enter(el.parentElement, { from: 'rise' })";
+const AUTH_RESULT_ENTER =
+	"el.closest('dialog')?.open && window.piUi?.motion?.enter(el.parentElement, { from: 'pop' })";
+
 export function renderAuthDialog(dialog: AppAuthDialog | undefined): string {
 	return syncHtml(
 		<dialog
@@ -45,7 +57,7 @@ function renderProviderPicker(dialog: AppAuthDialog): string {
 	const providerHaystacks = dialog.providers.map(providerSearchHaystack);
 	return syncHtml(
 		<>
-			<header>
+			<header id={`auth-phase-${dialog.phase}`} data-init={AUTH_PHASE_ENTER}>
 				<h2 id="auth-dialog-title">{title}</h2>
 				<p>
 					{dialog.mode === "login"
@@ -154,7 +166,7 @@ function renderAuthenticationFlow(dialog: AppAuthDialog): string {
 	const hasTextPrompt = Boolean(dialog.prompt && !dialog.prompt.options);
 	return syncHtml(
 		<>
-			<header>
+			<header id={`auth-phase-${dialog.phase}`} data-init={AUTH_PHASE_ENTER}>
 				<h2 id="auth-dialog-title" safe>
 					Log in to {dialog.providerName}
 				</h2>
@@ -196,7 +208,11 @@ function renderAuthenticationFlow(dialog: AppAuthDialog): string {
 					</div>
 				)}
 				{dialog.error && (
-					<p class="error-foreground dialog-message" safe>
+					<p
+						class="error-foreground dialog-message"
+						data-init="window.piUi?.motion?.enter(el, { from: 'fade' })"
+						safe
+					>
 						{dialog.error}
 					</p>
 				)}
@@ -215,6 +231,9 @@ function renderAuthenticationFlow(dialog: AppAuthDialog): string {
 					<button
 						type="button"
 						class="btn"
+						data-indicator:_auth-submitting
+						data-attr:disabled="$_authSubmitting"
+						data-attr:aria-busy="$_authSubmitting ? 'true' : 'false'"
 						data-on:click={postAuthInput("$authInput")}
 					>
 						Continue
@@ -291,7 +310,7 @@ function postAuthInput(value: string): string {
 function renderResult(dialog: AppAuthDialog): string {
 	return syncHtml(
 		<>
-			<header>
+			<header id={`auth-phase-${dialog.phase}`} data-init={AUTH_RESULT_ENTER}>
 				<h2 id="auth-dialog-title">
 					{dialog.error ? "Authentication failed" : "Authentication updated"}
 				</h2>

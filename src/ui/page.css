@@ -64,7 +64,10 @@
 	.app-shell {
 		position: fixed;
 		inset: 0;
-		overflow: hidden;
+
+		/* clip, not hidden: a hidden box is still a programmatic scroll container, and focus
+		   moving into an off-screen pane scrolled the whole app sideways (LW-P0 lurch). */
+		overflow: clip;
 	}
 
 	.workspace-shell {
@@ -77,8 +80,45 @@
 		container: workspace / inline-size;
 	}
 
-	#session-sidebar[open]:not(:modal) ~ .workspace-shell {
+	/* Sessions' layout reserve. pane-motion.ts withholds it while the sidebar slides in
+	   (data-reserve-hold) and re-applies it for one synchronous measurement on close
+	   (data-reserve-keep). */
+	#app:not([data-reserve-hold="sessions"])
+		> #session-sidebar[open]:not(:modal)
+		~ .workspace-shell,
+	#app[data-reserve-keep="sessions"] > .workspace-shell {
 		margin-inline-end: var(--session-sidebar-width);
+	}
+
+	/* Pane FLIP width lock (pane-motion.ts): the centred column takes its post-open width
+	   at the keypress, so the only re-wrap happens with the action, not at the end. */
+	#chat-pane[data-pane-lock] #messages > .messages-stack {
+		max-width: var(--pane-lock-stack);
+	}
+	#chat-pane[data-pane-lock] #prompt-box {
+		max-width: var(--pane-lock-prompt);
+	}
+
+	/* Sessions ⇄ Live Workspace share one slot: swapping crossfades in place (the incoming
+	   pane fades in over 200ms, the outgoing out over 120ms, the chat does not move). */
+	#app[data-pane-swap] #session-sidebar,
+	#app[data-pane-swap] #live-workspace {
+		translate: none;
+		transition:
+			opacity var(--duration-pane-in) var(--ease-out),
+			display var(--duration-pane-in) allow-discrete,
+			overlay var(--duration-pane-in) allow-discrete;
+	}
+	#app[data-pane-swap] #session-sidebar:not([open]),
+	#app[data-pane-swap]:not(.live-workspace-open) #live-workspace {
+		opacity: 0;
+		transition-duration: var(--duration-sm);
+	}
+	@starting-style {
+		#app[data-pane-swap] #session-sidebar[open],
+		#app[data-pane-swap].live-workspace-open #live-workspace {
+			opacity: 0;
+		}
 	}
 
 	.chat-pane {
@@ -197,17 +237,14 @@
 	}
 
 	/*
-	 * Suppressed whenever either sibling pane is open, matching how #workspace-review's own
-	 * docking breakpoint is handled: this doesn't check whether the pane is actually docked
-	 * at the current width (only one of the two ever is, see live-workspace.css), just whether
-	 * it's open, which is the same simplification #workspace-review already relies on.
+	 * Suppressed while Review is open. Docked Live Workspace now occupies the Sessions slot,
+	 * so it keeps the same centring as Sessions (the swap never moves the content).
 	 */
 	@container (width >= calc(50vw + 28rem)) {
-		#app:not(.review-open, .live-workspace-open)
-			:is(#prompt-box, #session-transition > *) {
+		#app:not(.review-open) :is(#prompt-box, #session-transition > *) {
 			translate: calc(50vw - var(--workspace-inset) - 50cqw) 0;
 		}
-		#app:not(.review-open, .live-workspace-open) .toolbar-actions {
+		#app:not(.review-open) .toolbar-actions {
 			translate: calc(
 					50vw - var(--workspace-inset) - var(--workspace-inset) - 50cqw
 				)
@@ -216,7 +253,7 @@
 	}
 
 	@container (width >= calc(50vw + 26rem)) {
-		#app:not(.review-open, .live-workspace-open) #messages > .messages-stack {
+		#app:not(.review-open) #messages > .messages-stack {
 			translate: calc(50vw - var(--workspace-inset) - 50cqw) 0;
 		}
 	}
@@ -252,7 +289,8 @@
 		background: var(--focus-ring);
 	}
 
-	.is-resizing :is(#workspace-shell, #workspace-review, #live-workspace) {
+	.is-resizing
+		:is(#workspace-shell, #workspace-review, #live-workspace, #session-sidebar) {
 		transition: none;
 	}
 

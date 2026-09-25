@@ -63,6 +63,7 @@ export function renderLoginPage({
 							method="post"
 							action={loginPath}
 							autocomplete={passwordMode ? "on" : "off"}
+							onsubmit={loginSubmitGuard}
 						>
 							<header class="login-header">
 								<img
@@ -140,11 +141,24 @@ export function renderLoginPage({
 							</button>
 						</form>
 					</main>
+					<script>{loginPageShowReset}</script>
 				</body>
 			</html>
 		),
 	);
 }
+
+/**
+ * Submitted (argon2id, plus the public URL's round trip): the form marks itself pending so
+ * the button dims and a second press or Enter is ignored. Plain inline handlers: this page
+ * has no Datastar, and the login route sends no CSP. No spinner (a new visual element).
+ */
+const loginSubmitGuard =
+	"if (this.dataset.pending !== undefined) return false; this.dataset.pending = ''; this.setAttribute('aria-busy', 'true');";
+
+/** Back from the bfcache restores the page as it was left: un-stick a pending form. */
+const loginPageShowReset =
+	"addEventListener('pageshow', (e) => { if (e.persisted) { const f = document.querySelector('.login-card'); f?.removeAttribute('data-pending'); f?.removeAttribute('aria-busy'); } });";
 
 const loginPageStyle = `
 	.login-page-body {
@@ -200,6 +214,13 @@ const loginPageStyle = `
 
 	.login-card .btn {
 		width: 100%;
+	}
+
+	/* Submitted: the button dims on .btn's own 120ms opacity transition and a second
+	   press/Enter is ignored (the onsubmit guard). */
+	.login-card[data-pending] .btn {
+		opacity: 0.7;
+		pointer-events: none;
 	}
 
 	/* Overrides app.css's shared .field > input sizing (2rem tall, 14px text) just for these

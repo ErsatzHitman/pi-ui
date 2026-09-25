@@ -17,6 +17,16 @@
 		font-size: var(--text-xs);
 		text-overflow: ellipsis;
 		white-space: nowrap;
+
+		/* Only surfaces when sending is actually slow (e.g. over the Funnel URL): the keyframe
+		   restarts on each data-show display flip, one fresh reveal per send. The 150ms delay
+		   is a threshold, not motion, so reduced motion keeps it. */
+		animation: prompt-status-reveal var(--duration-sm) var(--ease-out) 150ms both;
+	}
+	@keyframes prompt-status-reveal {
+		from {
+			opacity: 0;
+		}
 	}
 
 	/* The flex container's own text-overflow doesn't reach its label span; without this a
@@ -26,6 +36,9 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
+
+	/* "Working…" and extension statuses fade in once per real insertion (keyed ids; WAAPI in
+	   static/app/prompt-motion.js, so a morph that re-inserts a kept node never replays it). */
 	.prompt-working-status {
 		display: inline-flex;
 		min-width: 0;

@@ -14,7 +14,7 @@ export function renderPromptAction(state: AppStateSnapshot): string {
 				data-variant="destructive"
 				data-size="icon"
 				type="button"
-				data-on:click={`@post('${endpoints.abort}', { payload: {} })`}
+				data-on:click={`el.setAttribute('data-aborting', ''); @post('${endpoints.abort}', { payload: {} })`}
 				data-on:keydown__window={`if (
 					evt.code === 'Escape' &&
 					!evt.ctrlKey &&
@@ -24,9 +24,11 @@ export function renderPromptAction(state: AppStateSnapshot): string {
 					window.piUi.shouldAbortOnEscape(evt)
 				) {
 					evt.preventDefault();
+					el.setAttribute('data-aborting', '');
 					@post('${endpoints.abort}', { payload: {} });
 				}`}
 				data-tooltip="Abort"
+				data-tooltip-delay
 				data-align="end"
 				aria-label="Abort"
 			>
@@ -62,6 +64,7 @@ export function renderPromptAction(state: AppStateSnapshot): string {
 				window.piUi.messageScroll.scrollBottom();
 				const submittedPrompt = $prompt;
 				$_promptSubmitting = true;
+				window.piUi.messageScroll.holdSpacerForSend?.();
 				window.piUi.prompt.clear();
 				window.piUi.fileTransfer.submit('${endpoints.prompt}', submittedPrompt);
 			`}

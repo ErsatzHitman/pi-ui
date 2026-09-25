@@ -50,7 +50,10 @@ export function renderFontDialog(): string {
 							{(["sans", "mono"] as const).map((kind) => (
 								<button
 									type="button"
-									data-on:click={`$fontKind = ${JSON.stringify(kind)}`}
+									data-on:click={`if ($fontKind !== ${JSON.stringify(kind)}) {
+										$fontKind = ${JSON.stringify(kind)};
+										window.piUi?.motion?.enter(el.closest('dialog')?.querySelector('.preference-grid[data-font-kind=${kind}]'), { from: 'fade' });
+									}`}
 									data-attr:aria-pressed={`$fontKind === ${JSON.stringify(kind)} ? 'true' : 'false'`}
 									aria-pressed={kind === "sans" ? "true" : "false"}
 								>
@@ -75,6 +78,7 @@ export function renderFontDialog(): string {
 					{(["sans", "mono"] as const).map((kind) => (
 						<div
 							class="preference-grid"
+							data-font-kind={kind}
 							role="radiogroup"
 							aria-label={kind === "sans" ? "Interface font" : "Code font"}
 							data-show={`$fontKind === ${JSON.stringify(kind)}`}

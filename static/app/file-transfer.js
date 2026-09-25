@@ -5,6 +5,7 @@ import {
 	attachmentFileIcons,
 	attachmentFileKind,
 } from "./attachment-file.js";
+import { duration, easing, reducedMotion } from "./motion.js";
 import { closePickers } from "./pickers.js";
 import { placeNoticeAbovePromptRow, promptInput } from "./prompt.js";
 
@@ -20,6 +21,11 @@ const AVIF_JPEG_QUALITY = 0.85;
 let dragDepth = 0;
 let submitting = false;
 const attachments = [];
+// Chip nodes keyed by attachment identity (D7): a change appends only new chips and removes
+// only departed ones, so `@starting-style` plays once per real insertion (prompt-box.css).
+let attachmentNodes = new Map();
+// Sent attachments leave at once: their chips re-appear in the user message.
+const instantRemovals = new WeakSet();
 
 export function hasFiles(data) {
 	if (!data) return false;
@@ -310,7 +316,9 @@ function showTransferError(message) {
 		error.setAttribute("aria-live", "polite");
 		placeNoticeAbovePromptRow(error, input);
 	}
-	error.textContent = message;
+	// Clearing only hides: the text stays for the 120ms fade-out (prompt-box.css) and is
+	// replaced by the next message. A hidden paragraph is out of the accessibility tree.
+	if (message) error.textContent = message;
 	error.hidden = !message;
 }
 
@@ -353,26 +361,111 @@ function removeSubmittedAttachments(submitted) {
 		const index = attachments.indexOf(attachment);
 		if (index < 0) continue;
 		attachments.splice(index, 1);
-		if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+		instantRemovals.add(attachment);
 	}
 }
 
 function removeAttachment(path) {
 	const index = attachments.findIndex((attachment) => attachment.path === path);
 	if (index < 0) return;
-	const [attachment] = attachments.splice(index, 1);
-	if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+	attachments.splice(index, 1);
 	renderAttachments();
+}
+
+/**
+ * Pure keyed reconcile: reuses the node of every key still present, creates nodes only for
+ * new keys (in order) and reports the departed ones. Exported for tests.
+ */
+export function reconcileKeyed(previous, keys, create) {
+	const nodes = new Map();
+	const added = [];
+	for (const key of keys) {
+		let node = previous.get(key);
+		if (node === undefined) {
+			node = create(key);
+			added.push(node);
+		}
+		nodes.set(key, node);
+	}
+	const removed = [...previous].filter(([key]) => !nodes.has(key));
+	return { nodes, added, removed };
+}
+
+/**
+ * Exit keyframes for a removed chip, starting from its computed values at the click (D-X1).
+ * An implicit start keyframe would not do: `click` fires after `:active` ends, so the
+ * underlying scale is already 1 and the chip's own CSS scale transition (which outranks
+ * animations) would ease it back up while it fades. The caller reads `from` first and then
+ * suppresses the chip's transitions (`[data-exiting]`), so a pressed chip leaves from 0.97.
+ * Reduced motion: opacity only.
+ */
+export function attachmentExitKeyframes(reduce, from) {
+	return reduce
+		? [{ opacity: from.opacity }, { opacity: 0 }]
+		: [
+				{ opacity: from.opacity, scale: from.scale },
+				{ opacity: 0, scale: 0.96 },
+			];
+}
+
+/** Pure: a chip's current opacity/scale from its computed style (`scale: none` is 1). */
+export function currentChipState(style) {
+	return {
+		opacity: Number(style.opacity),
+		scale: style.scale === "none" ? "1" : style.scale,
+	};
 }
 
 function renderAttachments() {
 	const tray = document.getElementById("prompt-attachments");
 	if (!(tray instanceof HTMLElement)) return;
-	tray.replaceChildren(...attachments.map(renderAttachment));
-	tray.hidden = attachments.length === 0;
+	const { nodes, removed } = reconcileKeyed(
+		attachmentNodes,
+		attachments,
+		renderAttachment,
+	);
+	attachmentNodes = nodes;
+	for (const [attachment, node] of removed) {
+		if (instantRemovals.has(attachment) || !node.isConnected) {
+			node.remove();
+			revokePreview(attachment);
+		} else exitAttachment(tray, node, attachment);
+	}
+	// New chips, plus kept chips whose tray was re-rendered, go to the end in order.
+	for (const node of nodes.values()) if (node.parentElement !== tray) tray.append(node);
+	syncTrayHidden(tray);
 	const send = document.querySelector("[data-send-trigger]");
 	if (send instanceof HTMLButtonElement)
 		send.disabled = !canSubmit(promptInput()?.value ?? "");
+}
+
+function exitAttachment(tray, node, attachment) {
+	// Read before [data-exiting] drops the transitions: mid-press-release this is ~0.97.
+	const from = currentChipState(getComputedStyle(node));
+	node.setAttribute("data-exiting", "");
+	node.style.pointerEvents = "none";
+	const done = () => {
+		node.remove();
+		// Revoke only after the exit, or the fading image chip would lose its preview.
+		revokePreview(attachment);
+		syncTrayHidden(tray);
+	};
+	node.animate(attachmentExitKeyframes(reducedMotion(), from), {
+		duration: duration.sm,
+		easing: easing.out,
+		fill: "forwards",
+	}).finished.then(done, done);
+}
+
+/** The tray stays shown while its last chip fades out. */
+function syncTrayHidden(tray) {
+	tray.hidden =
+		attachments.length === 0 &&
+		!tray.querySelector(".prompt-attachment[data-exiting]");
+}
+
+function revokePreview(attachment) {
+	if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
 }
 
 function renderAttachment(attachment) {

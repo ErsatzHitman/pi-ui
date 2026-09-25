@@ -5,7 +5,13 @@ import { assert, assertEquals, assertStringIncludes } from "#testing/assertions"
 import { AppStore } from "../state/app-store.ts";
 import { assertStringExcludes } from "../testing/assertions.ts";
 import { MessageRenderService } from "./message-render-service.ts";
-import { renderMessage, renderMessages } from "./messages.tsx";
+import {
+	markEntering,
+	renderMessage,
+	renderMessages,
+	renderOlderMessagesPatch,
+	renderPendingResponse,
+} from "./messages.tsx";
 import type { AppMessage } from "./render-state.ts";
 
 function tool(overrides: Partial<AppMessage> = {}): AppMessage {
@@ -197,7 +203,7 @@ test("custom messages with details render a nested collapsible with escaped text
 	// The nested disclosure keeps its open state across morphs.
 	assertStringIncludes(
 		html,
-		'class="context-details context-details-nested" data-preserve-attr="open"',
+		'class="context-details context-details-nested" data-preserve-attr="open style"',
 	);
 });
 
@@ -224,7 +230,7 @@ test("custom messages (command output such as memory-info, rtk-status) render ex
 		timestamp: new Date(0),
 	});
 	assertStringIncludes(html, "<details");
-	assertStringIncludes(html, 'data-preserve-attr="open" open>');
+	assertStringIncludes(html, 'data-preserve-attr="open style" open>');
 });
 
 test("compaction and skill context messages stay collapsed by default", () => {
@@ -236,7 +242,7 @@ test("compaction and skill context messages stay collapsed by default", () => {
 		text: "summary text",
 		timestamp: new Date(0),
 	});
-	assertStringExcludes(compaction, 'data-preserve-attr="open" open>');
+	assertStringExcludes(compaction, 'data-preserve-attr="open style" open>');
 	const skill = renderMessage({
 		id: "skill-1",
 		presentationState: "plain",
@@ -245,7 +251,7 @@ test("compaction and skill context messages stay collapsed by default", () => {
 		text: "skill body",
 		timestamp: new Date(0),
 	});
-	assertStringExcludes(skill, 'data-preserve-attr="open" open>');
+	assertStringExcludes(skill, 'data-preserve-attr="open style" open>');
 });
 
 test("bodyless tools show only their title", () => {
@@ -348,4 +354,115 @@ test("stopped replies and thinking blocks show the muted Stopped note", () => {
 		}),
 		"message-stopped-note",
 	);
+});
+
+function message(id: string, overrides: Partial<AppMessage> = {}): AppMessage {
+	return {
+		id,
+		presentationState: "final",
+		presentationVersion: 1,
+		role: "assistant",
+		state: "success",
+		text: "text",
+		timestamp: new Date(0),
+		...overrides,
+	};
+}
+
+function dataEnterCount(html: string): number {
+	return html.split("data-enter").length - 1;
+}
+
+test("markEntering marks exactly the article root of every message role", () => {
+	const roles: Partial<AppMessage>[] = [
+		{ role: "user" },
+		{ role: "assistant" },
+		{ role: "thought" },
+		{ role: "tool", title: "Read file" },
+		{ role: "system" },
+		{ role: "notice" },
+		{ role: "system", state: "error", text: "boom" },
+		{ role: "compaction" },
+		{ role: "skill" },
+		{ role: "custom", meta: "memory-info" },
+		{
+			role: "extension-activity",
+			activities: [
+				{
+					v: 1,
+					id: "xa-1",
+					extension: {
+						id: "jev",
+						label: "JEV",
+						path: "/ext/jev/index.ts",
+						source: "local",
+					},
+					trigger: { kind: "hook", event: "before_agent_start" },
+					title: "Consult",
+					state: "working",
+					startedAt: 0,
+					output: [],
+				},
+			],
+		},
+	];
+	for (const overrides of roles) {
+		const html = markEntering(renderMessage(message("m-1", overrides)));
+		assert(html.startsWith("<article data-enter"), `${overrides.role} root marked`);
+		assertEquals(dataEnterCount(html), 1);
+	}
+});
+
+test("markEntering leaves an empty render empty and rejects a non-article root", () => {
+	assertEquals(markEntering(""), "");
+	let threw = false;
+	try {
+		markEntering("<div></div>");
+	} catch {
+		threw = true;
+	}
+	assert(threw, "a non-article root throws");
+});
+
+test("renderMessages marks only the entering message, and #messages only on request", () => {
+	const hint = { keys: "ctrl+k", description: "commands" };
+	const messages = [
+		message("m-1", { role: "user" }),
+		message("m-2"),
+		message("m-3", { role: "tool", title: "Read" }),
+	];
+	const plain = renderMessages(messages, hint);
+	assertEquals(dataEnterCount(plain), 0);
+	const entering = renderMessages(messages, hint, false, [], true, false, {
+		enteringId: "m-2",
+	});
+	assertEquals(dataEnterCount(entering), 1);
+	assertStringIncludes(
+		entering,
+		'<article data-enter class="message message-narrative',
+	);
+	const replaced = renderMessages(messages, hint, false, [], true, false, {
+		enter: true,
+	});
+	assertEquals(dataEnterCount(replaced), 1);
+	assertStringIncludes(replaced, '<main id="messages" data-enter');
+});
+
+test("older-history batches never carry the entry marker", () => {
+	const html = renderOlderMessagesPatch([
+		message("m-1", { role: "user" }),
+		message("m-2"),
+	]);
+	assertStringExcludes(html, "data-enter");
+});
+
+test("the pending response row enters live and is not a message", () => {
+	const html = renderPendingResponse();
+	assert(html.startsWith("<article"), "an article root");
+	assertStringIncludes(html, 'id="message-pending"');
+	assertStringIncludes(html, "data-enter");
+	assertStringIncludes(html, "minimal-activity");
+	assertStringIncludes(html, "thinking...");
+	assertStringExcludes(html, "data-message-id");
+	assertStringExcludes(html, "message-thought");
 });

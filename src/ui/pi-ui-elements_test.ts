@@ -504,6 +504,9 @@ test("a pinned roster renders as a compact summary strip, not a full row list", 
 	// button opens Live Workspace, so it must also close Sessions if it's open.
 	assertStringIncludes(html, "$_liveWorkspaceOpen = true;");
 	assertStringIncludes(html, "getElementById('session-sidebar')");
+	// Every trigger animates and arms the pane choreography first (motion round 2).
+	assertStringIncludes(html, "window.piUi.paneMotion?.arm('live', true);");
+	assertStringExcludes(html, "data-live-workspace-animate");
 });
 
 test("a pinned progress element keeps its one-line bar inside the summary strip", () => {
@@ -562,7 +565,7 @@ test("an inline widget with many lines starts collapsed", () => {
 	// The user's open/closed choice must survive Datastar morphs.
 	assertStringIncludes(
 		long,
-		'<details class="piui-widget-lines-collapsible" data-preserve-attr="open">',
+		'<details class="piui-widget-lines-collapsible" data-preserve-attr="open style">',
 	);
 });
 

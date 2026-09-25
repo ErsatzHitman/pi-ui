@@ -14,7 +14,11 @@ export function renderExtensionWidgets(
 			{state.extensionWidgets
 				.filter((widget) => widget.placement === placement)
 				.map((widget) => (
-					<div class="extension-widget" data-extension-widget={widget.key}>
+					<div
+						id={`extension-widget-${placement}-${encodeURIComponent(widget.key)}`}
+						class="extension-widget"
+						data-extension-widget={widget.key}
+					>
 						{widget.lines.map((line) => (
 							<div safe>{line}</div>
 						))}

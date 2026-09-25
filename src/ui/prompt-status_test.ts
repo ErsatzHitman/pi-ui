@@ -1,9 +1,10 @@
 import { test } from "bun:test";
 
-import { assertStringIncludes } from "#testing/assertions";
+import { assertEquals, assertStringIncludes } from "#testing/assertions";
 
 import { emptyLiveWorkspaceSnapshot } from "../live-workspace-types.ts";
 import { assertStringExcludes } from "../testing/assertions.ts";
+import { renderPromptAction } from "./prompt-action.tsx";
 import { renderPromptStatus, renderUsageIndicators } from "./prompt-status.tsx";
 import { appRenderSnapshot } from "./test-fixtures.ts";
 
@@ -107,4 +108,36 @@ test("an unattributed working message still renders exactly as before", () => {
 	);
 	assertStringIncludes(html, "prompt-working-status");
 	assertStringIncludes(html, "doing a thing…");
+});
+
+test("the working status and extension statuses are keyed, so an entry fires once per insertion", () => {
+	const html = renderPromptStatus(
+		appRenderSnapshot({
+			activityText: "doing a thing…",
+			extensionWorkingVisible: true,
+			extensionStatuses: [{ key: "fake mode/1", text: "build" }],
+		}),
+	);
+	assertStringIncludes(html, 'id="prompt-working-status"');
+	assertStringIncludes(html, 'id="extension-status-fake%20mode%2F1"');
+});
+
+test("abort acknowledges at t0 from both the click and Escape, and its label waits for the tooltip delay", () => {
+	const abort = renderPromptAction(appRenderSnapshot({ activityText: "Working…" }));
+	const setAborting = "el.setAttribute('data-aborting', '');";
+	assertStringIncludes(abort, `data-on:click="${setAborting} @post('/abort'`);
+	const escape = abort.slice(abort.indexOf("data-on:keydown__window"));
+	const escapeMark = escape.indexOf(setAborting);
+	assertEquals(escapeMark >= 0 && escapeMark < escape.indexOf("@post('/abort'"), true);
+	assertStringIncludes(abort, "data-tooltip-delay");
+	// Both svgs stay rendered; the class swap drives the crossfade.
+	assertStringIncludes(abort, "prompt-send-icon prompt-action-icon-exit");
+	assertStringIncludes(abort, "prompt-abort-icon prompt-action-icon-enter");
+});
+
+test("the Send click holds the transcript spacer before clearing the composer", () => {
+	const send = renderPromptAction(appRenderSnapshot({ activityText: undefined }));
+	const hold = send.indexOf("window.piUi.messageScroll.holdSpacerForSend?.();");
+	const clear = send.indexOf("window.piUi.prompt.clear();");
+	assertEquals(hold >= 0 && hold < clear, true);
 });

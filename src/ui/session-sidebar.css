@@ -132,11 +132,22 @@
 	.session-rename-input {
 		width: 100%;
 		min-width: 0;
-		height: 1.5rem;
+
+		/* 1.25rem, the title line's own height: the row no longer grows 6px when rename
+		   starts (flow-spec §10.3, owner-approved). */
+		height: 1.25rem;
 		border-radius: var(--radius-sm);
 		padding: 0 0.25rem;
 		font-size: var(--text-sm);
 		pointer-events: auto;
+
+		/* The input fades in over the title (SP-06); only the input, because a title fade
+		   would replay on every row move. */
+		transition: opacity var(--duration-sm) var(--ease-out);
+
+		@starting-style {
+			opacity: 0;
+		}
 	}
 
 	.session-row-actions {
@@ -288,6 +299,10 @@
 		justify-content: center;
 		padding: 1rem 0.5rem;
 		color: var(--text-muted);
+
+		/* A fast catalog load never flashes a spinner (B-X2). */
+		animation: reveal-after-threshold var(--duration-md) var(--ease-out) 200ms
+			backwards;
 	}
 	.session-sidebar-empty {
 		margin: 0;
@@ -303,10 +318,25 @@
 		color: var(--text-muted);
 	}
 
+	/* The paging spinner (data-show on `$_sessionPageLoading`) only surfaces on a slow page;
+	   the keyframe restarts on each display flip, which is exactly one per load. */
+	.session-page-trigger > span {
+		animation: reveal-after-threshold var(--duration-md) var(--ease-out) 200ms
+			backwards;
+	}
+
 	.session-sidebar-row {
 		position: relative;
 		list-style: none;
 		border-radius: var(--radius-md);
+		transition: opacity var(--duration-md) var(--ease-out);
+	}
+
+	/* Delete confirmed, awaiting the server: the row dims and leaves interaction; the list
+	   motion's ghost then carries it out from this opacity (ghostExit fromOpacity, B-X3). */
+	.session-sidebar-row[data-deleting] {
+		opacity: 0.45;
+		pointer-events: none;
 	}
 	.session-sidebar-row-button {
 		position: absolute;
@@ -416,20 +446,42 @@
 		}
 	}
 
-	@media (width <= 48rem) and (prefers-reduced-motion: no-preference) {
-		.session-sidebar[data-animate-open][open] {
-			translate: 0 0;
-			transition:
-				translate var(--duration-lg) var(--ease-drawer),
-				display var(--duration-lg) allow-discrete,
-				overlay var(--duration-lg) allow-discrete;
-		}
-		.session-sidebar[data-animate-open][open]::backdrop {
-			transition:
-				opacity var(--duration-lg) var(--ease-out),
-				display var(--duration-lg) allow-discrete,
-				overlay var(--duration-lg) allow-discrete;
-		}
+	/* Motion round 2: every user toggle (pointer, keybind, palette, Escape, row tap, swipe)
+	   slides the sidebar along one path, in from the right edge and back out the same
+	   way. `data-animate-open` is set by every user command and removed by
+	   restoreSessionSidebar() (load, breakpoint change), which therefore stays instant.
+	   At rest the open dialog has `translate: none`, so the fixed resize handle keeps the
+	   viewport as its containing block. */
+	.session-sidebar[data-animate-open] {
+		translate: calc(100% + var(--workspace-inset)) 0;
+		transition:
+			translate var(--duration-pane-out) var(--ease-drawer),
+			display var(--duration-pane-out) allow-discrete,
+			overlay var(--duration-pane-out) allow-discrete;
+	}
+	.session-sidebar[data-animate-open][open] {
+		translate: none;
+		transition-duration: var(--duration-pane-in);
+	}
+
+	/* Still displayed through its 160ms exit: a tap there must not resume a session. */
+	.session-sidebar[data-animate-open]:not([open]) {
+		pointer-events: none;
+	}
+	.session-sidebar[data-animate-open]::backdrop {
+		opacity: 0;
+		transition:
+			opacity var(--duration-pane-out) var(--ease-out),
+			display var(--duration-pane-out) allow-discrete,
+			overlay var(--duration-pane-out) allow-discrete;
+	}
+	.session-sidebar[data-animate-open][open]::backdrop {
+		/* --drawer-drag (0..1) tracks a swipe-to-close; see session-sidebar.tsx. */
+		opacity: calc(1 - var(--drawer-drag, 0));
+		transition-duration: var(--duration-pane-in);
+	}
+	.session-sidebar[data-dragging]::backdrop {
+		transition: none;
 	}
 	@starting-style {
 		.session-sidebar[data-animate-open][open] {
@@ -437,6 +489,23 @@
 		}
 		.session-sidebar[data-animate-open][open]::backdrop {
 			opacity: 0;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.session-sidebar[data-animate-open],
+		.session-sidebar[data-animate-open][open] {
+			translate: none;
+		}
+		.session-sidebar[data-animate-open]:not([open]) {
+			opacity: 0;
+		}
+	}
+	@starting-style {
+		@media (prefers-reduced-motion: reduce) {
+			/* stylelint-disable-next-line max-nesting-depth -- reduced-motion entry fade for the sidebar */
+			.session-sidebar[data-animate-open][open] {
+				opacity: 0;
+			}
 		}
 	}
 }

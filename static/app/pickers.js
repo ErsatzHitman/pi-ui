@@ -1,4 +1,5 @@
 import { endpoints } from "../../src/server/routes/endpoints.ts";
+import { bindPromptMotion } from "./prompt-motion.js";
 import { focusPromptEnd, promptInput, setPromptValue } from "./prompt.js";
 
 let activeFilePrefix;
@@ -65,6 +66,7 @@ export function bindPickers(options) {
 	document.addEventListener("focusout", (event) => {
 		if (event.target === promptInput()) closePickers(true);
 	});
+	bindPromptMotion();
 }
 
 function syncFromPrompt(event) {
@@ -320,17 +322,25 @@ function isSlashOpen() {
 	return isPopoverVisible("prompt-slash-popover");
 }
 
-function isPopoverVisible(id) {
+// A closing picker stays rendered for its 120ms exit (prompt-box.css `[hidden]` +
+// allow-discrete), so `checkVisibility()` alone would keep it "open": Enter would not send
+// and Escape would be captured. `hidden` is the real state.
+export function isPopoverVisible(id) {
 	const popover = document.getElementById(id);
-	return popover instanceof HTMLElement && popover.checkVisibility();
+	return popover instanceof HTMLElement && !popover.hidden && popover.checkVisibility();
+}
+
+// Rows of a picker that is fading out are not selectable.
+export function isRowVisible(row) {
+	return (
+		row instanceof HTMLElement &&
+		!row.closest(".prompt-picker-popover[hidden]") &&
+		row.checkVisibility()
+	);
 }
 
 function visibleRows(selector) {
-	return document
-		.querySelectorAll(selector)
-		.values()
-		.filter((row) => row instanceof HTMLElement && row.checkVisibility())
-		.toArray();
+	return document.querySelectorAll(selector).values().filter(isRowVisible).toArray();
 }
 
 function selectedPickerRow(selector) {

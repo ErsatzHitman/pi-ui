@@ -54,7 +54,7 @@ test("a standalone extension-activity card carries the frozen DOM contract", () 
 	assertStringIncludes(html, 'data-activity-state="working"');
 	assertStringIncludes(html, 'data-activity-extension="jev"');
 	assertStringIncludes(html, 'data-activity-trigger="hook"');
-	assertStringIncludes(html, 'data-preserve-attr="open"');
+	assertStringIncludes(html, 'data-preserve-attr="open style"');
 	assertStringIncludes(html, 'aria-busy="true"');
 	assertStringIncludes(html, ">JEV<");
 	assertStringIncludes(html, ">Consult<");
@@ -108,18 +108,18 @@ test("an errored activity opens its output by default; a working one stays colla
 			activities: [activity({ state: "working" })],
 		}),
 	);
-	// `data-preserve-attr="open"` is always present (so a user's toggle survives a
+	// `data-preserve-attr="open style"` is always present (so a user's toggle survives a
 	// patch); the bare boolean `open` attribute right after it is what actually
 	// opens the <details> — present only when `openByDefault` is true.
-	assertStringIncludes(working, 'data-preserve-attr="open">');
-	assertStringExcludes(working, 'data-preserve-attr="open" open');
+	assertStringIncludes(working, 'data-preserve-attr="open style">');
+	assertStringExcludes(working, 'data-preserve-attr="open style" open');
 
 	const failed = renderMessage(
 		activityMessage("extension-activity", {
 			activities: [activity({ state: "error", error: "boom" })],
 		}),
 	);
-	assertStringIncludes(failed, 'data-preserve-attr="open" open>');
+	assertStringIncludes(failed, 'data-preserve-attr="open style" open>');
 });
 
 test("a display:false payload is still shown, collapsed, and labelled hidden in terminal", () => {
@@ -284,4 +284,13 @@ test("a card with no output has nothing to expand, so it shows no chevron", () =
 	const summary = html.slice(html.indexOf("<summary"), html.indexOf("</summary>"));
 	assertStringIncludes(summary, "describing 1 image");
 	assertStringExcludes(html, "context-chevron");
+});
+
+test("each prompt chip is keyed by its activity id, so a morph never re-uses a chip for another", () => {
+	const html = renderExtensionActivityChips([
+		chip({ id: "xa:1" }),
+		chip({ id: "xa-2" }),
+	]);
+	assertStringIncludes(html, 'id="ext-activity-chip-xa%3A1"');
+	assertStringIncludes(html, 'id="ext-activity-chip-xa-2"');
 });

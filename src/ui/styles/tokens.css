@@ -90,6 +90,12 @@
 		--duration-lg: 200ms; /* drawer/sheet enter, toast enter */
 		--duration-xl: 250ms; /* usage-ring morph */
 
+		/* Pane choreography (motion round 2): every pane (Sessions, Live Workspace, Review)
+		   slides in at --duration-pane-in and out ~20% faster at --duration-pane-out, on
+		   --ease-drawer; content following a pane (FLIP) uses the same pair. */
+		--duration-pane-in: var(--duration-lg);
+		--duration-pane-out: var(--duration-md);
+
 		/* Elevation */
 		--shadow-sm: 0 1px 2px -1px oklch(20% 0 none / 10%);
 		--shadow-md:

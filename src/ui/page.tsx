@@ -231,6 +231,7 @@ export function renderPage(
 						workspaceReviewPreferences: state.workspaceReviewPreferences,
 						liveWorkspacePreferences: state.liveWorkspacePreferences,
 						sessionDeletePath: "",
+						_sessionDeletingPath: "",
 						sessionDeleteTitle: "",
 						sessionRenamePath: "",
 						sessionRenameTitle: "",
@@ -620,9 +621,16 @@ export function renderPage(
 									commandfor="session-delete-dialog"
 									command="close"
 									data-attr:disabled="$sessionDeletePath === ''"
-									data-on:click={`@post('${endpoints.sessionsDelete}', {
-										payload: { sessionDeletePath: $sessionDeletePath },
-									})`}
+									// B-X3: the row dims at t0 while the delete is in flight; the 4s reset
+									// restores a row whose delete failed (on success it is already gone).
+									data-on:click={`
+										const deleting = $sessionDeletePath;
+										$_sessionDeletingPath = deleting;
+										setTimeout(() => { if ($_sessionDeletingPath === deleting) $_sessionDeletingPath = ''; }, 4000);
+										@post('${endpoints.sessionsDelete}', {
+											payload: { sessionDeletePath: $sessionDeletePath },
+										});
+									`}
 								>
 									Delete session
 								</button>

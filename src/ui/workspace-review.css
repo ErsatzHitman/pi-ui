@@ -26,6 +26,22 @@
 		min-height: 0;
 		grid-template-columns: minmax(0, 1fr);
 		background: var(--surface-canvas);
+
+		/* Motion round 2 (overlay, <88rem): a full-screen surface, so a short slide from the
+		   toggle's (left) edge plus a fade rather than a full-width travel. Closed, it stays
+		   displayed through the exit (allow-discrete) and leaves the way it came. */
+		opacity: 0;
+		translate: -1.5rem 0;
+		transition:
+			opacity var(--duration-pane-out) var(--ease-out),
+			translate var(--duration-pane-out) var(--ease-out),
+			display var(--duration-pane-out) allow-discrete;
+	}
+
+	/* The exit keeps the pane displayed for --duration-pane-out; a click in that window must
+	   reach the chat, not the fading tree or editor. */
+	#app:not(.review-open) #workspace-review {
+		pointer-events: none;
 	}
 	.review-body {
 		display: grid;
@@ -300,6 +316,17 @@
 		margin-block-start: 0.5rem;
 		color: var(--status-danger);
 		font-size: var(--text-base);
+
+		/* Drops in when validation un-hides it (workspace-files.ts submitEntryName); the
+		   exit stays instant, it is cleared when the dialog resets. */
+		transition:
+			opacity var(--duration-md) var(--ease-out),
+			translate var(--duration-md) var(--ease-out);
+
+		@starting-style {
+			opacity: 0;
+			translate: 0 -0.25rem;
+		}
 	}
 	.workspace-mode-header {
 		display: flex;
@@ -565,6 +592,45 @@
 		border-radius: 0 0 var(--radius-sm) var(--radius-sm);
 		background: var(--surface-raised);
 		box-shadow: var(--shadow-lg);
+
+		/* Rises from the canvas's bottom edge (the canvas clips it: overflow hidden +
+		   clip-path, .review-diff-canvas) and falls back the same way. `display` is
+		   transitioned so `[hidden]` keeps it rendered for the exit. */
+		transition:
+			translate var(--duration-md) var(--ease-drawer),
+			display var(--duration-md) allow-discrete;
+	}
+	.review-graph-detail:not([hidden]) {
+		transition-duration: var(--duration-lg);
+	}
+
+	/* Still rendered during its slide-out: a quick click on the row beneath must reach the
+	   graph, not the departing sheet's parent links. */
+	.review-graph-detail[hidden] {
+		translate: 0 100%;
+		pointer-events: none;
+	}
+	@starting-style {
+		.review-graph-detail:not([hidden]) {
+			translate: 0 100%;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.review-graph-detail,
+		.review-graph-detail[hidden] {
+			translate: none;
+		}
+		.review-graph-detail[hidden] {
+			opacity: 0;
+		}
+	}
+	@starting-style {
+		@media (prefers-reduced-motion: reduce) {
+			/* stylelint-disable-next-line max-nesting-depth -- reduced-motion entry fade for the commit sheet */
+			.review-graph-detail:not([hidden]) {
+				opacity: 0;
+			}
+		}
 	}
 
 	/* The detail shows the whole message: the subject wraps instead of truncating
@@ -655,6 +721,19 @@
 		background: var(--surface-raised);
 		color: var(--text);
 		box-shadow: var(--shadow-lg);
+
+		/* A fresh node per open (workspace-files.ts renderContextMenu), so this plays
+		   exactly once per open, growing from the click point. Exit stays instant: the
+		   library removes the node. */
+		transform-origin: 0 0;
+		transition:
+			opacity var(--duration-sm) var(--ease-out),
+			scale var(--duration-sm) var(--ease-out);
+
+		@starting-style {
+			opacity: 0;
+			scale: 0.97;
+		}
 	}
 
 	.workspace-tree-context-menu-item {
@@ -783,17 +862,64 @@
 
 	#app.review-open #workspace-review {
 		display: grid;
+		opacity: 1;
+		translate: none;
+		transition-duration: var(--duration-pane-in);
+	}
+	@starting-style {
+		#app.review-open #workspace-review {
+			opacity: 0;
+			translate: -1.5rem 0;
+		}
 	}
 
+	/* The first style after load (a persisted open review) is instant. */
+	:root:not([data-motion-ready]) #workspace-review {
+		transition: none;
+	}
+
+	/*
+	 * ≥88rem: the pane docks on the left. Its box is the same open or closed (the review
+	 * track, spanned from the left inset), and closed it is only translated off the left
+	 * edge, so it slides in and out along one path on --ease-drawer. The layout reserve (the
+	 * chat and toolbar moving to column 4) is a separate rule so pane-motion.ts can withhold
+	 * it while the pane slides in (data-reserve-hold) and re-apply it for one synchronous
+	 * measurement on close (data-reserve-keep).
+	 */
 	@container workspace (width >= 88rem) {
-		#app.review-open #workspace-review {
+		#workspace-review {
 			position: relative;
 			inset: auto;
 			grid-row: 1 / 3;
-			grid-column: 1 / 4;
+			grid-column: 1 / -1;
+			justify-self: start;
+			width: calc(
+				var(--workspace-inset) +
+					(100% - 2 * var(--workspace-inset) - var(--workspace-gap)) *
+					clamp(0.35, var(--review-pane-ratio, 0.5), 0.65) +
+					var(--workspace-gap)
+			);
 			grid-template-columns: minmax(0, 1fr) var(--workspace-gap);
 			padding: var(--workspace-inset) 0 var(--workspace-inset)
 				var(--workspace-inset);
+			opacity: 1;
+			translate: -100% 0;
+			transition:
+				translate var(--duration-pane-out) var(--ease-drawer),
+				display var(--duration-pane-out) allow-discrete;
+		}
+
+		#app.review-open #workspace-review {
+			translate: none;
+			transition-duration: var(--duration-pane-in);
+		}
+
+		/* While it moves, the pane keeps the base opaque canvas: the chat and toolbar sit
+		   full-width under it (reserve withheld on open, dropped at t0 on close), and must not
+		   show through the review's unfilled toolbar, header and gap strips. Only settled open,
+		   with the reserve applied and nothing underneath, is it transparent, as before (the
+		   chat pane's shadow stays visible in the gap column). */
+		#app.review-open:not([data-reserve-hold="review"]) #workspace-review {
 			background: transparent;
 		}
 
@@ -801,7 +927,8 @@
 			display: block;
 		}
 
-		#app.review-open #chat-pane {
+		#app.review-open:not([data-reserve-hold="review"]) #chat-pane,
+		#app[data-reserve-keep="review"] #chat-pane {
 			position: relative;
 			inset: auto;
 			grid-row: 2;
@@ -810,13 +937,38 @@
 			margin: var(--workspace-inset) 0 var(--workspace-inset);
 		}
 
-		#app.review-open .toolbar {
+		#app.review-open:not([data-reserve-hold="review"]) .toolbar,
+		#app[data-reserve-keep="review"] .toolbar {
 			grid-column: 4;
 			margin-inline: 0;
+		}
+	}
+	@starting-style {
+		@container workspace (width >= 88rem) {
+			/* stylelint-disable-next-line max-nesting-depth -- @starting-style scoped to the review dock */
+			#app.review-open #workspace-review {
+				translate: -100% 0;
+			}
 		}
 	}
 
 	#review-git-separator {
 		translate: calc(-1 * var(--workspace-gap)) 0;
+	}
+
+	/* Reduced motion, both modes: the pane fades (120ms, base.css allowlist) and never
+	   moves. Docked, its closed state is otherwise opaque, so a close would hold at full
+	   opacity for the display window and then pop. */
+	@media (prefers-reduced-motion: reduce) {
+		#workspace-review,
+		#app.review-open #workspace-review {
+			translate: none;
+		}
+		@container workspace (width >= 88rem) {
+			/* stylelint-disable-next-line max-nesting-depth -- reduced-motion close fade for the review dock */
+			#app:not(.review-open) #workspace-review {
+				opacity: 0;
+			}
+		}
 	}
 }

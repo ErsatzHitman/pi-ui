@@ -43,9 +43,11 @@ test("sidebar restores responsive preferences before datastar", () => {
 		[false, true, "closed"],
 	] as const) {
 		let shownAs = "closed";
+		const reset: string[] = [];
 		const dialog = {
 			closedBy: "any",
-			removeAttribute() {},
+			style: { removeProperty: (name: string) => reset.push(name) },
+			removeAttribute: (name: string) => reset.push(name),
 			close() {
 				shownAs = "closed";
 			},
@@ -68,6 +70,8 @@ test("sidebar restores responsive preferences before datastar", () => {
 		);
 		assertEquals(shownAs, expected);
 		assertEquals(dialog.closedBy, mobile ? "any" : "none");
+		// Load and breakpoint restores stay instant and drop any half-finished swipe.
+		assertEquals(reset, ["data-animate-open", "--drawer-drag", "data-dragging"]);
 	}
 });
 
@@ -196,5 +200,17 @@ test("in remote mode a tab reports its page visibility on load and on every chan
 		assertStringIncludes(page, "visible: document.visibilityState === 'visible'");
 	} finally {
 		setRemoteMode(false);
+	}
+});
+
+test("confirming a delete marks the row pending before the POST (B-X3)", () => {
+	const signals = html.split("data-signals__ifmissing=")[1]?.slice(0, 600) ?? "";
+	assertStringIncludes(signals, "_sessionDeletingPath");
+	const confirm =
+		html.split("Delete session</button>")[0]?.split("<button").at(-1) ?? "";
+	const pending = confirm.indexOf("$_sessionDeletingPath = deleting");
+	const post = confirm.indexOf("@post(");
+	if (pending === -1 || post === -1 || pending > post) {
+		throw new Error("expected the pending mark before the delete POST");
 	}
 });

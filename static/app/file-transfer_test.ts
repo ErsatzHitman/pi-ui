@@ -17,14 +17,17 @@ Object.defineProperty(globalThis, "ResizeObserver", {
 });
 
 const {
+	attachmentExitKeyframes,
 	composePrompt,
 	convertAvifToJpeg,
+	currentChipState,
 	extractTransferredFilePaths,
 	fileWithDetectedMimeType,
 	formatFileReferences,
 	isAvifImageFile,
 	isHeicImageFile,
 	jpegFileName,
+	reconcileKeyed,
 } = await import("./file-transfer.js");
 
 test("file references use one line per path and end with a newline", () => {
@@ -201,4 +204,49 @@ test("transferred files use a webview-provided path without reading bytes", () =
 		}),
 		["/tmp/large-model.bin"],
 	);
+});
+
+test("adding an attachment keeps the existing chip node; removing one leaves the other intact", () => {
+	const first = { path: "/tmp/one.txt" };
+	const second = { path: "/tmp/two.txt" };
+	const create = (attachment: { path: string }) => ({ chip: attachment.path });
+
+	const one = reconcileKeyed(new Map(), [first], create);
+	const firstNode = one.nodes.get(first);
+	assertEquals(one.added.length, 1);
+
+	const two = reconcileKeyed(one.nodes, [first, second], create);
+	assertEquals(two.nodes.get(first) === firstNode, true);
+	assertEquals(two.added, [{ chip: "/tmp/two.txt" }]);
+	assertEquals(two.removed, []);
+
+	const secondNode = two.nodes.get(second);
+	const back = reconcileKeyed(two.nodes, [second], create);
+	assertEquals(back.nodes.get(second) === secondNode, true);
+	assertEquals(back.added, []);
+	assertEquals(back.removed.length, 1);
+	assertEquals(
+		back.removed[0]?.[0] === first && back.removed[0]?.[1] === firstNode,
+		true,
+	);
+});
+
+test("a removed chip exits from the scale it had at the click, not from 1", () => {
+	// Mid press-release the chip's computed scale is still ~0.97 (D-X1).
+	const pressed = currentChipState({ opacity: "1", scale: "0.97" });
+	assertEquals(pressed, { opacity: 1, scale: "0.97" });
+	assertEquals(attachmentExitKeyframes(false, pressed), [
+		{ opacity: 1, scale: "0.97" },
+		{ opacity: 0, scale: 0.96 },
+	]);
+	// Unscaled chip: computed `scale: none` starts at 1; a chip still fading in keeps its opacity.
+	assertEquals(currentChipState({ opacity: "0.4", scale: "none" }), {
+		opacity: 0.4,
+		scale: "1",
+	});
+	// Reduced motion: opacity only.
+	assertEquals(attachmentExitKeyframes(true, pressed), [
+		{ opacity: 1 },
+		{ opacity: 0 },
+	]);
 });

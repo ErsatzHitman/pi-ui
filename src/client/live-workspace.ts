@@ -6,6 +6,13 @@
  * git-availability gating, which Live Workspace has no equivalent of.
  */
 
+import {
+	duration,
+	easing,
+	reducedMotion,
+	staggerCap,
+	staggerStepMs,
+} from "../../static/app/motion.js";
 import { formatRetryCountdown } from "../live-workspace-types.ts";
 import { bindLiveWorkspace } from "./live-workspace-open.ts";
 import {
@@ -16,6 +23,7 @@ import {
 	needsNotificationPermission,
 	requestNotificationPermission,
 } from "./notification-permission.ts";
+import { bindPaneMotion } from "./pane-motion.ts";
 
 const tickIntervalMs = 1000;
 
@@ -119,6 +127,61 @@ function watchTurnPhase(): void {
 	});
 }
 
+/** Rows and blocks that settle in when the server adds them (flow-spec B8). */
+const enterSelector =
+	".live-workspace-activity-row, .live-workspace-agent-row, .live-workspace-tool-row, " +
+	".live-workspace-turn-banner, .live-workspace-agent-list, .live-workspace-tool-list, " +
+	".live-workspace-activity-list, #live-workspace-workflow-journal > *, #live-workspace-delegate-ledger > *";
+
+/**
+ * Entry for Live Workspace rows (flow-spec B8, motion round 2). Rows are id-keyed
+ * (`lw-tool-…`, `lw-agent-…`, `lw-activity-…`), so a morph inserts exactly the new row and
+ * leaves the others in place; only an id this pane has never shown animates, and only inside
+ * the visible tab of an open pane, so a tab reveal or a re-patch never replays it. The first
+ * few fresh rows of a burst stagger (40ms, at most 4). Exits stay instant (flow-spec §9).
+ */
+function watchRowEntries(): void {
+	const pane = document.getElementById("live-workspace");
+	if (!pane) return;
+	const seen = new Set(
+		[...pane.querySelectorAll<HTMLElement>("[id^='lw-']")].map(
+			(element) => element.id,
+		),
+	);
+	new MutationObserver((records) => {
+		const open = document
+			.getElementById("app")
+			?.classList.contains("live-workspace-open");
+		const fresh: HTMLElement[] = [];
+		for (const record of records) {
+			for (const node of record.addedNodes) {
+				if (!(node instanceof HTMLElement) || !node.matches(enterSelector))
+					continue;
+				if (node.id && seen.has(node.id)) continue;
+				if (node.id) seen.add(node.id);
+				if (open && node.closest("section")?.checkVisibility()) fresh.push(node);
+			}
+		}
+		const reduce = reducedMotion();
+		for (const [index, element] of fresh.slice(0, staggerCap).entries()) {
+			element.animate(
+				reduce
+					? [{ opacity: 0 }, { opacity: 1 }]
+					: [
+							{ opacity: 0, translate: "0 -0.25rem" },
+							{ opacity: 1, translate: "0 0" },
+						],
+				{
+					duration: reduce ? duration.sm : duration.md,
+					delay: index * staggerStepMs,
+					easing: easing.out,
+					fill: "backwards",
+				},
+			);
+		}
+	}).observe(pane, { childList: true, subtree: true });
+}
+
 window.piUi.liveWorkspace = {
 	applyOpen: bindLiveWorkspace().applyOpen,
 	requestNotificationPermission,
@@ -127,6 +190,8 @@ window.piUi.liveWorkspace = {
 };
 
 watchTurnPhase();
+watchRowEntries();
+bindPaneMotion();
 tickElapsed();
 setInterval(tickElapsed, tickIntervalMs);
 // Every SSE patch of a tab re-renders its elapsed/countdown spans empty (the server only

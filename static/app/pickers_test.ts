@@ -11,6 +11,8 @@ import {
 	copyLastAssistantMessage,
 	extractArgumentQuery,
 	extractFilePrefix,
+	isPopoverVisible,
+	isRowVisible,
 	nextPickerIndex,
 } from "./pickers.js";
 
@@ -294,6 +296,58 @@ test("Enter in an argument picker opened by a late completions response still co
 		dom.pressEnter();
 		assertEquals(dom.input.value, "/model openrouter/llama-4-maverick");
 		assertEquals(dom.input.events.includes("pi-ui-argument-close"), true);
+	} finally {
+		dom.restore();
+	}
+});
+
+/** Stubs `HTMLElement` and `document.getElementById` for the picker visibility checks. */
+function installVisibilityDom(popover: { hidden: boolean; checkVisibility(): boolean }) {
+	class FakeHTMLElement {}
+	const element = Object.assign(new FakeHTMLElement(), popover);
+	const restores = [
+		patchGlobal("HTMLElement", FakeHTMLElement),
+		patchGlobal("document", {
+			getElementById: (id: string) =>
+				id === "prompt-slash-popover" ? element : null,
+		}),
+	];
+	return {
+		FakeHTMLElement,
+		restore: () => {
+			for (const restore of restores.reverse()) restore();
+		},
+	};
+}
+
+test("a picker fading out (hidden, still rendered for its exit) no longer counts as open", () => {
+	const closing = installVisibilityDom({ hidden: true, checkVisibility: () => true });
+	try {
+		assertEquals(isPopoverVisible("prompt-slash-popover"), false);
+	} finally {
+		closing.restore();
+	}
+	const open = installVisibilityDom({ hidden: false, checkVisibility: () => true });
+	try {
+		assertEquals(isPopoverVisible("prompt-slash-popover"), true);
+	} finally {
+		open.restore();
+	}
+});
+
+test("rows of a closing picker are not selectable", () => {
+	const dom = installVisibilityDom({ hidden: false, checkVisibility: () => true });
+	try {
+		const row = (closingPicker: boolean) =>
+			Object.assign(new dom.FakeHTMLElement(), {
+				checkVisibility: () => true,
+				closest: (selector: string) =>
+					selector === ".prompt-picker-popover[hidden]" && closingPicker
+						? {}
+						: null,
+			});
+		assertEquals(isRowVisible(row(true)), false);
+		assertEquals(isRowVisible(row(false)), true);
 	} finally {
 		dom.restore();
 	}

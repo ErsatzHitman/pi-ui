@@ -1,4 +1,4 @@
-import { closeSessionSidebarAction, pointerOverlayAnimate } from "../commands/actions.ts";
+import { closeSessionSidebarAction } from "../commands/actions.ts";
 import {
 	isPiUiSheetElement,
 	type PiUiAction,
@@ -172,11 +172,11 @@ function renderRosterSummary(element: PiUiElement): string {
 /**
  * Opens the Live Workspace pane to the Extensions tab, where the full element renders. Sessions
  * and Live Workspace are mutually exclusive (PLAN-ux.md "sidebar-exclusive"), so this closes
- * Sessions too if it happens to be open. Sets `data-live-workspace-animate` itself, like
- * `toggleLiveWorkspaceAction`, so whether it slides never depends on how the pane last toggled.
+ * Sessions too if it happens to be open. Like every pane trigger it arms the pane
+ * choreography first (src/client/pane-motion.ts, flow-critique #1).
  */
 function openLiveWorkspaceExtensionsAction(): string {
-	return `document.getElementById('app')?.toggleAttribute('data-live-workspace-animate', ${pointerOverlayAnimate});
+	return `window.piUi.paneMotion?.arm('live', true);
 		$_liveWorkspaceOpen = true;
 		${closeSessionSidebarAction()}
 		$liveWorkspacePreferences.tab = 'extensions';
@@ -348,7 +348,7 @@ function renderWidgetLines(value: JsonValue | undefined): string {
 	);
 	if (lines.length <= widgetCollapseLineThreshold) return syncHtml(list);
 	return syncHtml(
-		<details class="piui-widget-lines-collapsible" data-preserve-attr="open">
+		<details class="piui-widget-lines-collapsible" data-preserve-attr="open style">
 			<summary class="fine-print">{lines.length} lines</summary>
 			{list}
 		</details>,

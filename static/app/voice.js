@@ -5,6 +5,7 @@
 // canvas drawing lives in voice-waveform.js.
 
 import { isString } from "../../src/utils/type-guards.ts";
+import { duration, easing } from "./motion.js";
 import { placeNoticeAbovePromptRow, promptInput } from "./prompt.js";
 import {
 	armingIsReady,
@@ -137,10 +138,30 @@ function setState(next) {
 	if (!canTransition(state, next)) {
 		console.error(`voice: illegal state transition ${state} -> ${next}`);
 	}
+	const previous = state;
 	state = next;
 	const panel = panelEl();
 	if (panel) panel.hidden = next === "idle";
 	dispatchVoiceState();
+	// Transcript, cancel, error and empty results all end here: the textarea (display:none
+	// while voice is active, prompt-voice.css) settles back in with the panel's own entry
+	// values instead of a one-frame swap. Focus and caret are never delayed.
+	if (previous !== "idle" && next === "idle") revealInput();
+}
+
+function revealInput() {
+	const input = promptInput();
+	if (!input) return;
+	const reduce = reducedMotion();
+	input.animate(
+		reduce
+			? [{ opacity: 0 }, { opacity: 1 }]
+			: [
+					{ opacity: 0, translate: "0 0.25rem" },
+					{ opacity: 1, translate: "0 0" },
+				],
+		{ duration: reduce ? duration.sm : duration.md, easing: easing.out },
+	);
 }
 
 function announce(message) {
@@ -220,10 +241,9 @@ function showError(message, { retryable = false } = {}) {
 function clearError() {
 	clearTimeout(errorClearTimer);
 	const el = document.getElementById("prompt-voice-error");
-	if (el) {
-		el.hidden = true;
-		el.replaceChildren();
-	}
+	// Only hide: the text stays for the fade-out (prompt-box.css `.file-transfer-error`);
+	// showError() replaces the children before the next reveal.
+	if (el) el.hidden = true;
 }
 
 function showNotice(message) {

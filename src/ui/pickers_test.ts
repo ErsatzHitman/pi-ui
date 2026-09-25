@@ -11,6 +11,7 @@ import {
 	renderWorkspaceDialogMenu,
 	slashPickerOpenExpression,
 } from "./pickers.tsx";
+import { queueItemId, renderPromptBox, renderPromptQueue } from "./prompt-box.tsx";
 import {
 	renderModelPicker,
 	renderThinkingPicker,
@@ -673,3 +674,58 @@ function escapeRegExp(value: string): string {
 function countOccurrences(haystack: string, needle: string): number {
 	return haystack.split(needle).length - 1;
 }
+
+test("prompt pickers toggle `hidden` (not data-show) so their exit can play", () => {
+	const html = renderPromptBox(appRenderSnapshot({}));
+	for (const id of [
+		"prompt-slash-popover",
+		"prompt-file-popover",
+		"prompt-argument-popover",
+	]) {
+		const start = html.indexOf(`id="${id}"`);
+		const tag = html.slice(start, html.indexOf(">", start));
+		assertStringIncludes(tag, " hidden");
+		assertStringIncludes(tag, "data-attr:hidden=");
+		assertFalse(tag.includes("data-show"));
+		assertFalse(tag.includes("display: none"));
+	}
+	assertStringIncludes(html, 'data-attr:hidden="!($_filePickerOpen)"');
+});
+
+test("Enter-send holds the transcript spacer before clearing; /copy does not", () => {
+	const html = renderPromptBox(appRenderSnapshot({}));
+	const copy = html.indexOf("if ($prompt.trim() === '/copy')");
+	const hold = html.indexOf("window.piUi.messageScroll.holdSpacerForSend?.();");
+	const copyReturn = html.indexOf("return;", copy);
+	assertEquals(copy >= 0 && hold > copyReturn, true);
+	assertEquals(hold < html.indexOf("window.piUi.prompt.clear();", hold), true);
+});
+
+test("queued messages are keyed: identical texts get distinct occurrence suffixes", () => {
+	const html = renderPromptQueue(
+		appRenderSnapshot({
+			queuedSteeringMessages: ["same", "same"],
+			queuedFollowUpMessages: ["same"],
+		}),
+	);
+	assertStringIncludes(html, 'id="prompt-queue-list"');
+	assertStringIncludes(html, `id="${queueItemId("steer", "same", 0)}"`);
+	assertStringIncludes(html, `id="${queueItemId("steer", "same", 1)}"`);
+	assertStringIncludes(html, `id="${queueItemId("followUp", "same", 0)}"`);
+	assertEquals(queueItemId("steer", "same", 1).endsWith("-1"), true);
+	assertFalse(queueItemId("steer", "a", 0) === queueItemId("steer", "b", 0));
+});
+
+test("the queue ✕ posts at once, blocks a second tap, and leaves the exit to the ghost", () => {
+	const html = renderPromptQueue(appRenderSnapshot({ queuedSteeringMessages: ["hi"] }));
+	const remove = html.slice(
+		html.indexOf("data-on:click", html.indexOf("prompt-queue-text")),
+	);
+	assertStringIncludes(remove, "hasAttribute('data-exit')");
+	assertStringIncludes(remove, "setAttribute('data-exit', 'down')");
+	assertStringIncludes(remove, "@post('/prompt/queue/remove'");
+	assertFalse(remove.includes("fill:'forwards'"));
+	assertFalse(remove.includes(".finished"));
+	// "Restore all" tells prompt-motion.js to ghost the items down into the composer.
+	assertStringIncludes(html, "pi-ui-queue-restore");
+});

@@ -158,8 +158,17 @@
 		min-width: 0;
 		flex: 1;
 	}
+
+	/* Always mounted (`data-text`): the :empty → text change carries the entry (B-X4). */
 	.workspace-folder-error {
 		color: var(--status-danger);
+		transition:
+			opacity var(--duration-md) var(--ease-out),
+			translate var(--duration-md) var(--ease-out);
+	}
+	.workspace-folder-error:empty {
+		opacity: 0;
+		translate: 0 -0.25rem;
 	}
 	.workspace-browser-error-message {
 		padding: 1.5rem 1.25rem;
@@ -236,6 +245,14 @@
 	}
 	.session-menu-content > [role="menuitem"] {
 		display: block;
+		transition: opacity var(--duration-md) var(--ease-out);
+	}
+
+	/* Delete confirmed, awaiting the server (B-X3): an attribute, not a class, because this
+	   row preserves its class across morphs. */
+	.session-menu-content > [role="menuitem"][data-deleting] {
+		opacity: 0.45;
+		pointer-events: none;
 	}
 	.session-menu-heading {
 		display: flex;
@@ -261,6 +278,19 @@
 		width: 0.75rem;
 		height: 0.75rem;
 		color: var(--status-danger);
+		transition:
+			opacity var(--duration-sm) var(--ease-out),
+			scale var(--duration-sm) var(--ease-out);
+	}
+
+	/* Abort acknowledged at t0 (mirrors #prompt-action[data-aborting], B-X5); the next row
+	   morph strips the attribute (it is not in the server HTML). */
+	.session-menu-abort[data-aborting] .session-menu-abort-icon {
+		opacity: 0.5;
+		scale: 0.95;
+	}
+	.session-menu-abort[data-aborting] {
+		pointer-events: none;
 	}
 	.session-menu-abort-icon rect {
 		fill: currentColor;
@@ -297,6 +327,28 @@
 	}
 	.tree-summary-input {
 		margin: 0.25rem;
+	}
+
+	/* In-dialog steps (Summarize branch?, custom prompt, New folder) settle in instead of
+	   teleporting (B-X4). Entry only: the exit is a commit or a keystroke. Scoped to the
+	   summary group, never the entry list, which is visible when the dialog opens (the dialog
+	   itself already animates). Height snaps. */
+	:is(
+		#tree-menu [aria-labelledby="tree-summary-heading"],
+		#tree-menu
+			[aria-labelledby="tree-summary-heading"]
+			> [role="heading"]:not(#tree-summary-heading),
+		.tree-summary-input,
+		.workspace-folder-create
+	) {
+		transition:
+			opacity var(--duration-md) var(--ease-out),
+			translate var(--duration-md) var(--ease-out);
+
+		@starting-style {
+			opacity: 0;
+			translate: 0 0.25rem;
+		}
 	}
 	.tree-row {
 		display: grid;

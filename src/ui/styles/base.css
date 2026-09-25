@@ -129,11 +129,92 @@
 
 		/* Gentler, not zero: these surfaces keep a short fade so appear/disappear stays
 		   legible; their scale/translate offsets snap (only opacity is transitioned).
-		   Zero specificity + later source order beats the `*` rule above. Dialogs must not
-		   get `allow-discrete`, or a closed dialog would linger on screen. */
-		:where(.toast, .dialog, .alert-dialog) {
+		   Zero specificity + later source order beats the `*` rule above.
+		   Opacity-only, no display: these surfaces' nodes stay rendered, or (dialogs) must
+		   vanish at once on close — a dialog given `allow-discrete` would linger on screen.
+		   Several :where() groups only because stylelint's compound-selector count sums
+		   across one list; every group is still zero-specificity. */
+		:where(
+			.toast,
+			.dialog,
+			.alert-dialog,
+			.command-dialog:modal,
+			#message-list > .message,
+			#message-list + .message-pending,
+			.markdown-content > *,
+			.message-stopped-note,
+			.tool-output-surface,
+			.tool-meta,
+			:root[data-motion-ready] #messages
+		),
+		:where(
+			.prompt-action-icons > svg,
+			#prompt-working-status,
+			.extension-status,
+			.ext-activity-chip,
+			.prompt-queue-item,
+			.prompt-attachment,
+			.extension-widget,
+			.file-transfer-error,
+			.live-workspace-icon-state > svg
+		),
+		:where(
+			.live-workspace-body > section,
+			.session-rename-input,
+			.segmented-control > button,
+			.review-sidebar-panel,
+			#review-git-main,
+			.workspace-tree-context-menu,
+			.workspace-entry-error,
+			.workspace-folder-create,
+			.workspace-folder-error,
+			.tree-summary-input,
+			.recent-session,
+			.session-sidebar-row
+		),
+		:where(
+			#tree-menu [aria-labelledby="tree-summary-heading"],
+			#tree-menu [aria-labelledby="tree-summary-heading"] > [role="heading"],
+			.session-menu-content > [role="menuitem"],
+			.session-menu-abort-icon
+		) {
 			transition-property: opacity !important;
 			transition-duration: var(--duration-sm) !important;
+		}
+
+		/* Panes, popovers and pickers keep their exit fade: display/overlay are restated
+		   so they stay rendered until the fade ends (each has an explicit closed-state
+		   opacity: 0, set in its own stylesheet). Pseudo-elements are invalid inside :where(),
+		   so the scrim is listed on its own. */
+		:where(
+			.session-sidebar[data-animate-open],
+			#live-workspace,
+			#live-workspace-backdrop,
+			#workspace-review,
+			[data-popover],
+			.prompt-picker-popover,
+			.review-graph-detail,
+			.messages-latest
+		),
+		.session-sidebar[data-animate-open]::backdrop {
+			transition-property: opacity, display, overlay !important;
+			transition-behavior: normal, allow-discrete, allow-discrete !important;
+			transition-duration: var(--duration-sm) !important;
+		}
+
+		/* Swipe-to-close is direct manipulation: the scrim tracks the finger with no lag
+		   (flow-spec B3(c)). `data-dragging` (session-sidebar.tsx, per scroll) lifts the
+		   fade above; B removes it before close(), so the exit keeps its fade. */
+		.session-sidebar[data-dragging]::backdrop {
+			transition-duration: 0ms !important;
+		}
+
+		/* The `*` rule does not match view-transition pseudo-elements: the theme crossfade
+		   stays (opacity, not movement), shortened. */
+		::view-transition-group(*),
+		::view-transition-old(*),
+		::view-transition-new(*) {
+			animation-duration: var(--duration-md) !important;
 		}
 
 		/* Tooltips list display/overlay by position, so their behavior list is restated
@@ -155,5 +236,20 @@
 			animation-iteration-count: infinite !important;
 		}
 		/* stylelint-enable declaration-no-important */
+	}
+
+	/* A fast load must not flash a spinner: loaders reveal only after 200ms. The delay is a
+	   threshold, not motion, so reduced motion keeps it (the * rule clamps duration only). */
+	@keyframes reveal-after-threshold {
+		from {
+			opacity: 0;
+		}
+	}
+
+	/* Theme flips (theme.js / motion.js themeTransition) crossfade the whole viewport. */
+	:root[data-vt="theme"]::view-transition-old(root),
+	:root[data-vt="theme"]::view-transition-new(root) {
+		animation-duration: var(--duration-xl);
+		animation-timing-function: ease;
 	}
 }

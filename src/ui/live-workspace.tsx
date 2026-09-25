@@ -2,7 +2,6 @@ import type { DelegateLedgerEntry } from "../agent/delegate-ledger-reader.ts";
 import type { WorkflowJournalSummary } from "../agent/workflow-journal-reader.ts";
 import {
 	closeLiveWorkspaceAction,
-	pointerOverlayAnimate,
 	toggleLiveWorkspaceAction,
 } from "../commands/actions.ts";
 import {
@@ -129,7 +128,7 @@ export function renderLiveWorkspaceToggle(_state: AppStateSnapshot): string {
 			aria-pressed="false"
 			data-attr:aria-pressed="$_liveWorkspaceOpen ? 'true' : 'false'"
 			aria-keyshortcuts={keybindAria("toggle-live-workspace")}
-			data-on:click={toggleLiveWorkspaceAction(pointerOverlayAnimate)}
+			data-on:click={toggleLiveWorkspaceAction()}
 			data-on:keydown__window={keybindAction(
 				"toggle-live-workspace",
 				toggleLiveWorkspaceAction(),
@@ -162,7 +161,7 @@ export function renderLiveWorkspace(
 				aria-hidden="true"
 				hidden
 				data-attr:hidden="!$_liveWorkspaceOpen"
-				data-on:click={closeLiveWorkspaceAction("true")}
+				data-on:click={closeLiveWorkspaceAction()}
 			/>
 			<section
 				id="live-workspace"
@@ -216,7 +215,7 @@ export function renderLiveWorkspace(
 							>
 								<Icon icon={tabIcons[tab]} />
 								{/* A#26: the label stays for assistive tech and the tooltip, but visually
-							    the tabs are icon-only so 5 of them never wrap at the drawer's 26rem width. */}
+							    the tabs are icon-only so 5 of them never wrap at the drawer's 20rem width. */}
 								<span class="sr-only">{tabLabels[tab]}</span>
 								<ShortcutTooltip label={tabLabels[tab]} />
 							</button>
@@ -290,9 +289,7 @@ export function renderLiveWorkspace(
 							class="btn live-workspace-close"
 							data-variant="ghost"
 							data-size="icon-xs"
-							data-on:click={closeLiveWorkspaceAction(
-								pointerOverlayAnimate,
-							)}
+							data-on:click={closeLiveWorkspaceAction()}
 							aria-label="Hide Live Workspace"
 						>
 							<Icon icon={X} />
@@ -447,7 +444,10 @@ function renderNowTab(snapshot: LiveWorkspaceSnapshot): string {
 			) : (
 				<ul class="live-workspace-tool-list">
 					{snapshot.activeTools.map((tool) => (
-						<li class="live-workspace-tool-row">
+						<li
+							id={`lw-tool-${encodeURIComponent(tool.toolCallId)}`}
+							class="live-workspace-tool-row"
+						>
 							<span class="live-workspace-tool-name" safe>
 								{tool.summary ?? tool.toolName}
 							</span>
@@ -652,6 +652,7 @@ export function renderDelegateLedgerPanel(
 function renderAgentRow(agent: LiveWorkspaceAgentRow): string {
 	return syncHtml(
 		<li
+			id={`lw-agent-${encodeURIComponent(agent.id)}`}
 			class="live-workspace-agent-row"
 			data-live-workspace-agent-status={agent.status}
 			style={agent.depth > 0 ? `padding-left: ${agent.depth}rem` : undefined}
@@ -809,6 +810,7 @@ function renderActivityTab(snapshot: LiveWorkspaceSnapshot): string {
 				<ul class="live-workspace-activity-list">
 					{snapshot.activity.map((entry) => (
 						<li
+							id={`lw-activity-${encodeURIComponent(entry.id)}`}
 							class="live-workspace-activity-row"
 							data-activity-kind={entry.kind}
 							data-background={entry.background || undefined}

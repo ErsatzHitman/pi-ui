@@ -22,20 +22,33 @@
 			background: oklch(0% 0 none / 10%);
 			backdrop-filter: blur(4px);
 
-			/* Fade opacity (composited), never the blur radius (re-blurs the viewport every frame). */
-			transition: opacity var(--duration-sm) var(--ease-out);
+			/* Fade opacity (composited), never the blur radius (re-blurs the viewport every frame).
+			   display/overlay keep the scrim in the top layer while it fades out. */
+			transition:
+				opacity var(--duration-sm) var(--ease-out),
+				display var(--duration-sm) allow-discrete,
+				overlay var(--duration-sm) allow-discrete;
 		}
 	}
 
-	/* No starting style for `.command-dialog` or blocking terminal surfaces: keyboard-opened switchers dim on frame 1. */
+	/* Round 2: the palette/switchers get a quick centred entry too (user override); blocking
+	   terminal surfaces stay instant (keyboard-driven, translate-anchored). */
 	@starting-style {
-		:where(.dialog, .alert-dialog):not(.terminal-surface-dialog)[open]::backdrop {
+		:where(.dialog, .alert-dialog, .command-dialog):not(
+				.terminal-surface-dialog
+			)[open]::backdrop {
 			opacity: 0;
 		}
 	}
+	:where(.dialog, .alert-dialog, .command-dialog):not(
+			.terminal-surface-dialog,
+			[open]
+		)::backdrop {
+		opacity: 0;
+	}
 
-	/* Modal panel entry. The transition lives only on `:modal`, so close stays instant.
-	   Targets the <dialog> itself, never `.dialog > *`, which content patches replace.
+	/* Modal panel entry. Targets the <dialog> itself, never `.dialog > *`, which content
+	   patches replace (a server-driven close fades whatever content is left: accepted).
 	   `.terminal-surface-dialog` is keyboard-driven and uses `translate` for anchoring.
 	   Accepted cost: a PIUI sheet that was open across a session rebind is reopened with
 	   `showModal()` and plays this entry again (a real reopen, not a morph replay). */
@@ -49,6 +62,42 @@
 			opacity: 0;
 			scale: 0.97;
 		}
+	}
+	:where(.command-dialog):modal {
+		transition:
+			opacity var(--duration-sm) var(--ease-out),
+			scale var(--duration-sm) var(--ease-out);
+	}
+	@starting-style {
+		:where(.command-dialog):modal {
+			opacity: 0;
+			scale: 0.98;
+		}
+	}
+
+	/* Exits: symmetric, faster than the entry (palette 80ms, dialogs 120ms). display/overlay
+	   keep the closing dialog in the top layer for the fade; it stops taking pointer input at
+	   once, so a quick click after Esc reaches what is underneath. Reduced motion: exits stay
+	   instant (base.css gives dialogs opacity only, no allow-discrete). */
+	:where(.dialog, .alert-dialog):not(.terminal-surface-dialog, [open]) {
+		opacity: 0;
+		scale: 0.97;
+		pointer-events: none;
+		transition:
+			opacity var(--duration-sm) var(--ease-out),
+			scale var(--duration-sm) var(--ease-out),
+			display var(--duration-sm) allow-discrete,
+			overlay var(--duration-sm) allow-discrete;
+	}
+	:where(.command-dialog):not([open]) {
+		opacity: 0;
+		scale: 0.98;
+		pointer-events: none;
+		transition:
+			opacity var(--duration-xs) var(--ease-out),
+			scale var(--duration-xs) var(--ease-out),
+			display var(--duration-xs) allow-discrete,
+			overlay var(--duration-xs) allow-discrete;
 	}
 
 	:where(.dialog, .alert-dialog) > * {
@@ -278,26 +327,55 @@
 		box-shadow:
 			0 0 0 1px var(--border),
 			var(--shadow-md);
+
+		/* Anchored popovers grow out of their trigger corner (origin per side/align below):
+		   160ms in, 120ms out. display/overlay keep the popover in the top layer for the exit
+		   fade. Under `position-try` flip the origin stays on the declared side (accepted). */
+		opacity: 0;
+		scale: 0.97;
+		transition:
+			opacity var(--duration-sm) var(--ease-out),
+			scale var(--duration-sm) var(--ease-out),
+			display var(--duration-sm) allow-discrete,
+			overlay var(--duration-sm) allow-discrete;
 	}
 
 	[data-popover]:popover-open {
 		display: flex;
+		opacity: 1;
+		scale: 1;
+		transition-duration: var(--duration-md);
+	}
+	@starting-style {
+		[data-popover]:popover-open {
+			opacity: 0;
+			scale: 0.97;
+		}
+	}
+
+	/* A fading popover must not take the click meant for what is underneath. */
+	[data-popover]:not(:popover-open) {
+		pointer-events: none;
 	}
 	[data-popover][data-side="top"][data-align="start"] {
 		position-area: block-start span-inline-end;
 		margin-block-end: 0.25rem;
+		transform-origin: 0 100%;
 	}
 	[data-popover][data-side="top"][data-align="end"] {
 		position-area: block-start span-inline-start;
 		margin-block-end: 0.25rem;
+		transform-origin: 100% 100%;
 	}
 	[data-popover][data-side="bottom"][data-align="start"] {
 		position-area: block-end span-inline-end;
 		margin-block-start: 0.5rem;
+		transform-origin: 0 0;
 	}
 	[data-popover][data-side="bottom"][data-align="end"] {
 		position-area: block-end span-inline-start;
 		margin-block-start: 0.5rem;
+		transform-origin: 100% 0;
 	}
 
 	:is(.dropdown-menu, .popover) {
