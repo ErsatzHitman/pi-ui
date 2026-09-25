@@ -74,6 +74,8 @@ export default function (pi) {
 }
 `;
 
+// Loads a real extension through the SDK; under full-suite parallel load this can
+// cross Bun's 5s default without anything being wrong.
 test("a discovered extension drives a real pi-tui SelectList and a streaming Text widget end to end", async () => {
 	const root = await makeTempDir();
 	const agentDir = `${root}/agent`;
@@ -150,7 +152,7 @@ test("a discovered extension drives a real pi-tui SelectList and a streaming Tex
 		await controller?.dispose();
 		await rm(root, { recursive: true });
 	}
-});
+}, 30_000);
 
 function surfaceLines(
 	store: AppStore,
