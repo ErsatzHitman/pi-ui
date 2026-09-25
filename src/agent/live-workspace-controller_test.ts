@@ -216,6 +216,37 @@ test("records a bounded, most-recent-first activity log", () => {
 	assertEquals(controller.snapshot(input).activity, []);
 });
 
+test("recordExtensionActivity appends one start line and one finish line, each tagged by phase and background", () => {
+	const { controller, input } = fixture();
+
+	controller.recordExtensionActivity(
+		"start",
+		"JEV started Consult · before_agent_start",
+		false,
+	);
+	controller.recordExtensionActivity(
+		"finish",
+		"JEV finished Consult · before_agent_start (2.1s) — Consulted jev",
+		false,
+	);
+	controller.recordExtensionActivity(
+		"start",
+		"Advisor started Review · agent_settled",
+		true,
+	);
+
+	const activity = controller.snapshot(input).activity;
+	assertEquals(activity.length, 3);
+	// Most-recent-first, same ordering as every other Activity-tab entry.
+	assertEquals(activity[0]?.kind, "extension-start");
+	assertEquals(activity[0]?.background, true);
+	assertStringIncludes(activity[0]?.text ?? "", "Advisor started Review");
+	assertEquals(activity[1]?.kind, "extension-finish");
+	assertStringIncludes(activity[1]?.text ?? "", "Consulted jev");
+	assertEquals(activity[2]?.kind, "extension-start");
+	assertEquals(activity[2]?.background, false);
+});
+
 test("derives a subagent fleet roster from a channel payload and clears stale rows", () => {
 	const { controller, input } = fixture();
 

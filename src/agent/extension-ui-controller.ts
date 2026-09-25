@@ -111,6 +111,12 @@ export type ExtensionUiControllerHooks = {
 	 */
 	onCustomPrompt?: (capturing: boolean) => () => void;
 	/**
+	 * Receives each committed frame of a `setWidget(key, (tui, theme) => Component)` widget:
+	 * its key and raw (ANSI-styled) rendered lines. Used by extension-activity tracking to
+	 * keep a panel's live progress and final frame (JEV's card, Advisor's live panel).
+	 */
+	onWidgetFrame?: (key: string, rawLines: readonly string[]) => void;
+	/**
 	 * Mount extension `setFooter`/`setHeader` components as terminal surfaces
 	 * (`extensions.terminalChrome`, see `extensions-config.ts`). Off by default:
 	 * the calls are accepted and ignored, like RPC mode.
@@ -163,6 +169,16 @@ export class ExtensionUiController {
 	#workingIndicator: AppExtensionWorkingIndicator | undefined;
 	#workingMessage: string | undefined;
 	#workingVisible = defaultWorkingVisible;
+	/**
+	 * `AppExtensionStatus.activityId` per status key — this controller has no
+	 * attribution of its own (a raw `ctx.ui.setStatus(key, text)` call
+	 * carries no extension identity; only `instrument.ts`'s wrapped `ctx`
+	 * knows which extension made it), so `RuntimeController` drives these
+	 * from its `ExtensionActivityTracker`'s `{trigger:"ui"}` ledger changes
+	 * via `setStatusActivityId`/`setWorkingActivityId`.
+	 */
+	readonly #statusActivityIds = new Map<string, string>();
+	#workingActivityId: string | undefined;
 	#hiddenThinkingLabel: string | undefined;
 	#toolsExpanded = false;
 	#footerMounted = false;
@@ -175,6 +191,15 @@ export class ExtensionUiController {
 	) {
 		this.#terminalSurfaces = new TerminalSurfaceController({
 			onUpdate: (surfaces) => this.store.setTerminalSurfaces([...surfaces]),
+			onFrame: hooks.onWidgetFrame
+				? (id, rawLines) => {
+						if (!id.startsWith(widgetSurfaceIdPrefix)) return;
+						hooks.onWidgetFrame?.(
+							id.slice(widgetSurfaceIdPrefix.length),
+							rawLines,
+						);
+					}
+				: undefined,
 			// Round 6 F2 — see `TerminalSurfaceControllerOptions.viewportHint`'s doc comment.
 			viewportHint: () => this.store.clientViewportCells,
 		});
@@ -223,14 +248,11 @@ export class ExtensionUiController {
 			},
 			setStatus: (key, text) => {
 				if (!isActive()) return;
-				if (text === undefined) this.#statuses.delete(key);
-				else this.#statuses.set(key, text);
-				this.store.setExtensionStatuses(
-					this.#statuses
-						.entries()
-						.map(([key, text]) => ({ key, text }))
-						.toArray(),
-				);
+				if (text === undefined) {
+					this.#statuses.delete(key);
+					this.#statusActivityIds.delete(key);
+				} else this.#statuses.set(key, text);
+				this.publishStatuses();
 			},
 			setWorkingMessage: (message) => {
 				if (!isActive()) return;
@@ -543,6 +565,7 @@ export class ExtensionUiController {
 	cancelAll(): void {
 		this.cancelPendingDialogs();
 		this.#statuses.clear();
+		this.#statusActivityIds.clear();
 		this.#widgets.clear();
 		this.#componentWidgetKeys.clear();
 		// Not clearing the per-runtime listener sets, for the same reason as
@@ -559,6 +582,7 @@ export class ExtensionUiController {
 		this.#workingIndicator = undefined;
 		this.#workingMessage = undefined;
 		this.#workingVisible = defaultWorkingVisible;
+		this.#workingActivityId = undefined;
 		this.#hiddenThinkingLabel = undefined;
 		this.#toolsExpanded = false;
 		this.#footerMounted = false;
@@ -858,7 +882,42 @@ export class ExtensionUiController {
 			message: this.#workingMessage,
 			visible: this.#workingVisible,
 			indicator: this.#workingIndicator,
+			activityId: this.#workingActivityId,
 		});
+	}
+
+	private publishStatuses(): void {
+		this.store.setExtensionStatuses(
+			this.#statuses
+				.entries()
+				.map(([key, text]) => {
+					const activityId = this.#statusActivityIds.get(key);
+					// Omit rather than send `undefined`, so an unattributed status
+					// still round-trips as a plain `{key, text}` (round-7-style
+					// exact-shape assertions elsewhere rely on this).
+					return activityId === undefined
+						? { key, text }
+						: { key, text, activityId };
+				})
+				.toArray(),
+		);
+	}
+
+	/** Attaches (or clears, with `undefined`) the `ExtensionActivity.id`
+	 * behind a `ctx.ui.setStatus(key, …)` line — see `#statusActivityIds`'s
+	 * doc comment and `AppExtensionStatus.activityId`. A no-op for a key with
+	 * no current status (nothing to republish). */
+	setStatusActivityId(key: string, activityId: string | undefined): void {
+		if (activityId === undefined) this.#statusActivityIds.delete(key);
+		else this.#statusActivityIds.set(key, activityId);
+		if (this.#statuses.has(key)) this.publishStatuses();
+	}
+
+	/** Same idea as `setStatusActivityId`, for the working indicator/message —
+	 * see `AppStateSnapshot.extensionWorkingActivityId`. */
+	setWorkingActivityId(activityId: string | undefined): void {
+		this.#workingActivityId = activityId;
+		this.syncWorking();
 	}
 }
 
@@ -870,8 +929,10 @@ function normalizeWorkingIndicator(
 }
 
 /** Stable terminal-surface id for a `setWidget(key, (tui, theme) => Component)` mount. */
+const widgetSurfaceIdPrefix = "widget:";
+
 function widgetSurfaceId(key: string): string {
-	return `widget:${key}`;
+	return `${widgetSurfaceIdPrefix}${key}`;
 }
 
 const footerSurfaceId = "footer";

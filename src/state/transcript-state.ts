@@ -1,3 +1,5 @@
+import type { ExtensionActivityView, ExtensionRef } from "../extension-activity-types.ts";
+
 export type TranscriptMessageRole =
 	| "user"
 	| "assistant"
@@ -8,7 +10,8 @@ export type TranscriptMessageRole =
 	| "compaction"
 	| "summary"
 	| "skill"
-	| "custom";
+	| "custom"
+	| "extension-activity";
 
 export type TranscriptMessageTitlePart = {
 	text: string;
@@ -67,6 +70,42 @@ export type TranscriptMessage = {
 	 * text/markdown fallback to fall back to.
 	 */
 	customRenderError?: string;
+	/**
+	 * On `role: "tool"`: this tool call's own id, set as soon as the message
+	 * exists (the assistant's tool-call preview, or `tool_execution_start` if
+	 * there was no preview) and never cleared — unlike
+	 * `SessionEventToolState.messageIds`, which is deleted at tool end.
+	 * `runtime-controller.ts`'s `upsertExtensionActivityMessage` (live) and
+	 * `transcript-projector.ts`'s `load()` (replay) reverse-scan for this to
+	 * find the message an anchored `ExtensionActivity`
+	 * (`ExtensionActivity.anchor.toolCallId`) folds into as a step, instead
+	 * of rendering a separate `role: "extension-activity"` card
+	 * (DESIGN-ext-activity.md §2.4 "Anchored").
+	 *
+	 * On `role: "extension-activity"`: the same id, carried only so an
+	 * anchored activity that found no matching tool message yet (the
+	 * fallback standalone card) still shows which tool call it belongs to.
+	 * This never routes `updateMessage` for that message — its own `id`
+	 * does.
+	 */
+	toolCallId?: string;
+	/**
+	 * On `role: "extension-activity"`: one or more activities rendered as a
+	 * single standalone card — normally one, but `instrument.ts` can fold
+	 * several scopes of the same extension's turn into one message (see
+	 * `extension-activity/tracker.ts`). Ordered oldest first.
+	 *
+	 * On `role: "tool"`: the anchored `ExtensionActivity` step(s) folded into
+	 * this tool's own card (§2.4 "Anchored"), merged by each step's `id` via
+	 * `extension-activity/view.ts`'s `mergeActivitySteps` — e.g. JEV's
+	 * `subagent_start` pre-launch gate, or Vision Proxy's `tool_result`
+	 * rewrite of a `read` call.
+	 */
+	activities?: readonly ExtensionActivityView[];
+	/** On `role: "extension-activity"` or an anchored `role: "tool"` message:
+	 * the activity/activities' shared owner — lets the renderer show one
+	 * header (icon/label) instead of repeating it per activity. */
+	extension?: ExtensionRef;
 };
 
 export type TranscriptMessageOptions = Pick<
@@ -81,6 +120,9 @@ export type TranscriptMessageOptions = Pick<
 	| "details"
 	| "customRenderHtml"
 	| "customRenderError"
+	| "toolCallId"
+	| "activities"
+	| "extension"
 >;
 
 export type TranscriptMessageInput = Omit<TranscriptMessage, "id">;
@@ -164,17 +206,67 @@ export class TranscriptState {
 	): string {
 		this.messageSeq += 1;
 		const id = `m-${this.messageSeq}`;
-		this.transcriptMessages.push({
+		const message: TranscriptMessage = {
 			id,
 			role,
 			text,
 			timestamp: new Date(),
 			...options,
-		});
-		this.messageIndexById.set(id, this.transcriptMessages.length - 1);
+		};
+		// A live `role: "user"` message is inserted *before* any run of standalone
+		// extension-activity cards (`toolCallId` unset) already sitting at the tail —
+		// never after them, even though this append is chronologically last. Without
+		// this, a `before_agent_start`-triggered card (promoted and committed by
+		// `RuntimeController.upsertExtensionActivityMessage` while the hook is still
+		// running — see `handleEvent`, which calls `observeExtensionActivityEvent`
+		// before this reducer runs) stays pinned above the very prompt it describes
+		// for the rest of the live session: nothing ever re-appends or reorders it
+		// afterwards, unlike `transcript-projector.ts`'s `anchorActivitiesAfterTheirUserTurn`,
+		// which only runs on a full replay (reload of a dead server, `/resume`,
+		// session switch, tree navigation) and never on an ordinary live append. This
+		// mirrors that replay pass's rule exactly ("nothing between" the run and the
+		// user row) so a live card and a replayed one land in the same place.
+		const insertAt =
+			role === "user"
+				? this.trailingStandaloneActivityRunStart()
+				: this.transcriptMessages.length;
+		this.transcriptMessages.splice(insertAt, 0, message);
+		this.reindexFrom(insertAt);
 		if (role === "assistant") this.activeAssistantId = id;
 		if (role === "thought") this.activeThoughtId = id;
 		return id;
+	}
+
+	/**
+	 * The index where a maximal run of trailing standalone extension-activity
+	 * cards begins — messages with `role: "extension-activity"` and no
+	 * `toolCallId` (an anchored/fallback card with `toolCallId` set is left
+	 * alone, exactly as `transcript-projector.ts`'s replay pass leaves it).
+	 * Returns `transcriptMessages.length` (append at the very end, the
+	 * previous behavior) when the tail holds no such run.
+	 */
+	private trailingStandaloneActivityRunStart(): number {
+		let index = this.transcriptMessages.length;
+		while (index > 0) {
+			const candidate = this.transcriptMessages[index - 1];
+			if (
+				candidate?.role !== "extension-activity" ||
+				candidate.toolCallId !== undefined
+			) {
+				break;
+			}
+			index -= 1;
+		}
+		return index;
+	}
+
+	/** Refreshes `messageIndexById` for every message from `start` onward,
+	 * after an insertion (rather than a plain trailing push) shifted them. */
+	private reindexFrom(start: number): void {
+		for (let index = start; index < this.transcriptMessages.length; index += 1) {
+			const message = this.transcriptMessages[index];
+			if (message) this.messageIndexById.set(message.id, index);
+		}
 	}
 
 	updateMessage(id: string, patch: Partial<Omit<TranscriptMessage, "id">>): boolean {

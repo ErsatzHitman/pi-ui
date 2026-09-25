@@ -150,6 +150,16 @@
 					"type": "boolean",
 					"default": false,
 					"description": "Draw extension setHeader/setFooter components (TUI banners and terminal status lines) around the prompt. Off by default: pi-ui's own prompt footer already shows the workspace, extension statuses, model, thinking level and usage."
+				},
+				"activityTracking": {
+					"type": "boolean",
+					"default": true,
+					"description": "Track and render every extension's Called/Working/Output/Completed lifecycle as durable cards, the way subagent activity is shown. On by default."
+				},
+				"activityPersist": {
+					"type": "boolean",
+					"default": true,
+					"description": "Persist extension activity cards so they survive a session switch, restart or /resume. On by default; has no effect when activityTracking is false."
 				}
 			},
 			"description": "How pi-ui binds pi SDK extensions.",

@@ -74,7 +74,8 @@ export function toolEndMeta(startedAt: number | undefined): string | undefined {
 	return duration === "0.0s" ? undefined : duration;
 }
 
-function formatDuration(ms: number): string {
+/** Tool-card duration text; extension-activity cards reuse it so both read alike. */
+export function formatDuration(ms: number): string {
 	if (ms <= 60_000) return `${(ms / 1000).toFixed(1)}s`;
 
 	const totalSeconds = Math.round(ms / 1000);

@@ -246,9 +246,20 @@ export function reduceSessionEvent(
 				const call = assistantEvent.toolCall;
 				const preview = tools.previewMessages.get(assistantEvent.contentIndex);
 				let id = preview?.id;
+				// Stamped as soon as this tool call's message exists, and never
+				// cleared (unlike `tools.messageIds`, below) — an anchored
+				// `ExtensionActivity` (e.g. a `tool_call` hook's pre-launch gate,
+				// which can run before `tool_execution_start`) finds this message
+				// by reverse-scanning for it (`transcript-state.ts`'s `toolCallId`
+				// doc comment; DESIGN-ext-activity.md §2.4 "Anchored").
 				if (!id) {
 					const view = context.formatToolPreview(call.name, {});
-					id = state.appendMessage("tool", view.text, view.options);
+					id = state.appendMessage("tool", view.text, {
+						...view.options,
+						toolCallId: call.id,
+					});
+				} else {
+					state.updateMessage(id, { toolCallId: call.id });
 				}
 				tools.previewMessages.delete(assistantEvent.contentIndex);
 				tools.messageIds.set(call.id, id);
@@ -309,8 +320,22 @@ export function reduceSessionEvent(
 			tools.startedAt.set(event.toolCallId, context.nowMs?.() ?? Date.now());
 			const view = context.formatToolStart(event);
 			const existingId = tools.messageIds.get(event.toolCallId);
-			const id = existingId ?? state.appendMessage("tool", view.text, view.options);
-			if (existingId) state.updateMessage(id, { text: view.text, ...view.options });
+			// Covers a tool call with no preview message (e.g. a synthetic/
+			// injected call) — see the `toolcall_end` branch above for the
+			// common case and why this is never cleared.
+			const id =
+				existingId ??
+				state.appendMessage("tool", view.text, {
+					...view.options,
+					toolCallId: event.toolCallId,
+				});
+			if (existingId) {
+				state.updateMessage(id, {
+					text: view.text,
+					toolCallId: event.toolCallId,
+					...view.options,
+				});
+			}
 			tools.messageIds.set(event.toolCallId, id);
 			break;
 		}

@@ -50,3 +50,61 @@ test("an ordinary running turn keeps the Sending... status gated on the submit s
 	assertStringIncludes(running, 'data-show="$_promptSubmitting"');
 	assertStringExcludes(running, "Waiting for extension input");
 });
+
+test("an extension status bound to an open activity renders only as that activity's chip", () => {
+	const html = renderPromptStatus(
+		appRenderSnapshot({
+			extensionStatuses: [
+				{ key: "fake-vision", text: "describing 1 image…", activityId: "xa-1" },
+				{ key: "fake-mode", text: "build" },
+			],
+			extensionActivityChips: [
+				{
+					id: "xa-1",
+					extensionLabel: "Vision Proxy",
+					state: "working",
+					progress: "describing 1 image…",
+				},
+			],
+		}),
+	);
+	// The bound status's own `.extension-status` chip is suppressed...
+	assertStringExcludes(html, 'data-extension-status="fake-vision"');
+	// ...in favor of the pink activity chip carrying the same text.
+	assertStringIncludes(html, "ext-activity-chip");
+	assertStringIncludes(html, "Vision Proxy");
+	assertStringIncludes(html, "describing 1 image…");
+	// An unrelated status (not bound to any activity) still renders as before.
+	assertStringIncludes(html, 'data-extension-status="fake-mode"');
+});
+
+test("a working message attributed to an open activity defers to that activity's chip", () => {
+	const html = renderPromptStatus(
+		appRenderSnapshot({
+			activityText: "reviewing…",
+			extensionWorkingVisible: true,
+			extensionWorkingActivityId: "xa-2",
+			extensionActivityChips: [
+				{
+					id: "xa-2",
+					extensionLabel: "Advisor",
+					state: "working",
+					progress: "reviewing…",
+				},
+			],
+		}),
+	);
+	assertStringExcludes(html, "prompt-working-status");
+	assertStringIncludes(html, "Advisor");
+});
+
+test("an unattributed working message still renders exactly as before", () => {
+	const html = renderPromptStatus(
+		appRenderSnapshot({
+			activityText: "doing a thing…",
+			extensionWorkingVisible: true,
+		}),
+	);
+	assertStringIncludes(html, "prompt-working-status");
+	assertStringIncludes(html, "doing a thing…");
+});

@@ -424,6 +424,31 @@ export class LiveWorkspaceController {
 		return undefined;
 	}
 
+	/**
+	 * DESIGN-ext-activity.md §4.1.3: one log line per extension-activity
+	 * lifecycle edge — "<Label> started <title>" when the activity is first
+	 * promoted (created), and "<Label> finished <title> (<duration>) —
+	 * <summary>" when it reaches a terminal state (finished). Each call
+	 * appends exactly one line; it never patches an earlier one, matching
+	 * every other Activity-tab entry ("Turn finished", "Model changed to
+	 * …") — the transcript card (`ui/extension-activity.tsx`), not this log,
+	 * is where a still-`working` activity's state is patched live. `kind`
+	 * carries the phase (`"extension-start"`/`"extension-finish"`) so the
+	 * pane can give a still-open activity's start line the same pink
+	 * `--status-active` treatment as the card (`live-workspace.css`).
+	 */
+	recordExtensionActivity(
+		phase: "start" | "finish",
+		text: string,
+		background: boolean,
+	): void {
+		this.pushActivity(
+			phase === "start" ? "extension-start" : "extension-finish",
+			text,
+			background,
+		);
+	}
+
 	private pushActivity(kind: string, text: string, background: boolean): void {
 		this.activity.push({
 			id: `a${this.nextActivityId++}`,

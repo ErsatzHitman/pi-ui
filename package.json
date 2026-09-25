@@ -24,6 +24,7 @@
 		"#testing/element-patches": "./src/testing/element-patches.ts",
 		"#testing/streams": "./src/testing/streams.ts",
 		"#testing/fake-stream-provider": "./src/testing/fake-stream-provider.ts",
+		"#testing/fake-activity-extensions": "./src/testing/fake-activity-extensions.ts",
 		"#testing/e2e-streaming-harness": "./src/testing/e2e-streaming-harness.ts",
 		"#testing/fake-groq-server": "./src/testing/fake-groq-server.ts"
 	},

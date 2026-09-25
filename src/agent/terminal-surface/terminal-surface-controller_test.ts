@@ -243,6 +243,52 @@ test("mountPersistent replaces an existing surface mounted under the same id", (
 	controller.disposeAll();
 });
 
+test("dispose() flushes a still-coalesced frame instead of dropping it on a same-key remount", () => {
+	const frames: string[][] = [];
+	const controller = new TerminalSurfaceController({
+		onUpdate: () => {},
+		onFrame: (_id, rawLines) => frames.push([...rawLines]),
+	});
+	let text = "consulting";
+	let requestRerender: () => void = () => {};
+	controller.mountPersistent({
+		id: "widget:example",
+		kind: "widget",
+		colorScheme: "dark",
+		factory: (tui) => {
+			requestRerender = () => tui.requestRender(false);
+			return { render: () => [text], invalidate: () => {} };
+		},
+	});
+	assertEquals(frames.at(-1), ["consulting"]);
+
+	// The component's state changes and it asks for a coalesced (non-forced)
+	// re-render — exactly `requestRender(force: false)`, matching a real
+	// component's own update path (e.g. JEV's card reaching "FAILED") — but
+	// the display-hz timer that would normally commit it hasn't fired yet.
+	text = "FAILED";
+	requestRerender();
+	assertEquals(frames.at(-1), ["consulting"], "not committed yet");
+
+	// `mountPersistent` under the same id disposes the previous mount first
+	// (JEV's `context` hook remounting `jev-decompose` while the tool's
+	// lingering close hasn't fired). That must settle the still-pending
+	// "FAILED" frame as the prior owner's last frame, not drop it.
+	controller.mountPersistent({
+		id: "widget:example",
+		kind: "widget",
+		colorScheme: "dark",
+		factory: () => ({ render: () => ["replacement"], invalidate: () => {} }),
+	});
+
+	assertEquals(
+		frames.some((lines) => lines.join("\n").includes("FAILED")),
+		true,
+	);
+	// And the replacement's own initial frame still commits after it.
+	assertEquals(frames.at(-1), ["replacement"]);
+});
+
 test("a factory that throws resolves undefined and never leaves a mounted surface behind", async () => {
 	const { controller } = makeController();
 	const result = await controller.mountCustom<string>({

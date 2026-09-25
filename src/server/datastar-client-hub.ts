@@ -32,7 +32,7 @@ const maxHiddenClientIds = 1024;
 
 type BroadcastElementsOptions = {
 	selector?: string;
-	mode?: "outer" | "replace" | "append" | "after" | "remove";
+	mode?: "outer" | "replace" | "append" | "before" | "after" | "remove";
 };
 
 type BroadcastEntry =
@@ -230,7 +230,7 @@ export class DatastarClientHub {
 		elements: string,
 		selector: string,
 		options: {
-			mode?: "outer" | "replace" | "append" | "after" | "remove";
+			mode?: "outer" | "replace" | "append" | "before" | "after" | "remove";
 			scripts?: readonly string[];
 		} = {},
 	): void {

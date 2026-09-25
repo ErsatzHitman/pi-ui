@@ -276,6 +276,25 @@
 		font-variant-numeric: tabular-nums;
 	}
 
+	/* Same pink as every other "working right now" surface (DESIGN-ext-activity.md §4.3):
+	   subagents, background bash and workflow rows all report status "running". */
+	.live-workspace-agent-row[data-live-workspace-agent-status="running"]
+		.live-workspace-agent-status {
+		color: var(--status-active);
+	}
+
+	/* §4.1.3: the Activity-tab "started" log line for an extension activity —
+	   the finish line is a plain row once it lands, same as every other entry. */
+	.live-workspace-activity-row[data-activity-kind="extension-start"] {
+		border-color: var(--status-active);
+		background: var(--status-active-surface);
+	}
+
+	.live-workspace-activity-row[data-activity-kind="extension-start"]
+		.live-workspace-activity-text {
+		color: var(--status-active);
+	}
+
 	.live-workspace-tool-preview {
 		flex-basis: 100%;
 		margin: 0;
