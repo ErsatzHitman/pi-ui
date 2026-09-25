@@ -127,6 +127,23 @@
 			transition-duration: 0.01ms !important;
 		}
 
+		/* Layout owners never transition: a 0.01ms `all` transition renders the old pane
+		   reserve beside the new one for a frame (hybrid Sessions⇄Live layout). Must stay
+		   before the allowlists below. */
+		:where(
+			#workspace-shell,
+			#chat-pane,
+			.toolbar,
+			.toolbar-actions,
+			.toolbar-end,
+			#prompt-box,
+			#messages > .messages-stack,
+			.messages-prompt-spacer,
+			#session-transition > *
+		) {
+			transition-duration: 0s !important;
+		}
+
 		/* Gentler, not zero: these surfaces keep a short fade so appear/disappear stays
 		   legible; their scale/translate offsets snap (only opacity is transitioned).
 		   Zero specificity + later source order beats the `*` rule above.
@@ -155,7 +172,6 @@
 			.prompt-queue-item,
 			.prompt-attachment,
 			.extension-widget,
-			.file-transfer-error,
 			.live-workspace-icon-state > svg
 		),
 		:where(
@@ -194,12 +210,33 @@
 			[data-popover],
 			.prompt-picker-popover,
 			.review-graph-detail,
-			.messages-latest
+			.messages-latest,
+			.file-transfer-error
 		),
 		.session-sidebar[data-animate-open]::backdrop {
 			transition-property: opacity, display, overlay !important;
 			transition-behavior: normal, allow-discrete, allow-discrete !important;
 			transition-duration: var(--duration-sm) !important;
+		}
+
+		/* `*::before/::after` does not reach ::backdrop: a closing modal's scrim would keep
+		   fading alone after the panel has gone. The entry fade stays; the Sessions scrim
+		   (above) keeps its exit fade by design. */
+		:where(.dialog, .alert-dialog, .command-dialog):not([open])::backdrop {
+			transition-duration: 0s !important;
+		}
+
+		/* Popovers, pickers, dialogs and tooltips only fade: their closed/@starting-style
+		   scale would otherwise apply at exit t0 while still opaque (a visible shrink jump). */
+		:where(
+			[data-popover],
+			.prompt-picker-popover,
+			.command-dialog,
+			.dialog,
+			.alert-dialog,
+			[data-slot="tooltip-content"]
+		) {
+			scale: none !important;
 		}
 
 		/* Swipe-to-close is direct manipulation: the scrim tracks the finger with no lag
@@ -251,5 +288,15 @@
 	:root[data-vt="theme"]::view-transition-new(root) {
 		animation-duration: var(--duration-xl);
 		animation-timing-function: ease;
+	}
+
+	/* The crossfade already carries the colour change: per-element colour/background/shadow
+	   transitions starting with the class flip would play inside it (and after it, against the
+	   new snapshot). data-vt is set before startViewTransition and removed on finish. */
+	:root[data-vt="theme"] *,
+	:root[data-vt="theme"] *::before,
+	:root[data-vt="theme"] *::after {
+		/* stylelint-disable-next-line declaration-no-important -- must outrank component transitions, for the crossfade only */
+		transition: none !important;
 	}
 }

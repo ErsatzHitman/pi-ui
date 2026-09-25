@@ -57,6 +57,8 @@ async function settle(): Promise<void> {
 	await Promise.resolve();
 }
 
+const quietHoldScript = "window.piUi.messageScroll.quietTranscript({ hold: true })";
+
 function dataEnterCount(html: string): number {
 	return html.split("data-enter").length - 1;
 }
@@ -118,6 +120,7 @@ test("a session replace sends signals, then #messages marked data-enter, then sc
 	assert(signals?.kind === "patchView", "signals patch first");
 	assertEquals(signals.elements, "");
 	assert(signals.signals !== "{}", "carries the real signals");
+	// No quiet script: the incoming node's own data-enter gates its nested entries.
 	assertEquals(signals.scripts, []);
 	const replace = calls[replaceIndex];
 	assert(replace?.kind === "replaceElement", "replace");
@@ -232,5 +235,101 @@ test("history renders and session replaces never include the pending row", async
 			.renderElements(renderer.projectState(store.snapshot()))
 			.includes("message-pending"),
 		"a full view has no pending row",
+	);
+});
+
+test("a code-theme replace is quieted first and keeps the transcript unmarked", async () => {
+	const { store, hub, renderer } = setup();
+	store.appendMessage("user", "hello");
+	store.appendMessage("assistant", "hi");
+	await settle();
+	hub.take();
+	renderer.codeThemeChanged();
+	await settle();
+	const calls = hub.take();
+	const replaceIndex = calls.findIndex((call) => call.kind === "replaceElement");
+	const before = calls[replaceIndex - 1];
+	assert(before?.kind === "patchView", "a patch before the replace");
+	assertEquals(before.scripts, [quietHoldScript]);
+});
+
+test("a code-theme replace during the wait keeps the pending row, with no blink or re-entry", async () => {
+	const { store, hub, renderer } = setup();
+	store.setActivityText("Working...");
+	store.appendMessage("user", "hello");
+	await settle();
+	assertEquals(pendingAppends(hub.take()), 1);
+	renderer.codeThemeChanged();
+	await settle();
+	const calls = hub.take();
+	const replace = calls.find((call) => call.kind === "replaceElement");
+	assert(replace?.kind === "replaceElement", "replaced");
+	assert(replace.elements.includes('id="message-pending"'), "the row is kept in place");
+	assertEquals(dataEnterCount(replace.elements), 0);
+	assertEquals(pendingAppends(calls), 0);
+	assertEquals(retireScripts(calls), 0);
+	// It still retires normally on the first response.
+	store.appendThoughtDelta("hmm");
+	await settle();
+	assertEquals(retireScripts(hub.take()), 1);
+});
+
+test("a reconnect's full view keeps a showing pending row, never after the turn ends", async () => {
+	const { store, hub, renderer } = setup();
+	store.setActivityText("Working...");
+	store.appendMessage("user", "hello");
+	await settle();
+	hub.take();
+	const view = () => renderer.renderElements(renderer.projectState(store.snapshot()));
+	assert(view().includes('id="message-pending"'), "a reconnect keeps the row");
+	assertEquals(
+		dataEnterCount(view().slice(view().indexOf('id="message-pending"') - 20)),
+		0,
+	);
+	store.setActivityText(undefined);
+	await settle();
+	assert(!view().includes("message-pending"), "an ended turn drops it");
+});
+
+test("a session replace keeps data-enter on follow-up morphs until the session has loaded", async () => {
+	const { store, hub, renderer } = setup();
+	store.setSessionTransition({
+		status: "loading",
+		generation: 1,
+		targetPath: "/tmp/new.jsonl",
+		overlay: false,
+	});
+	hub.take();
+	renderer.transcriptReplacing();
+	renderer.requestCommit();
+	await settle();
+	const replace = hub.take().find((call) => call.kind === "replaceElement");
+	assert(replace?.kind === "replaceElement", "replaced");
+	assertEquals(dataEnterCount(replace.elements), 1);
+	assert(
+		!replace.elements.includes("data-class:messages-loading"),
+		"never born with the loading dim",
+	);
+	const transcriptMorph = () =>
+		hub
+			.take()
+			.find(
+				(call) =>
+					call.kind === "patchView" && call.elements.includes('id="messages"'),
+			);
+	store.setSessionCatalog([]);
+	await settle();
+	const loading = transcriptMorph();
+	assert(loading?.kind === "patchView", "a sessions morph while loading");
+	assertEquals(dataEnterCount(loading.elements), 1);
+	store.setSessionTransition({ status: "idle", generation: 1 });
+	store.setSessionCatalog([]);
+	await settle();
+	const loaded = transcriptMorph();
+	assert(loaded?.kind === "patchView", "a sessions morph once loaded");
+	assert(!loaded.elements.includes("data-enter"), "the marker is released");
+	assert(
+		loaded.elements.includes("data-class:messages-loading"),
+		"the dim is bound again",
 	);
 });

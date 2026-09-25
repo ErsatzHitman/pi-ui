@@ -23,10 +23,10 @@ export function queueTextKey(id) {
 
 /**
  * Pure: which removed queue items leave through a ghost, and which way.
- * - ✕ pressed (`data-exit="down"`): back down the way it entered.
+ * - ✕ pressed (id in `removing`, or `data-exit="down"`): back down the way it entered.
  * - ✕ on one of several identical texts: the server re-renders the survivors, so idiomorph
- *   keeps the pressed node (stripping its `data-exit`) and removes the last same-text id.
- *   `reassigned` counts those strips per text key; such a removal also leaves downward.
+ *   keeps the pressed node and removes the last same-text id. `reassigned` counts pressed
+ *   ids still on screen per text key; such a removal also leaves downward.
  * - "Restore all": down into the composer the text returns to.
  * - Otherwise the steer was delivered: it lifts toward the transcript.
  * An id still present was moved or re-inserted by the morph, not removed. An item that was
@@ -37,7 +37,7 @@ export function planQueueExits(
 	removed,
 	presentIds,
 	offsets,
-	{ restoring = false, reassigned = new Map() } = {},
+	{ restoring = false, reassigned = new Map(), removing = new Set() } = {},
 ) {
 	const plan = [];
 	const strips = new Map(reassigned);
@@ -45,34 +45,52 @@ export function planQueueExits(
 		const offset = offsets.get(node.id);
 		if (!node.id || presentIds.has(node.id) || !offset) continue;
 		if (offset.clipTop + offset.clipBottom >= offset.height) continue;
+		const pressed =
+			removing.has(node.id) || node.getAttribute("data-exit") === "down";
 		const key = queueTextKey(node.id);
-		const stripped = (strips.get(key) ?? 0) > 0;
+		const stripped = !pressed && (strips.get(key) ?? 0) > 0;
 		if (stripped) strips.set(key, strips.get(key) - 1);
 		const translateY =
-			node.getAttribute("data-exit") === "down" || stripped
-				? "0.25rem"
-				: restoring
-					? "0.5rem"
-					: "-0.5rem";
+			pressed || stripped ? "0.25rem" : restoring ? "0.5rem" : "-0.5rem";
 		plan.push({ node, offset, translateY });
 	}
 	return plan;
 }
 
-/** ✕-marked items the morph kept for a same-text survivor (their `data-exit` was stripped
- * in this batch), counted per text key. A 4s failed-POST reset looks the same, but then no
- * same-text item is removed in the batch, so the count is unused. */
-function reassignedExits(records) {
-	const counts = new Map();
-	for (const record of records) {
-		const { target } = record;
-		if (record.type !== "attributes" || record.oldValue !== "down") continue;
-		if (!(target instanceof Element) || !target.matches(queueItemSelector)) continue;
-		if (target.hasAttribute("data-exit") || !target.isConnected) continue;
-		const key = queueTextKey(target.id);
-		counts.set(key, (counts.get(key) ?? 0) + 1);
+/**
+ * Pure: settles one frame of queue mutations. `removedNodes` is every queue item the
+ * frame's MutationObserver callbacks reported removed; a morph may remove and re-add the
+ * whole list in separate callbacks, so presence is judged once, from the live DOM
+ * (`presentIds`). Returns the removed nodes (one per id) that are really gone, the ids
+ * that are really new (`fresh`, for entries) and the ✕-pressed ids idiomorph kept for a
+ * same-text survivor (`reassigned`, counted per text key; `kept` lists them).
+ */
+export function settleQueueFrame(previousIds, presentIds, removedNodes, removing) {
+	const gone = new Map();
+	for (const node of removedNodes)
+		if (node.id && !presentIds.has(node.id) && !gone.has(node.id))
+			gone.set(node.id, node);
+	const goneKeys = new Set([...gone.keys()].map(queueTextKey));
+	const reassigned = new Map();
+	const kept = [];
+	for (const id of removing) {
+		if (!presentIds.has(id) || gone.has(id)) continue;
+		const key = queueTextKey(id);
+		if (!goneKeys.has(key)) continue;
+		reassigned.set(key, (reassigned.get(key) ?? 0) + 1);
+		kept.push(id);
 	}
-	return counts;
+	return {
+		removed: [...gone.values()],
+		fresh: freshIds(previousIds, [...presentIds]),
+		reassigned,
+		kept,
+	};
+}
+
+/** Ids whose ✕ was pressed and whose POST is in flight (prompt-box.tsx's ✕ handler). */
+function queueRemoving() {
+	return globalThis.piUi?.queueRemoving ?? new Set();
 }
 
 export function bindPromptMotion() {
@@ -134,28 +152,44 @@ function watchQueue(queue, box) {
 	let offsets = measureQueue(queue, box);
 	let transcript = document.getElementById("messages");
 	let restoringUntil = 0;
+	// One frame of removed items: a morph can remove and re-add the list in separate
+	// callbacks, so presence is judged once per frame from the live DOM (flow-critique S1).
+	let removedBuffer = [];
+	let frame = 0;
+	// Offsets stay those from before the frame's removals until it settles.
 	const remeasure = () => {
-		offsets = measureQueue(queue, box);
+		if (!frame) offsets = measureQueue(queue, box);
 	};
 	document.addEventListener("pi-ui-queue-restore", () => {
 		restoringUntil = performance.now() + restoreWindowMs;
 	});
-	new MutationObserver((records) => {
+	const settle = () => {
+		frame = 0;
 		const present = keyedNodes(queue, queueItemSelector);
 		const presentIds = new Set(present.map((item) => item.id));
-		const removed = removedMatches(records, queueItemSelector);
+		const removing = queueRemoving();
+		const { removed, fresh, reassigned, kept } = settleQueueFrame(
+			ids,
+			presentIds,
+			removedBuffer,
+			removing,
+		);
+		removedBuffer = [];
 		const restoring = performance.now() < restoringUntil;
-		// A session switch replaces #messages (and quiets the transcript): the old session's
-		// steers were not delivered, so they vanish with it instead of lifting.
+		// A session replace marks the new #messages `data-enter` (a code-theme replace does
+		// not): the old session's steers were not delivered, so they vanish with it.
 		const nextTranscript = document.getElementById("messages");
-		const switched = nextTranscript !== transcript;
+		const switched =
+			nextTranscript !== transcript &&
+			nextTranscript?.hasAttribute("data-enter") === true;
 		transcript = nextTranscript;
 		const plan =
 			switched || !entriesAllowed()
 				? []
 				: planQueueExits(removed, presentIds, offsets, {
 						restoring,
-						reassigned: reassignedExits(records),
+						reassigned,
+						removing,
 					});
 		if (plan.length > 0) {
 			const anchor = box.getBoundingClientRect();
@@ -178,23 +212,28 @@ function watchQueue(queue, box) {
 					ghost.style.clipPath = `inset(${offset.clipTop}px 0 ${offset.clipBottom}px 0)`;
 			}
 		}
+		// Gone ids no longer need the double-tap guard; a pressed node kept for a same-text
+		// survivor is that survivor now, so it takes taps again.
+		for (const node of removed) removing.delete(node.id);
+		for (const id of kept) {
+			removing.delete(id);
+			document.getElementById(id)?.removeAttribute("data-exit");
+		}
 		if (restoring && removed.length > 0) restoringUntil = 0;
-		if (entriesAllowed()) {
-			const fresh = new Set(freshIds(ids, [...presentIds]));
+		if (entriesAllowed() && fresh.length > 0) {
+			const entering = new Set(fresh);
 			// Re-measure once each entry settles: its in-flight `translate` skews the rect.
 			for (const item of present)
-				if (fresh.has(item.id))
+				if (entering.has(item.id))
 					enterQueueItem(item).finished.then(remeasure, noop);
 		}
 		ids = presentIds;
 		remeasure();
-	}).observe(queue, {
-		childList: true,
-		subtree: true,
-		attributes: true,
-		attributeFilter: ["data-exit"],
-		attributeOldValue: true,
-	});
+	};
+	new MutationObserver((records) => {
+		removedBuffer.push(...removedMatches(records, queueItemSelector));
+		if (!frame) frame = requestAnimationFrame(settle);
+	}).observe(queue, { childList: true, subtree: true });
 	// The composer growing (typing, widgets) moves the bottom-anchored queue up, and scrolling
 	// the queue list moves its items.
 	new ResizeObserver(remeasure).observe(box);

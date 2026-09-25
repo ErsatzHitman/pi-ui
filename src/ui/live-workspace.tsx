@@ -206,7 +206,9 @@ export function renderLiveWorkspace(
 								data-attr:aria-pressed={`$liveWorkspacePreferences.tab === '${tab}' || (!$liveWorkspacePreferences.tab && '${tab}' === 'now') ? 'true' : 'false'`}
 								data-on:click={`
 								el.focus();
+								const switched = ($liveWorkspacePreferences.tab || 'now') !== '${tab}';
 								$liveWorkspacePreferences.tab = '${tab}';
+								if (switched) window.piUi.motion?.enter(document.getElementById('live-workspace-${tab}'), { from: 'fade' });
 								document.body.dispatchEvent(new CustomEvent(
 									'pi-ui-live-workspace-preferences',
 									{ detail: { tab: '${tab}' } },

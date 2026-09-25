@@ -121,6 +121,21 @@
 		}
 	}
 
+	/* Live → Sessions: the Sessions reserve (margin-inline-end above) lands at t0, and the
+	   outgoing docked Live pane is justify-self: end in the shell, so through its 120ms fade
+	   it jumped one sidebar width left, over the chat. Hold it on the viewport edge.
+	   V-check: film Live → Sessions (Ctrl+B and the toolbar) at 1280 and 1440: #live-workspace
+	   x stays 990 / 1150 in every fade frame, the chat's x and width do not move, and the
+	   right slot never shows bare canvas. */
+	@media (width >= 64rem) {
+		#app[data-pane-swap]:not(.live-workspace-open)
+			> #session-sidebar[open]:not(:modal)
+			~ .workspace-shell
+			#live-workspace {
+			margin-inline-end: calc(-1 * var(--session-sidebar-width));
+		}
+	}
+
 	.chat-pane {
 		display: grid;
 		min-width: 0;

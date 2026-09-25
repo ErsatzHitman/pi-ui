@@ -119,6 +119,31 @@ test("closing the pane (Escape, close button, backdrop) persists the open prefer
 	}
 });
 
+test("a tab click fades the incoming section once, from the click, not @starting-style (LW-V2-03)", () => {
+	const html = renderLiveWorkspace(snapshot(), {}, emptyUsage);
+	const tabs = html
+		.split('class="segmented-control live-workspace-tabs"')[1]
+		?.split('class="live-workspace-header-actions"')[0];
+	if (!tabs) throw new Error("tab strip not found");
+	for (const tab of ["now", "agents", "usage", "activity", "extensions"]) {
+		assertStringIncludes(
+			tabs,
+			`if (switched) window.piUi.motion?.enter(document.getElementById('live-workspace-${tab}'), { from: 'fade' });`,
+		);
+		assertStringIncludes(
+			tabs,
+			`const switched = ($liveWorkspacePreferences.tab || 'now') !== '${tab}';`,
+		);
+	}
+	// The switch is read before the preference changes, so re-clicking the active tab never fades.
+	const click = tabs.split("data-on:click=")[1] ?? "";
+	const switchedIndex = click.indexOf("const switched");
+	const assignIndex = click.indexOf("$liveWorkspacePreferences.tab = ");
+	if (switchedIndex === -1 || assignIndex === -1 || switchedIndex > assignIndex) {
+		throw new Error("expected the switch check before the tab preference is written");
+	}
+});
+
 test("only the preference-selected tab renders visible; the rest are display:none", () => {
 	const preferences: LiveWorkspacePreferences = { tab: "usage" };
 	const html = renderLiveWorkspaceData(snapshot(), preferences, emptyUsage);

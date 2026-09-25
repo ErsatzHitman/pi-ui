@@ -721,8 +721,10 @@ test("the queue ✕ posts at once, blocks a second tap, and leaves the exit to t
 	const remove = html.slice(
 		html.indexOf("data-on:click", html.indexOf("prompt-queue-text")),
 	);
-	assertStringIncludes(remove, "hasAttribute('data-exit')");
+	// The guard is keyed by id: a streaming morph cannot clear it (it keeps `data-exit` too).
+	assertStringIncludes(remove, "if (removing.has(item.id)) return;");
 	assertStringIncludes(remove, "setAttribute('data-exit', 'down')");
+	assertStringIncludes(html, 'data-preserve-attr="data-exit"');
 	assertStringIncludes(remove, "@post('/prompt/queue/remove'");
 	assertFalse(remove.includes("fill:'forwards'"));
 	assertFalse(remove.includes(".finished"));

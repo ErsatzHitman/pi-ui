@@ -440,7 +440,11 @@ function renderQueuedMessages(state: AppStateSnapshot): string {
 	return syncHtml(
 		<section id="prompt-queue-list" class="prompt-queue-list">
 			{items.map(({ behavior, index, label, text }, itemIndex) => (
-				<div id={ids[itemIndex]} class="prompt-queue-item raised-surface">
+				<div
+					id={ids[itemIndex]}
+					class="prompt-queue-item raised-surface"
+					data-preserve-attr="data-exit"
+				>
 					<span
 						class={[
 							"prompt-queue-dot",
@@ -484,9 +488,14 @@ function renderQueuedMessages(state: AppStateSnapshot): string {
 						class="prompt-queue-remove"
 						data-on:click={`
 							const item = el.closest('.prompt-queue-item');
-							if (item.hasAttribute('data-exit')) return;
+							const removing = (window.piUi.queueRemoving ??= new Set());
+							if (removing.has(item.id)) return;
+							removing.add(item.id);
+							setTimeout(() => {
+								removing.delete(item.id);
+								item.removeAttribute('data-exit');
+							}, 4000);
 							item.setAttribute('data-exit', 'down');
-							setTimeout(() => item.removeAttribute('data-exit'), 4000);
 							@post('${endpoints.promptQueueRemove}', { payload: { queueBehavior: '${behavior}', queueIndex: ${index} } });
 						`}
 						aria-label="Remove queued message"

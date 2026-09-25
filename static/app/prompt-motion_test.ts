@@ -2,7 +2,12 @@ import { test } from "bun:test";
 
 import { assertEquals } from "#testing/assertions";
 
-import { freshIds, planQueueExits, queueTextKey } from "./prompt-motion.js";
+import {
+	freshIds,
+	planQueueExits,
+	queueTextKey,
+	settleQueueFrame,
+} from "./prompt-motion.js";
 
 /** A removed queue item as the MutationObserver hands it over (detached, attributes kept). */
 function removedItem(id: string, exit?: string) {
@@ -113,4 +118,79 @@ test("an item scrolled out of the queue list gets no ghost", () => {
 		plan.map((exit) => exit.node.id),
 		["partial"],
 	);
+});
+
+test("a list removed and re-added in two callbacks of one frame: no ghosts, no entries", () => {
+	// Callback 1 removed section#prompt-queue-list (all three items); callback 2 re-added it.
+	// The frame settles once, from the live DOM, so nothing left and nothing is new.
+	const previous = new Set(["alpha-0", "bravo-0", "charlie-0"]);
+	const removed = [
+		removedItem("alpha-0"),
+		removedItem("bravo-0"),
+		removedItem("charlie-0"),
+	];
+	const frame = settleQueueFrame(
+		previous,
+		new Set(previous),
+		removed,
+		new Set<string>(),
+	);
+	assertEquals(frame.removed, []);
+	assertEquals(frame.fresh, []);
+	assertEquals(
+		planQueueExits(frame.removed, new Set(previous), new Map([["alpha-0", offset]])),
+		[],
+	);
+});
+
+test("the same removal re-added without one item ghosts only that item, once", () => {
+	const previous = new Set(["alpha-0", "bravo-0", "charlie-0"]);
+	const present = new Set(["bravo-0", "charlie-0"]);
+	// The whole list was removed (and alpha reported twice across callbacks).
+	const alpha = removedItem("alpha-0");
+	const frame = settleQueueFrame(
+		previous,
+		present,
+		[alpha, removedItem("bravo-0"), removedItem("charlie-0"), removedItem("alpha-0")],
+		new Set(["alpha-0"]),
+	);
+	assertEquals(frame.removed, [alpha]);
+	assertEquals(frame.fresh, []);
+	// ✕ was pressed on alpha: it leaves downward even though a morph stripped `data-exit`.
+	const plan = planQueueExits(frame.removed, present, new Map([["alpha-0", offset]]), {
+		removing: new Set(["alpha-0"]),
+	});
+	assertEquals(
+		plan.map((exit) => [exit.node.id, exit.translateY]),
+		[["alpha-0", "0.25rem"]],
+	);
+});
+
+test("✕ on the first of two identical texts: the pressed node is kept, its twin leaves down", () => {
+	const previous = new Set(["q-steer-abc-0", "q-steer-abc-1"]);
+	const present = new Set(["q-steer-abc-0"]);
+	const twin = removedItem("q-steer-abc-1");
+	const frame = settleQueueFrame(previous, present, [twin], new Set(["q-steer-abc-0"]));
+	assertEquals(frame.kept, ["q-steer-abc-0"]);
+	const plan = planQueueExits(
+		frame.removed,
+		present,
+		new Map([["q-steer-abc-1", offset]]),
+		{ reassigned: frame.reassigned, removing: new Set(["q-steer-abc-0"]) },
+	);
+	assertEquals(
+		plan.map((exit) => exit.translateY),
+		["0.25rem"],
+	);
+});
+
+test("a new id in the settled frame is fresh; a pressed id with no same-text removal is not kept", () => {
+	const frame = settleQueueFrame(
+		new Set(["a-0"]),
+		new Set(["a-0", "b-0"]),
+		[],
+		new Set(["a-0"]),
+	);
+	assertEquals(frame.fresh, ["b-0"]);
+	assertEquals(frame.kept, []);
 });

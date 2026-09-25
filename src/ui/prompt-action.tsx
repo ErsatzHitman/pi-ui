@@ -14,6 +14,7 @@ export function renderPromptAction(state: AppStateSnapshot): string {
 				data-variant="destructive"
 				data-size="icon"
 				type="button"
+				data-preserve-attr="data-aborting"
 				data-on:click={`el.setAttribute('data-aborting', ''); @post('${endpoints.abort}', { payload: {} })`}
 				data-on:keydown__window={`if (
 					evt.code === 'Escape' &&
@@ -53,6 +54,7 @@ export function renderPromptAction(state: AppStateSnapshot): string {
 			class="btn prompt-action"
 			data-size="icon"
 			type="button"
+			data-init="el.removeAttribute('data-aborting')"
 			disabled={state.promptEditorText.trim() === ""}
 			data-send-trigger
 			data-attr:disabled="

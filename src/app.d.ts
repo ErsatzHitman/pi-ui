@@ -51,6 +51,8 @@ interface PiUiNamespace {
 		/** Arms the send-time prompt-spacer hold (real submit paths only, not /copy). */
 		holdSpacerForSend(): void;
 		hydratePierreDiff(element: HTMLElement): void;
+		/** Gates nested entries while a whole transcript is inserted (ui-renderer.ts). */
+		quietTranscript(options?: { hold?: boolean }): void;
 		restoreAnchor(): void;
 		/** Crossfades the pending "thinking..." row out in place (ui-renderer.ts). */
 		retirePending(replaced?: boolean): void;

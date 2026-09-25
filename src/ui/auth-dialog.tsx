@@ -3,16 +3,32 @@ import type { AppAuthDialog, AppAuthProvider } from "../state/app-store.ts";
 import { syncHtml } from "./sync-html.ts";
 
 /**
- * Phase change inside an open dialog: the panel settles in. The header id changes per phase,
- * so idiomorph inserts a fresh header and `data-init` runs once per phase; in-phase status
- * and progress patches morph the same header without re-running it. A content patch that
- * lands before showModal() (the first phase of an open) is skipped: overlays.css already
- * animates the dialog itself. `#auth-dialog-content` is id-stable, so WAAPI survives morphs.
+ * Phase change inside an open dialog: the header and the block after it settle in while the
+ * panel surface stays put (animating `#auth-dialog-content` itself blanked the whole panel
+ * for a frame). The header id changes per phase, so idiomorph inserts a fresh header and
+ * `data-init` runs for it; in-phase status and progress patches morph the same header
+ * without re-running it. Skipped while the dialog is closed or still running its own
+ * entry/exit transition (the first phase of an open: overlays.css already animates the
+ * dialog, so a content entry on top would be a double entry). Datastar evaluates `data-init`
+ * twice for a morph-inserted node (once for the node, once for its copied attribute), so a
+ * header that is already animating is not entered again: one WebAnimation per target.
  */
-const AUTH_PHASE_ENTER =
-	"el.closest('dialog')?.open && window.piUi?.motion?.enter(el.parentElement, { from: 'rise' })";
-const AUTH_RESULT_ENTER =
-	"el.closest('dialog')?.open && window.piUi?.motion?.enter(el.parentElement, { from: 'pop' })";
+function authPhaseEnter(from: "rise" | "fade"): string {
+	return `const d = el.closest('dialog'); if (d?.open && !d.getAnimations().length && !el.getAnimations().length) { const m = window.piUi?.motion; m?.enter(el, { from: '${from}' }); m?.enter(el.nextElementSibling, { from: '${from}' }); }`;
+}
+const AUTH_PHASE_ENTER = authPhaseEnter("rise");
+const AUTH_RESULT_ENTER = authPhaseEnter("fade");
+/** An error line appearing inside a phase: one fade, however often `data-init` evaluates. */
+const AUTH_ERROR_ENTER =
+	"el.getAnimations().length || window.piUi?.motion?.enter(el, { from: 'fade' })";
+/**
+ * A closed dialog keeps its last content while it fades out: the `/auth/close` patch renders
+ * an ignore-morph placeholder, and Datastar skips a morph only when both the live node and
+ * the patch carry `data-ignore-morph`, so the live node is marked once the dialog closes.
+ * The next open's patch has no marker and replaces the stale content before `showModal()`.
+ */
+const AUTH_DIALOG_TOGGLE =
+	"document.getElementById('auth-dialog-content')?.toggleAttribute('data-ignore-morph', evt.newState === 'closed')";
 
 export function renderAuthDialog(dialog: AppAuthDialog | undefined): string {
 	return syncHtml(
@@ -21,6 +37,7 @@ export function renderAuthDialog(dialog: AppAuthDialog | undefined): string {
 			class="dialog"
 			aria-labelledby="auth-dialog-title"
 			closedby="any"
+			data-on:toggle={AUTH_DIALOG_TOGGLE}
 			data-on:close={`@post('${endpoints.authClose}', { payload: {} })`}
 			data-signals__ifmissing={JSON.stringify({
 				_authSearch: "",
@@ -36,7 +53,11 @@ export function renderAuthDialog(dialog: AppAuthDialog | undefined): string {
 
 export function renderAuthDialogContent(dialog: AppAuthDialog | undefined): string {
 	return syncHtml(
-		<div id="auth-dialog-content" class="dialog-wide">
+		<div
+			id="auth-dialog-content"
+			class="dialog-wide"
+			data-ignore-morph={dialog ? undefined : true}
+		>
 			{dialog ? renderDialogContent(dialog) : <div />}
 		</div>,
 	);
@@ -210,7 +231,7 @@ function renderAuthenticationFlow(dialog: AppAuthDialog): string {
 				{dialog.error && (
 					<p
 						class="error-foreground dialog-message"
-						data-init="window.piUi?.motion?.enter(el, { from: 'fade' })"
+						data-init={AUTH_ERROR_ENTER}
 						safe
 					>
 						{dialog.error}

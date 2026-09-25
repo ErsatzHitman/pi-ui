@@ -1,3 +1,4 @@
+import { holdFollow } from "./message-scroll.js";
 import { duration, easing, reducedMotion } from "./motion.js";
 
 // Accordion: the one sanctioned height animation (animate/RECIPES "Accordion"; flow-spec
@@ -42,6 +43,14 @@ export function nextDetailsIntent(isOpen, inFlight) {
 }
 
 /**
+ * Pure (unit-tested): whether a scroller sits at its bottom edge (within 2px), so an
+ * accordion inside it should grow upward with that edge held (message-scroll holdFollow).
+ */
+export function isPinnedScroller(scroller) {
+	return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 2;
+}
+
+/**
  * Pure (unit-tested): the settle step of a finished accordion. Only the latest intent may
  * set `open`; an older animation that a reversal cancelled must not.
  */
@@ -68,6 +77,13 @@ function toggleDetails(event) {
 	const wantOpen = nextDetailsIntent(details.open, current);
 	// Start from what is on screen: the in-flight height/opacity, or the resting state.
 	const fromHeight = details.getBoundingClientRect().height;
+	// Measured before `open` flips: a transcript pinned to its bottom keeps that edge fixed
+	// while the accordion moves, so the reply below never dips and climbs back (S5).
+	const messages = document.getElementById("messages");
+	const holdBottom =
+		messages instanceof HTMLElement &&
+		messages.contains(details) &&
+		isPinnedScroller(messages);
 	const fromOpacity = current
 		? Number.parseFloat(getComputedStyle(content).opacity)
 		: details.open
@@ -119,7 +135,7 @@ function toggleDetails(event) {
 	}
 	const entry = { animations, wantOpen };
 	running.set(details, entry);
-	Promise.all(animations.map((animation) => animation.finished)).then(
+	const settled = Promise.all(animations.map((animation) => animation.finished)).then(
 		() => {
 			if (!settleDetails(details, entry, running.get(details))) return;
 			running.delete(details);
@@ -129,6 +145,9 @@ function toggleDetails(event) {
 		},
 		() => {},
 	);
+	// Held through the settle too: a close's height only drops when `open` clears there
+	// (at once under reduced motion, which skips the height tween).
+	if (holdBottom) holdFollow({ finished: settled });
 }
 
 /** The summary's chevron: the context icon, or the PIUI list's `::before` marker. */

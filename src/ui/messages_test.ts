@@ -466,3 +466,40 @@ test("the pending response row enters live and is not a message", () => {
 	assertStringExcludes(html, "data-message-id");
 	assertStringExcludes(html, "message-thought");
 });
+
+test("a full render keeps a showing pending row in place without replaying its entry", () => {
+	const hint = { keys: "ctrl+k", description: "commands" };
+	const html = renderMessages(
+		[message("m-1", { role: "user" })],
+		hint,
+		false,
+		[],
+		true,
+		false,
+		{ pending: true },
+	);
+	assertStringIncludes(html, 'id="message-pending"');
+	assertEquals(dataEnterCount(html), 0);
+	// Right after #message-list (`#message-list + .message-pending`), before the trim button.
+	const pendingAt = html.indexOf('id="message-pending"');
+	assertEquals(html.split('id="message-pending"').length, 2);
+	assertStringIncludes(html, '</div><article id="message-pending"');
+	assert(pendingAt < html.indexOf('id="messages-trim"'), "before the trim button");
+	assertStringExcludes(renderPendingResponse({ enter: false }), "data-enter");
+	assertStringExcludes(
+		renderMessages([message("m-1", { role: "user" })], hint),
+		"message-pending",
+	);
+	assertStringExcludes(
+		renderMessages([], hint, false, [], true, false, { pending: true }),
+		"message-pending",
+	);
+});
+
+test("a session replace's incoming #messages is never born with the loading dim", () => {
+	const hint = { keys: "ctrl+k", description: "commands" };
+	const entering = renderMessages([], hint, false, [], true, false, { enter: true });
+	assertStringExcludes(entering, "data-class:messages-loading");
+	assertStringIncludes(entering, "data-attr:aria-busy");
+	assertStringIncludes(renderMessages([], hint), "data-class:messages-loading");
+});

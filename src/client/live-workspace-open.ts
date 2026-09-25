@@ -67,8 +67,16 @@ type SheetDrag = {
 	v: number;
 	active: boolean;
 	hold: Animation | undefined;
+	/** The scrim's opacity, following the sheet down (LW-V2-09). */
+	scrim: Animation | undefined;
 	raf: number;
 };
+
+/** Pure (unit-tested): the scrim fades with the sheet's downward travel, never above 1. */
+export function scrimOpacity(dy: number, height: number): number {
+	if (height <= 0) return 1;
+	return Math.min(1, Math.max(0, 1 - Math.max(0, dy) / height));
+}
 
 /**
  * Sheet mode only (≤48rem): the grabber and the header's empty area drag the sheet down to
@@ -79,13 +87,17 @@ type SheetDrag = {
 function bindSheetDrag(pane: HTMLElement): void {
 	const sheet = globalThis.matchMedia?.("(width <= 48rem)");
 	let drag: SheetDrag | undefined;
+	const backdrop = () => document.getElementById("live-workspace-backdrop");
 	const offsetNow = () =>
 		new DOMMatrixReadOnly(getComputedStyle(pane).transform).m42 || 0;
-	const setHeld = (hold: Animation | undefined, dy: number) => {
-		const effect = hold?.effect;
-		if (effect instanceof KeyframeEffect) {
-			effect.setKeyframes([{ transform: `translateY(${dy}px)` }]);
-		}
+	const setKeyframe = (animation: Animation | undefined, keyframe: Keyframe) => {
+		const effect = animation?.effect;
+		if (effect instanceof KeyframeEffect) effect.setKeyframes([keyframe]);
+	};
+	const setHeld = (current: SheetDrag, dy: number) => {
+		setKeyframe(current.hold, { transform: `translateY(${dy}px)` });
+		const height = pane.getBoundingClientRect().height;
+		setKeyframe(current.scrim, { opacity: scrimOpacity(dy, height) });
 	};
 	pane.addEventListener("pointerdown", (event) => {
 		if (!sheet?.matches || drag || event.button !== 0) return;
@@ -103,6 +115,7 @@ function bindSheetDrag(pane: HTMLElement): void {
 			v: 0,
 			active: false,
 			hold: undefined,
+			scrim: undefined,
 			raf: 0,
 		};
 	});
@@ -113,7 +126,11 @@ function bindSheetDrag(pane: HTMLElement): void {
 			drag.active = true;
 			// A re-grab mid-snap continues from where the sheet is drawn.
 			drag.base = offsetNow();
-			for (const animation of pane.getAnimations()) {
+			const scrim = backdrop();
+			for (const animation of [
+				...pane.getAnimations(),
+				...(scrim?.getAnimations() ?? []),
+			]) {
 				if (animation.id === "sheet-drag") animation.cancel();
 			}
 			pane.setPointerCapture(drag.id);
@@ -122,6 +139,18 @@ function bindSheetDrag(pane: HTMLElement): void {
 				fill: "forwards",
 				id: "sheet-drag",
 			});
+			// The scrim follows the sheet down instead of holding at 1 until release.
+			drag.scrim = scrim?.animate(
+				[
+					{
+						opacity: scrimOpacity(
+							drag.base,
+							pane.getBoundingClientRect().height,
+						),
+					},
+				],
+				{ duration: 0, fill: "forwards", id: "sheet-drag" },
+			);
 		}
 		const height = pane.getBoundingClientRect().height;
 		const dy = rubberBand(drag.base + event.clientY - drag.y, height);
@@ -133,7 +162,7 @@ function bindSheetDrag(pane: HTMLElement): void {
 			drag.raf = requestAnimationFrame(() => {
 				if (!drag) return;
 				drag.raf = 0;
-				setHeld(drag.hold, drag.dy);
+				setHeld(drag, drag.dy);
 			});
 		}
 	});
@@ -143,21 +172,39 @@ function bindSheetDrag(pane: HTMLElement): void {
 		drag = undefined;
 		cancelAnimationFrame(current.raf);
 		const hold = current.hold;
+		const scrim = current.scrim;
 		if (!current.active || !hold) return;
-		setHeld(hold, current.dy);
+		setHeld(current, current.dy);
 		const height = pane.getBoundingClientRect().height;
+		const scrimFrom = scrimOpacity(current.dy, height);
+		const scrimElement = backdrop();
 		if (
 			event.type !== "pointercancel" &&
 			sheetRelease(current.dy, height, current.v) === "dismiss"
 		) {
 			// Close as every other trigger does: the CSS translate exit (or the reduced-motion
-			// fade) runs while the held transform keeps the sheet at the finger's offset.
+			// fade) runs while the held transform keeps the sheet at the finger's offset. The
+			// scrim finishes its fade from where the finger left it, alongside the exit.
 			closeLiveWorkspace();
-			setTimeout(() => hold.cancel(), duration.paneOut + 60);
+			const scrimOut = scrimElement?.animate(
+				[{ opacity: scrimFrom }, { opacity: 0 }],
+				{
+					duration: duration.paneOut,
+					easing: easing.out,
+					fill: "forwards",
+					id: "sheet-drag",
+				},
+			);
+			scrim?.cancel();
+			setTimeout(() => {
+				hold.cancel();
+				scrimOut?.cancel();
+			}, duration.paneOut + 60);
 			return;
 		}
 		if (reducedMotion()) {
 			hold.cancel();
+			scrim?.cancel();
 			return;
 		}
 		pane.animate(
@@ -168,8 +215,14 @@ function bindSheetDrag(pane: HTMLElement): void {
 				id: "sheet-drag",
 			},
 		);
-		// Same frame: the snap-back animation takes over from the finger's offset.
+		scrimElement?.animate([{ opacity: scrimFrom }, { opacity: 1 }], {
+			duration: duration.lg,
+			easing: easing.drawer,
+			id: "sheet-drag",
+		});
+		// Same frame: the snap-back animations take over from the finger's offset.
 		hold.cancel();
+		scrim?.cancel();
 	};
 	pane.addEventListener("pointerup", end);
 	pane.addEventListener("pointercancel", end);
@@ -194,6 +247,8 @@ export function bindLiveWorkspace() {
 		const pane = document.getElementById("live-workspace");
 		if (!pane) return;
 		if (open) {
+			// Cleared before the focus below: an inert pane cannot take it (C6).
+			pane.inert = false;
 			requestAnimationFrame(() => {
 				// preventScroll: the pane is still sliding in from off-screen; a scroll-into-view
 				// here lurched the whole app sideways (LW-P0-FOCUS-SCROLL-LURCH).
@@ -214,6 +269,9 @@ export function bindLiveWorkspace() {
 		if (pane.contains(document.activeElement)) {
 			document.getElementById("live-workspace-toggle")?.focus();
 		}
+		// The pane keeps `display` through its slide-out: after focus has left it, take it out
+		// of the Tab order and the accessibility tree until it reopens (C6).
+		pane.inert = true;
 	};
 	const unregisterSurface = registerDismissibleSurface({
 		// A back press already consumed this surface's history entry; don't pop another.

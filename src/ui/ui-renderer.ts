@@ -76,6 +76,9 @@ type TranscriptReplaceReason = "session" | "code-theme";
  * place under a response article that just took its slot, or where it is (turn over). */
 const replacePendingScript = "window.piUi.messageScroll.retirePending(true)";
 const retirePendingScript = "window.piUi.messageScroll.retirePending()";
+/** Gates nested entries until the replaced #messages binds (message-scroll.js). */
+const quietTranscriptHoldScript =
+	"window.piUi.messageScroll.quietTranscript({ hold: true })";
 
 type DirtyRegions = {
 	pickers: boolean;
@@ -117,6 +120,13 @@ export class UiRenderer implements AppStorePresentation {
 	 * the turn ending (abort, error, settle). Never part of a history render.
 	 */
 	private pendingResponse: { shown: boolean; sawRunning: boolean } | undefined;
+	/**
+	 * A session replace's incoming #messages is still entering (`data-enter`, never
+	 * `.messages-loading`): follow-up transcript morphs keep the marker until the
+	 * session has loaded or its first message is appended, so an empty-transcript morph
+	 * never strips it (nor re-binds the loading dim) before the rise has run.
+	 */
+	private transcriptEnterPending = false;
 
 	constructor(
 		private readonly store: AppStore,
@@ -270,18 +280,30 @@ export class UiRenderer implements AppStorePresentation {
 				this.effectSignalOverrides(effects),
 			);
 			const replace = this.replaceTranscriptOnCommit;
+			if (replace === "session") this.transcriptEnterPending = true;
+			else if (state.sessionTransition.status !== "loading")
+				this.transcriptEnterPending = false;
 			if (replace) {
-				// Signals first: the incoming #messages must not be born with
-				// `messages-loading` (it would start dimmed and fade up — SP-03).
-				this.hub.patchView("", signals, []);
+				// Signals first: the incoming #messages is never born `.messages-loading`
+				// (SP-03). Its nested entries (stopped note, tool output, recent-session rows)
+				// must not replay: a session replace is gated by its own `data-enter`
+				// (messages.css `#messages:not([data-enter])`), from its first style; a
+				// code-theme replace has no marker, so the transcript is quieted before the
+				// new subtree lands, released by the new #messages' data-init (bindResize).
+				this.hub.patchView(
+					"",
+					signals,
+					replace === "code-theme" ? [quietTranscriptHoldScript] : [],
+				);
 				this.hub.replaceElement(
 					this.renderTranscript(this.projectState(state), {
 						enter: replace === "session",
 					}),
 					"#messages",
 				);
-				// The replace dropped any pending row; a still-waiting turn re-appends it.
-				if (this.pendingResponse) this.pendingResponse.shown = false;
+				// A still-showing pending row was rendered into the replace in place
+				// (`pending`), so it neither blinks nor re-enters; a session replace
+				// already dropped the wait (transcriptReplacing).
 				this.hub.patchView("", "{}", this.mainEffectScripts(effects));
 			} else {
 				this.hub.patchView(
@@ -291,7 +313,12 @@ export class UiRenderer implements AppStorePresentation {
 				);
 			}
 			this.syncPendingResponse(Boolean(state.activityText));
-			this.patchDirtyRegions(state, effects, dirtyRegions, replace === "session");
+			this.patchDirtyRegions(
+				state,
+				effects,
+				dirtyRegions,
+				this.transcriptEnterPending,
+			);
 		}
 		this.replaceTranscriptOnCommit = undefined;
 		if (this.hub.clientCount > 0)
@@ -301,8 +328,8 @@ export class UiRenderer implements AppStorePresentation {
 		snapshot: AppStateSnapshot,
 		effects: readonly UiCommitEffect[],
 		dirty: DirtyRegions,
-		/** This commit replaced the transcript for a session: an empty-transcript morph
-		 * below must keep the replace's `data-enter`, or its fade never starts. */
+		/** A session replace's transcript is still entering: an empty-transcript morph
+		 * below must keep its `data-enter`, or its rise never starts (or is cut short). */
 		enterTranscript = false,
 	): void {
 		if (dirty.extensionElements) {
@@ -411,7 +438,11 @@ export class UiRenderer implements AppStorePresentation {
 		}
 	}
 	messageAppended(id: string): void {
-		if (this.hub.clientCount === 0) return;
+		if (this.hub.clientCount === 0) {
+			// Any append ends the wait, seen or not: a reconnect must not restore the row.
+			this.pendingResponse = undefined;
+			return;
+		}
 		this.messages.messageAppended(id);
 		this.appendMessage(id);
 	}
@@ -438,6 +469,8 @@ export class UiRenderer implements AppStorePresentation {
 		// Any live append ends the wait: a response article replaces the row, and a new
 		// user message re-arms it below itself (appendMessage).
 		this.pendingResponse = undefined;
+		// The first message ends a session replace's entry: it re-renders #messages.
+		this.transcriptEnterPending = false;
 		if (this.store.messages.length === 1) {
 			this.hub.patchElement(
 				this.messages.renderMessagesElement({ enteringId: id }),
@@ -547,7 +580,10 @@ export class UiRenderer implements AppStorePresentation {
 		this.requestCommit();
 	}
 	streamingMessageStarted(id: string): void {
-		if (this.hub.clientCount === 0) return;
+		if (this.hub.clientCount === 0) {
+			this.pendingResponse = undefined;
+			return;
+		}
 		this.messages.streamingMessageStarted(id);
 		this.appendMessage(id);
 	}
@@ -556,6 +592,8 @@ export class UiRenderer implements AppStorePresentation {
 		this.messages.streamingMessageChanged();
 	}
 	sessionTransitionChanged(scrollToBottom: boolean): void {
+		if (this.store.sessionTransition.status !== "loading")
+			this.transcriptEnterPending = false;
 		if (this.hub.clientCount === 0) return;
 		this.hub.patchView(
 			"",
@@ -622,7 +660,15 @@ export class UiRenderer implements AppStorePresentation {
 			snapshot.sessions,
 			snapshot.models.some((model) => model.configured),
 			snapshot.sessionCatalogLoading,
-			{ enter },
+			// A showing pending row is part of every full render (reconnect, code-theme
+			// replace), never a history one: it is only ever shown during a live wait, and
+			// a turn that ended while no client was connected no longer waits.
+			{
+				enter,
+				pending:
+					this.pendingResponse?.shown === true &&
+					Boolean(snapshot.activityText),
+			},
 		);
 	}
 	private renderAppElements(snapshot: AppStateSnapshot): string {

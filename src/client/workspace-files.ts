@@ -13,7 +13,7 @@ import {
 	type GitStatusEntry,
 } from "@pierre/trees";
 
-import { enter, motionReady } from "../../static/app/motion.js";
+import { enter, motionReady, reducedMotion } from "../../static/app/motion.js";
 import { getPierreThemes } from "../pierre-theme.ts";
 import { errorMessage } from "../utils/errors.ts";
 import { workspaceTreeStyle, workspaceTreeUnsafeCss } from "../workspace-review-tree.ts";
@@ -27,8 +27,13 @@ import { revealTreePath, syncWorkspaceTreePaths } from "./workspace-tree.ts";
 
 /** A selection this soon after the previous one (j/k stepping) swaps its content instantly. */
 export const selectionFadeGapMs = 150;
-/** Upper bound on holding the Files main hidden while the first tree and file load. */
-const loadHoldMs = 1500;
+/**
+ * Upper bound on holding the Files main hidden while the first tree and file load: the
+ * same 200ms reveal-after threshold as base.css. A fast load resolves in one fade; a slow
+ * one fades the main (and its "Loading files…" status) in at 200ms instead of leaving it
+ * blank.
+ */
+const loadHoldMs = 200;
 
 /** Pure (unit-tested): whether a file selection at `now` fades the new content in. */
 export function selectionFades(now: number, lastSelectAt: number): boolean {
@@ -396,6 +401,12 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 
 	function holdForLoad(): void {
 		if (loadHold || !motionReady()) return;
+		if (reducedMotion()) {
+			// No hold: the main (and its loading status) shows at once, and the content that
+			// follows swaps in place like after an expired hold, with no opacity dip.
+			loadHoldExpired = true;
+			return;
+		}
 		loadHoldExpired = false;
 		const hold = mainHost.animate([{ opacity: 0 }, { opacity: 0 }], {
 			duration: loadHoldMs,

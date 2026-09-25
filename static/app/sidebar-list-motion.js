@@ -40,6 +40,16 @@ export function diffRows(previous, next) {
 }
 
 /**
+ * Pure (unit-tested): the FLIP curve for a batch. A removal closes its gap on ease-out, so
+ * the rows below start moving in the ghost's first frames instead of idling on the in-out
+ * curve's slow start, which left a hole beside a ghost already gone (SP-11). A pure reorder
+ * keeps the symmetric in-out glide.
+ */
+export function flipEasing(removedCount) {
+	return removedCount > 0 ? easing.out : easing.inOut;
+}
+
+/**
  * Pure (unit-tested): the ghost for a removed row. A delete-pending row (B-X3) was dimmed, and
  * the clone loses `data-deleting`, so the ghost starts from the dimmed opacity instead of
  * flashing back to 1. Reduced motion: a shorter fade (ghostExit drops the movement itself).
@@ -48,7 +58,8 @@ export function removedRowGhost(row, reduce) {
 	return {
 		translateY: "0",
 		scale: 0.97,
-		ms: reduce ? duration.xs : duration.sm,
+		// md, not sm: the ghost fades across the gap's collapse instead of ahead of it (SP-11).
+		ms: reduce ? duration.xs : duration.md,
 		fromOpacity: row.hasAttribute("data-deleting") ? deletingOpacity : 1,
 	};
 }
@@ -99,6 +110,11 @@ export function bindSessionListMotion() {
 	// A closed dialog has no boxes: forget the layout on close and re-measure once it opens, so
 	// the first change after opening already animates (and the first population never does).
 	sidebar.addEventListener("toggle", refresh);
+	// The desktop sidebar is restored open (and rendered with its rows) before this binds, so
+	// its toggle already fired: measure now, or the first delete after a load has no layout to
+	// diff against and the row vanishes. An empty SSR list stays unmeasured, so the first
+	// catalog population still never animates.
+	refresh();
 
 	new MutationObserver((records) => {
 		const list = listElement();
@@ -112,6 +128,7 @@ export function bindSessionListMotion() {
 		const origin = list.getBoundingClientRect();
 
 		if (!reduce) {
+			const flipCurve = flipEasing(removed.length);
 			for (const { id, dy } of moved) {
 				const row = document.getElementById(id);
 				const layoutTop = next.get(id)?.top;
@@ -132,7 +149,7 @@ export function bindSessionListMotion() {
 					[{ transform: `translateY(${offset}px)` }, { transform: "none" }],
 					{
 						duration: duration.lg,
-						easing: easing.inOut,
+						easing: flipCurve,
 						id: flipId,
 					},
 				);

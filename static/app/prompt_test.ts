@@ -5,6 +5,7 @@ import { assertEquals } from "#testing/assertions";
 import {
 	fadesEmptyState,
 	placeNoticeAbovePromptRow,
+	promptGhostKeyframes,
 	promptGhostStyle,
 } from "./prompt.js";
 
@@ -61,8 +62,31 @@ test("the send ghost copies the textarea box and type metrics into a fixed, iner
 	);
 });
 
-test("a /copy clear keeps the empty state; a real send fades it", () => {
+test("a slash command keeps the empty state; a real send fades it", () => {
 	assertEquals(fadesEmptyState("/copy"), false);
 	assertEquals(fadesEmptyState("  /copy "), false);
+	assertEquals(fadesEmptyState("/model"), false);
 	assertEquals(fadesEmptyState("hello"), true);
+	assertEquals(fadesEmptyState("hello /model"), true);
+	assertEquals(fadesEmptyState(""), true);
+});
+
+test("a send ghost holds lifted at 0.35 until its message lands; a slash command's exits", () => {
+	const held = promptGhostKeyframes(false, true);
+	assertEquals(held.lift, [
+		{ opacity: 1, transform: "none" },
+		{ opacity: 0.35, transform: "translateY(-0.5rem)" },
+	]);
+	assertEquals(held.exit, [{ opacity: 0, transform: "translateY(-0.5rem)" }]);
+	assertEquals(promptGhostKeyframes(false, false).lift[1], {
+		opacity: 0,
+		transform: "translateY(-0.5rem)",
+	});
+});
+
+test("under reduced motion the send ghost only dims: no transform", () => {
+	const held = promptGhostKeyframes(true, true);
+	assertEquals(held.lift[1], { opacity: 0.35 });
+	assertEquals(held.exit, [{ opacity: 0 }]);
+	assertEquals(promptGhostKeyframes(true, false).lift[1], { opacity: 0 });
 });

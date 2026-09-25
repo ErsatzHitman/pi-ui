@@ -1,4 +1,4 @@
-import { duration, easing, reducedMotion } from "../../static/app/motion.js";
+import { duration, easing, enter, reducedMotion } from "../../static/app/motion.js";
 import {
 	formatAdaptiveDateTime,
 	formatExpandedDateTime,
@@ -90,6 +90,56 @@ export function createDetailClearer(
 	return { cancel, schedule };
 }
 
+/** How long a commit sheet waits for its detail before opening without it. */
+export const detailOpenCapMs = 150;
+
+type DetailSheet = Pick<HTMLElement, "hidden"> & {
+	style: Pick<CSSStyleDeclaration, "minBlockSize">;
+};
+
+/**
+ * Unit-tested: opens the commit sheet already holding its commit, so the slide carries the
+ * full-height sheet instead of a bare header that snaps taller once it has landed. Waits up
+ * to `capMs` for `load`: in time, `render` fills the sheet and it opens in the same task. On
+ * a miss the sheet opens at the cap with `showLoading`'s placeholder, holding `heldHeight`
+ * (its last measured height, clamped to the sheet's 60% max) as a min-block-size; the late
+ * content then swaps in under `fadeIn` instead of growing the sheet. `isCurrent` drops a
+ * load that a newer selection or a close has superseded.
+ */
+export async function openDetailWhenLoaded<T>(options: {
+	capMs: number;
+	detail: DetailSheet;
+	fadeIn: () => void;
+	heldHeight: number;
+	isCurrent: () => boolean;
+	load: Promise<T>;
+	render: (value: T) => void;
+	showLoading: () => void;
+}): Promise<void> {
+	const { capMs, detail, heldHeight, isCurrent } = options;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const capped = new Promise<undefined>((resolve) => {
+		timer = setTimeout(() => resolve(undefined), capMs);
+	});
+	const early = await Promise.race([options.load.then((value) => ({ value })), capped]);
+	clearTimeout(timer);
+	if (!isCurrent()) return;
+	if (early) {
+		detail.style.minBlockSize = "";
+		options.render(early.value);
+		detail.hidden = false;
+		return;
+	}
+	detail.style.minBlockSize = heldHeight > 0 ? `min(${heldHeight}px, 60%)` : "";
+	options.showLoading();
+	detail.hidden = false;
+	const late = await options.load;
+	if (!isCurrent()) return;
+	options.render(late);
+	detail.style.minBlockSize = "";
+	options.fadeIn();
+}
+
 /** Lower sorts first: the current branch and main lead, tags trail. */
 function refPriority(ref: GitGraphRef): number {
 	if (ref.current) return 0;
@@ -126,6 +176,8 @@ export function createWorkspaceGitGraph(
 	const detailClearer = createDetailClearer(detail, () => detailOpen, duration.md + 40);
 	const detailCache = new Map<string, WorkspaceGitGraphCommitDetail>();
 	let detailRequest = 0;
+	// The sheet's height when it last closed: a slow reopen holds it (openDetailWhenLoaded).
+	let lastDetailHeight = 0;
 	// Rows "Load more" asked for. Live refreshes (the workspace watcher, e.g. every file
 	// an agent writes) publish the default-sized window; while this is set they are
 	// re-read at this size instead, so the extra history (and the scroll position in it)
@@ -488,27 +540,44 @@ export function createWorkspaceGitGraph(
 		}
 	}
 
+	/**
+	 * Renders the commit before the sheet opens (openDetailWhenLoaded), so its slide carries
+	 * the full-height sheet. An already-open sheet keeps the previous commit until the new
+	 * one arrives or the cap passes.
+	 */
 	async function showDetail(hash: string): Promise<void> {
+		const requestId = ++detailRequest;
 		const cached = detailCache.get(hash);
 		if (cached) {
+			detail.style.minBlockSize = "";
 			renderDetail(cached);
+			detail.hidden = false;
 			return;
 		}
-		detail.hidden = false;
-		detail.replaceChildren(loadingParagraph("Loading commit…"));
-		const requestId = ++detailRequest;
-		const loaded = await api.loadCommit(hash);
-		if (requestId !== detailRequest || selectedHash !== hash) return;
-		if (!loaded) {
-			detail.replaceChildren(loadingParagraph("Unable to load commit"));
-			return;
-		}
-		detailCache.set(hash, loaded);
-		renderDetail(loaded);
+		await openDetailWhenLoaded({
+			capMs: detailOpenCapMs,
+			detail,
+			fadeIn: () => {
+				for (const child of detail.children) enter(child, { from: "fade" });
+			},
+			heldHeight: detail.hidden ? lastDetailHeight : detail.offsetHeight,
+			isCurrent: () =>
+				requestId === detailRequest && selectedHash === hash && detailOpen,
+			load: api.loadCommit(hash),
+			render: (loaded) => {
+				if (!loaded) {
+					detail.replaceChildren(loadingParagraph("Unable to load commit"));
+					return;
+				}
+				detailCache.set(hash, loaded);
+				renderDetail(loaded);
+			},
+			showLoading: () =>
+				detail.replaceChildren(loadingParagraph("Loading commit…")),
+		});
 	}
 
 	function renderDetail(value: WorkspaceGitGraphCommitDetail): void {
-		detail.hidden = false;
 		detail.replaceChildren();
 		const heading = document.createElement("div");
 		heading.className = "review-detail-heading";
@@ -598,6 +667,7 @@ export function createWorkspaceGitGraph(
 
 	function closeDetail(): void {
 		detailOpen = false;
+		if (!detail.hidden) lastDetailHeight = detail.offsetHeight;
 		detail.hidden = true;
 		// The sheet slides out with its content (workspace-review.css); empty it only once it
 		// has left, and only if nothing reopened it meanwhile.

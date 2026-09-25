@@ -56,8 +56,13 @@ export type RenderMessagesOptions = {
 	/** The one live-appended message to mark `data-enter` (first message of a chat). */
 	enteringId?: string;
 	/** Mark `#messages` itself `data-enter`: a session replace fades the new transcript in
-	 * (flow-critique #2/#3). Never set for code-theme replaces, reconnects or full views. */
+	 * (flow-critique #2/#3). Never set for code-theme replaces, reconnects or full views.
+	 * The incoming node is never born `.messages-loading`: the loading dim belongs to the
+	 * outgoing node, and a follow-up render without `enter` restores the binding. */
 	enter?: boolean;
+	/** The live turn's pending "thinking..." row is showing (ui-renderer.ts): a full
+	 * render (reconnect, code-theme replace) keeps it, without replaying its entry. */
+	pending?: boolean;
 };
 
 export function renderMessages(
@@ -75,10 +80,14 @@ export function renderMessages(
 			class={messages.length === 0 ? "messages-empty" : undefined}
 			data-enter={options.enter === true}
 			data-show="!$_sessionTransitionVisible"
-			data-class:messages-loading="
+			data-class:messages-loading={
+				options.enter === true
+					? undefined
+					: `
 				$_sessionLoading ||
 				$_sessionTransitionStatus === 'loading'
-			"
+			`
+			}
 			data-attr:aria-busy="
 				$_sessionLoading ||
 				$_sessionTransitionStatus === 'loading' ? 'true' : 'false'
@@ -123,6 +132,9 @@ export function renderMessages(
 									: renderMessage(message),
 							)}
 				</div>
+				{options.pending === true &&
+					messages.length > 0 &&
+					renderPendingResponse({ enter: false })}
 				<button
 					id="messages-trim"
 					type="button"
@@ -158,13 +170,17 @@ export function renderOlderMessagesPatch(messages: readonly AppMessage[]): strin
  * not a message, and is never part of a history render. Not `.message-thought` either:
  * minimal mode's "hide every earlier activity row" rule must not snap it away before the
  * crossfade; `.message + .message` already gives it the thought row's exact offset.
+ * `enter: false`: a full render of a row that is already showing (reconnect, code-theme
+ * replace) keeps it in place without replaying its entry.
  */
-export function renderPendingResponse(): string {
+export function renderPendingResponse({
+	enter = true,
+}: { enter?: boolean } = {}): string {
 	return syncHtml(
 		<article
 			id="message-pending"
 			class="message message-narrative thought-foreground message-pending"
-			data-enter
+			data-enter={enter}
 			aria-hidden="true"
 		>
 			<div class="tool-timeline-item minimal-activity">

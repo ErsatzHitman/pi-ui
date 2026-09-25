@@ -317,8 +317,9 @@
 		backdrop-filter: blur(2px);
 		pointer-events: auto;
 
-		/* Fades in and out (exit 120ms = entry): `display` is transitioned allow-discrete so
-		   `[hidden]` keeps it rendered for the fade; `.btn`'s list is restated. */
+		/* Fades in and out (exit 80ms, faster than the 120ms entry): `display` is transitioned
+		   allow-discrete so `[hidden]` keeps it rendered for the fade; `.btn`'s list is
+		   restated. */
 		transition:
 			background-color var(--duration-sm) ease,
 			border-color var(--duration-sm) ease,
@@ -333,6 +334,7 @@
 	}
 	.messages-latest[hidden] {
 		opacity: 0;
+		transition-duration: var(--duration-xs);
 	}
 	@media (hover: hover) and (pointer: fine) {
 		.messages-latest:not(:disabled):hover {

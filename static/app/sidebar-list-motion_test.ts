@@ -2,8 +2,8 @@ import { test } from "bun:test";
 
 import { assertEquals } from "#testing/assertions";
 
-import { duration } from "./motion.js";
-import { diffRows, removedRowGhost } from "./sidebar-list-motion.js";
+import { duration, easing } from "./motion.js";
+import { diffRows, flipEasing, removedRowGhost } from "./sidebar-list-motion.js";
 
 type Box = { top: number; left: number; width: number; height: number };
 
@@ -89,7 +89,7 @@ test("a removed delete-pending row ghosts out from its dimmed opacity (B-X0/B-X3
 	assertEquals(removedRowGhost(row(["data-deleting"]), false), {
 		translateY: "0",
 		scale: 0.97,
-		ms: duration.sm,
+		ms: duration.md,
 		fromOpacity: 0.45,
 	});
 });
@@ -97,4 +97,9 @@ test("a removed delete-pending row ghosts out from its dimmed opacity (B-X0/B-X3
 test("a removed row that was not pending ghosts from full opacity; reduced motion is shorter", () => {
 	assertEquals(removedRowGhost(row([]), false).fromOpacity, 1);
 	assertEquals(removedRowGhost(row([]), true).ms, duration.xs);
+});
+
+test("a removal closes its gap on ease-out; a pure reorder keeps the in-out glide (SP-11)", () => {
+	assertEquals(flipEasing(1), easing.out);
+	assertEquals(flipEasing(0), easing.inOut);
 });

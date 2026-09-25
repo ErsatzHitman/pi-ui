@@ -156,35 +156,79 @@ function flipTargets(): HTMLElement[] {
 	return [...document.querySelectorAll<HTMLElement>(flipSelector)];
 }
 
+/** One target's box, read once per layout. */
+export type PaneRect = { left: number; width: number };
+
+function rects(targets: readonly HTMLElement[]): PaneRect[] {
+	return targets.map((element) => {
+		const { left, width } = element.getBoundingClientRect();
+		return { left, width };
+	});
+}
+
 function lefts(targets: readonly HTMLElement[]): number[] {
 	return targets.map((element) => element.getBoundingClientRect().left);
 }
 
-function cancelFlips(targets: readonly HTMLElement[]): void {
-	for (const element of targets) {
-		for (const animation of element.getAnimations()) {
-			if (animation.id === flipId) animation.cancel();
-		}
-	}
+/**
+ * The live FLIP animations, kept as the objects `animate()` returned. Cancelling through
+ * `element.getAnimations()` flushed style once per target inside the toggle task (B2).
+ */
+let flips: Animation[] = [];
+
+function cancelFlips(): void {
+	for (const animation of flips) animation.cancel();
+	flips = [];
 }
 
-function lockColumns(targets: readonly HTMLElement[], rects: readonly DOMRect[]): void {
+function flipsRunning(): boolean {
+	return flips.some(
+		(animation) =>
+			animation.playState === "running" || animation.playState === "paused",
+	);
+}
+
+function chatLocked(): boolean {
+	return document.getElementById("chat-pane")?.hasAttribute("data-pane-lock") === true;
+}
+
+/** Pure: the width lock an open needs, or undefined when the column keeps its width. */
+export function lockWidths(
+	targets: readonly Pick<HTMLElement, "matches">[],
+	final: readonly PaneRect[],
+	current: readonly PaneRect[] | undefined,
+): { stack?: number; prompt?: number } | undefined {
+	const indexOf = (selector: string) =>
+		targets.findIndex((element) => element.matches(selector));
+	const stackIndex = indexOf("#messages > .messages-stack");
+	const promptIndex = indexOf("#prompt-box");
+	const stack = final[stackIndex]?.width;
+	const prompt = final[promptIndex]?.width;
+	const changed = (index: number, width: number | undefined) => {
+		const now = current?.[index]?.width;
+		return width !== undefined && (now === undefined || Math.abs(width - now) >= 1);
+	};
+	if (current && !changed(stackIndex, stack) && !changed(promptIndex, prompt)) {
+		return undefined;
+	}
+	return { stack, prompt };
+}
+
+function lockColumns(widths: { stack?: number; prompt?: number }): void {
 	const chat = document.getElementById("chat-pane");
 	if (!chat) return;
-	const widthOf = (selector: string) => {
-		const index = targets.findIndex((element) => element.matches(selector));
-		return index >= 0 ? rects[index]?.width : undefined;
-	};
-	const stack = widthOf("#messages > .messages-stack");
-	const prompt = widthOf("#prompt-box");
-	if (stack !== undefined) chat.style.setProperty("--pane-lock-stack", `${stack}px`);
-	if (prompt !== undefined) chat.style.setProperty("--pane-lock-prompt", `${prompt}px`);
+	if (widths.stack !== undefined) {
+		chat.style.setProperty("--pane-lock-stack", `${widths.stack}px`);
+	}
+	if (widths.prompt !== undefined) {
+		chat.style.setProperty("--pane-lock-prompt", `${widths.prompt}px`);
+	}
 	chat.setAttribute("data-pane-lock", "");
 }
 
 function clearLocks(): void {
 	const chat = document.getElementById("chat-pane");
-	if (!chat) return;
+	if (!chat?.hasAttribute("data-pane-lock")) return;
 	chat.removeAttribute("data-pane-lock");
 	chat.style.removeProperty("--pane-lock-stack");
 	chat.style.removeProperty("--pane-lock-prompt");
@@ -192,110 +236,228 @@ function clearLocks(): void {
 
 let generation = 0;
 let swapTimer: ReturnType<typeof setTimeout> | undefined;
+let swapToken = 0;
 
 /** Commits an open: drops the hold, clears the width lock and ends the FLIP, in one block,
- * so the next frame renders the final layout with the content exactly where the FLIP ended. */
+ * so the next frame renders the final layout with the content exactly where the FLIP ended.
+ * Writes only what is set, so a settled page takes no relayout here. */
 export function releasePane(): void {
-	document.getElementById("app")?.removeAttribute("data-reserve-hold");
+	const app = document.getElementById("app");
+	if (app?.hasAttribute("data-reserve-hold")) app.removeAttribute("data-reserve-hold");
 	clearLocks();
-	cancelFlips(flipTargets());
+	cancelFlips();
 }
 
+function clearSwap(): void {
+	swapToken++;
+	clearTimeout(swapTimer);
+	swapTimer = undefined;
+	document.getElementById("app")?.removeAttribute("data-pane-swap");
+}
+
+/** The first CSS transition of `property` on `element` (flushes style, see paneSlide). */
+function cssTransition(element: Element | null, property: string): Animation | undefined {
+	return element
+		?.getAnimations()
+		.find(
+			(animation) =>
+				animation instanceof CSSTransition &&
+				animation.transitionProperty === property,
+		);
+}
+
+/**
+ * Marks a Sessions ⇄ Live swap. The attribute stays until the incoming pane's fade has
+ * actually run: a wall-clock timer armed in the toggle task expired during a stalled first
+ * frame and the panes slid instead of crossfading (B3). With a fade to follow, its
+ * `finished` (which also settles on cancel) is the only clock: a timer can fire while
+ * rendering is stalled, before the fade's end (and the outgoing pane's `display: none`) is
+ * processed, and dropping the swap then starts a translate transition on the outgoing pane.
+ * After a stalled frame both fades end in the same style update, so the swap is dropped two
+ * frames after `finished`, once a style update has applied the outgoing pane's
+ * `display: none`. With no fade, a fallback timer starts from the first frame.
+ */
 function markSwap(): void {
 	const app = document.getElementById("app");
 	if (!app) return;
 	app.setAttribute("data-pane-swap", "");
+	const token = ++swapToken;
 	clearTimeout(swapTimer);
-	swapTimer = setTimeout(
-		() => app.removeAttribute("data-pane-swap"),
-		duration.paneIn + 50,
-	);
+	swapTimer = undefined;
+	const clear = () => {
+		if (token === swapToken) clearSwap();
+	};
+	requestAnimationFrame(() => {
+		if (token !== swapToken) return;
+		const incoming = app.classList.contains("live-workspace-open")
+			? "live-workspace"
+			: "session-sidebar";
+		const fade = cssTransition(document.getElementById(incoming), "opacity");
+		const afterStyle = () =>
+			requestAnimationFrame(() => requestAnimationFrame(clear));
+		if (fade) fade.finished.then(afterStyle, afterStyle);
+		else swapTimer = setTimeout(clear, duration.paneIn + 50);
+	});
 }
 
-/** Resolves when the pane's own slide ends (or is cancelled), with a timer fallback. */
-function paneSettled(pane: Pane): Promise<void> {
-	return new Promise((resolve) => {
-		const timer = setTimeout(resolve, duration.paneIn + 100);
-		const done = () => {
-			clearTimeout(timer);
-			resolve();
-		};
-		// getAnimations() flushes style, so the slide's transition exists by now.
-		const slide = document
-			.getElementById(paneElementIds[pane])
-			?.getAnimations()
-			.find(
-				(animation) =>
-					animation instanceof CSSTransition &&
-					animation.transitionProperty === "translate",
-			);
-		slide?.finished.then(done, done);
+/** The pane's own slide. `getAnimations()` flushes style, and under the chat's size
+ * container queries a style flush is a layout: call it only where layout is clean. */
+function paneSlide(pane: Pane): Animation | undefined {
+	return cssTransition(document.getElementById(paneElementIds[pane]), "translate");
+}
+
+/**
+ * Puts the FLIPs on the pane slide's clock: same start time and same duration, so a
+ * reversed (shortened) slide on a reopen mid-close and the content move together (B4).
+ * A reversed transition takes its start time from the timeline at once, while a new WAAPI
+ * animation waits for the next frame, so syncing only after `ready` left the content one
+ * frame behind the pane.
+ */
+function syncFlips(slide: Animation, own: readonly Animation[]): void {
+	const slideMs = Number(slide.effect?.getComputedTiming().duration);
+	for (const flip of own) {
+		if (Number.isFinite(slideMs) && slideMs > 0) {
+			flip.effect?.updateTiming({ duration: slideMs });
+		}
+		if (slide.startTime !== null) flip.startTime = slide.startTime;
+	}
+}
+
+/**
+ * Follows the pane's own slide: syncs the FLIPs to it and, for an open, commits when it
+ * ends (or is cancelled). `found` is the slide looked up right after the change's last
+ * forced layout (style is clean there, so the lookup costs no style pass); without one the
+ * lookup runs in the first frame. The fallback timer starts only once the slide has started,
+ * so a stalled first frame cannot release the reserve before the slide ran (B3).
+ */
+function followSlide(
+	pane: Pane,
+	gen: number,
+	own: readonly Animation[],
+	commit: boolean,
+	found: Animation | undefined,
+) {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const done = () => {
+		clearTimeout(timer);
+		if (commit && gen === generation) releasePane();
+	};
+	const fallback = () => {
+		if (commit && gen === generation) timer = setTimeout(done, duration.paneIn + 100);
+	};
+	const follow = (slide: Animation) => {
+		syncFlips(slide, own);
+		if (commit) slide.finished.then(done, done);
+		slide.ready.then(
+			() => {
+				if (gen !== generation) return;
+				syncFlips(slide, own);
+				fallback();
+			},
+			() => {},
+		);
+	};
+	if (found) {
+		follow(found);
+		return;
+	}
+	requestAnimationFrame(() => {
+		if (gen !== generation) return;
+		const slide = paneSlide(pane);
+		if (slide) follow(slide);
+		else fallback();
 	});
+}
+
+function animateFlips(
+	targets: readonly HTMLElement[],
+	deltas: readonly ({ from: number; to: number } | undefined)[],
+	options: KeyframeAnimationOptions,
+): Animation[] {
+	const own: Animation[] = [];
+	for (const [index, element] of targets.entries()) {
+		const delta = deltas[index];
+		if (!delta) continue;
+		const to = delta.to === 0 ? "none" : `translateX(${delta.to}px)`;
+		own.push(
+			element.animate(
+				[{ transform: `translateX(${delta.from}px)` }, { transform: to }],
+				{ ...options, id: flipId },
+			),
+		);
+	}
+	flips.push(...own);
+	return own;
 }
 
 /**
  * Open `pane`: the pane slides over the still-wide chat (reserve withheld), the content FLIPs
- * from `visual` (where the eye is, including any in-flight FLIP) to its final x under a width
- * lock, and the reserve lands under the opaque pane when the slide ends.
+ * from `visual` (where the eye is, including any in-flight FLIP) to its final x, and the
+ * reserve lands under the opaque pane when the slide ends.
+ *
+ * Cost (B2): one forced layout (the real post-open layout) in the toggle task. A second one
+ * runs only when the column changes width (the lock re-wraps it) or when `visual` is not
+ * the held layout (`settled` false: a FLIP, hold or lock was live when it was read).
  */
 export function openPane(
 	pane: Pane,
 	targets: readonly HTMLElement[],
-	visual: readonly number[],
+	visual: readonly PaneRect[],
+	settled = false,
 ): void {
 	const app = document.getElementById("app");
 	if (!app) return;
 	const gen = ++generation;
-	cancelFlips(targets);
+	cancelFlips();
 	clearLocks();
 	app.removeAttribute("data-reserve-hold");
-	const final = targets.map((element) => element.getBoundingClientRect());
+	const final = rects(targets);
+	// Style and layout are clean here and the slide already exists: a lookup after the hold
+	// write would flush style, and style under a size container query is a layout.
+	const slide = paneSlide(pane);
 	app.setAttribute("data-reserve-hold", pane);
-	lockColumns(targets, final);
-	const base = lefts(targets);
-	for (const [index, element] of targets.entries()) {
-		const from = (visual[index] ?? base[index] ?? 0) - (base[index] ?? 0);
-		const to = (final[index]?.left ?? 0) - (base[index] ?? 0);
-		element.animate(
-			[
-				{ transform: `translateX(${from}px)` },
-				{ transform: `translateX(${to}px)` },
-			],
-			{
-				duration: duration.paneIn,
-				easing: easing.drawer,
-				fill: "forwards",
-				id: flipId,
-			},
-		);
-	}
-	void paneSettled(pane).then(() => {
-		if (gen === generation) releasePane();
-	});
+	const lock = lockWidths(targets, final, settled ? visual : undefined);
+	if (lock) lockColumns(lock);
+	// Settled and unlocked: the held layout is the pre-change layout that `visual` measured.
+	const base = settled && !lock ? visual.map((rect) => rect.left) : lefts(targets);
+	const own = animateFlips(
+		targets,
+		targets.map((_, index) => {
+			const left = base[index] ?? 0;
+			return {
+				from: (visual[index]?.left ?? left) - left,
+				to: (final[index]?.left ?? left) - left,
+			};
+		}),
+		{ duration: duration.paneIn, easing: easing.drawer, fill: "forwards" },
+	);
+	followSlide(pane, gen, own, true, slide);
 }
 
 /** Close: the reserve drops at t0 (under the still-opaque pane) and the content glides from
  * `visual` back to its resting x on the pane's exit clock. */
 export function closePane(
 	targets: readonly HTMLElement[],
-	visual: readonly number[],
+	visual: readonly PaneRect[],
+	pane?: Pane,
 ): void {
 	const app = document.getElementById("app");
 	if (!app) return;
-	generation++;
+	const gen = ++generation;
 	// Closed mid-open (or while another pane's open is settling): commit that open first.
-	if (app.hasAttribute("data-reserve-hold")) releasePane();
-	else cancelFlips(targets);
+	releasePane();
 	const base = lefts(targets);
-	for (const [index, element] of targets.entries()) {
-		const dx = (visual[index] ?? base[index] ?? 0) - (base[index] ?? 0);
-		if (Math.abs(dx) < 0.5) continue;
-		element.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }], {
-			duration: duration.paneOut,
-			easing: easing.drawer,
-			id: flipId,
-		});
-	}
+	const slide = pane ? paneSlide(pane) : undefined;
+	const own = animateFlips(
+		targets,
+		targets.map((_, index) => {
+			const left = base[index] ?? 0;
+			const from = (visual[index]?.left ?? left) - left;
+			return Math.abs(from) < 0.5 ? undefined : { from, to: 0 };
+		}),
+		{ duration: duration.paneOut, easing: easing.drawer },
+	);
+	if (pane && own.length > 0) followSlide(pane, gen, own, false, slide);
 }
 
 /**
@@ -307,7 +469,7 @@ export function closePane(
  */
 function settleHeldOpen(
 	targets: readonly HTMLElement[],
-	visual: readonly number[],
+	visual: readonly PaneRect[],
 ): void {
 	if (!document.getElementById("app")?.hasAttribute("data-reserve-hold")) return;
 	if (reducedMotion()) {
@@ -321,7 +483,9 @@ type ArmedChange = {
 	predicted: PaneLayoutState;
 	widths: Pick<PaneLayoutState, "wideForLive" | "wideForReview">;
 	targets: HTMLElement[];
-	visual: number[];
+	visual: PaneRect[];
+	/** No hold, lock or FLIP was live when `visual` was read (see openPane). */
+	settled: boolean;
 	hold: Pane | undefined;
 };
 let armed: ArmedChange | undefined;
@@ -333,7 +497,8 @@ function motionBlocked(): boolean {
 /**
  * Synchronous half: call first thing in a pane trigger, before the trigger changes the DOM.
  * Several arms in one task (Live opening closes Sessions through a nested command) merge into
- * one prediction, measured once against the untouched layout.
+ * one prediction, measured once against the untouched layout. Every read happens here,
+ * before any attribute write, so it hits the last frame's layout.
  */
 export function armPaneMotion(pane: Pane, willOpen: boolean): void {
 	if (motionBlocked()) return;
@@ -348,7 +513,11 @@ export function armPaneMotion(pane: Pane, willOpen: boolean): void {
 			predicted: state,
 			widths,
 			targets,
-			visual: lefts(targets),
+			visual: rects(targets),
+			settled:
+				!app.hasAttribute("data-reserve-hold") &&
+				!chatLocked() &&
+				!flipsRunning(),
 			hold: undefined,
 		};
 		armed = change;
@@ -397,8 +566,9 @@ function commitArmed(change: ArmedChange): void {
 		return;
 	}
 	if (reducedMotion()) return;
-	if (actual.kind === "open") openPane(actual.pane, targets, visual);
-	else if (actual.kind === "close") closePane(targets, visual);
+	if (actual.kind === "open") openPane(actual.pane, targets, visual, change.settled);
+	// The armed `visual` is the pre-close layout: no data-reserve-keep measurement needed.
+	else if (actual.kind === "close") closePane(targets, visual, actual.pane);
 }
 
 /**
@@ -436,25 +606,27 @@ function commitUnarmed(records: readonly MutationRecord[]): void {
 			// The DOM already changed: withhold the incoming pane's reserve too, which restores
 			// the held (unreserved) layout, to read where the content is drawn right now.
 			app.setAttribute("data-reserve-hold", incoming);
-			settleHeldOpen(targets, lefts(targets));
+			settleHeldOpen(targets, rects(targets));
 		}
 		return;
 	}
 	if (reducedMotion()) return;
 	if (change.kind === "open") {
 		// Style == the last frame, so this layout is cached.
+		const settled =
+			!app.hasAttribute("data-reserve-hold") && !chatLocked() && !flipsRunning();
 		app.setAttribute("data-reserve-hold", change.pane);
-		openPane(change.pane, targets, lefts(targets));
+		openPane(change.pane, targets, rects(targets), settled);
 	} else if (change.kind === "close") {
-		let visual: number[];
+		let visual: PaneRect[];
 		if (app.getAttribute("data-reserve-hold") === change.pane) {
-			visual = lefts(targets);
+			visual = rects(targets);
 		} else {
 			app.setAttribute("data-reserve-keep", change.pane);
-			visual = lefts(targets);
+			visual = rects(targets);
 			app.removeAttribute("data-reserve-keep");
 		}
-		closePane(targets, visual);
+		closePane(targets, visual, change.pane);
 	}
 }
 
@@ -483,8 +655,7 @@ export function bindPaneMotion(): void {
 		generation++;
 		armed = undefined;
 		releasePane();
-		clearTimeout(swapTimer);
-		app.removeAttribute("data-pane-swap");
+		clearSwap();
 	});
 	bindSessionListMotion();
 }

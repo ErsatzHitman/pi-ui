@@ -29,8 +29,10 @@
 		filter: blur(2px);
 	}
 
-	/* Abort pressed: acknowledge at t0, until the server morph (which strips the attribute). */
-	#prompt-action[data-aborting] .prompt-abort-icon {
+	/* Abort pressed: acknowledge at t0 and hold it until the turn ends. Intermediate morphs
+	   of the still-destructive button keep the attribute (`data-preserve-attr`); the flip to
+	   Send drops it, and the rule is scoped to the Stop state so it can never dim Send. */
+	#prompt-action[data-variant="destructive"][data-aborting] .prompt-abort-icon {
 		opacity: 0.5;
 		scale: 0.95;
 	}

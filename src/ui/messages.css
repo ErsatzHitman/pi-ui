@@ -41,16 +41,18 @@
 	}
 
 	/* A session replace (switch, new chat) marks the incoming #messages `data-enter`
-	   (ui-renderer.ts; never a code-theme replace): it rises from the loading dim level
-	   instead of cutting in, so a slow switch continues from 0.5 and a fast one is a
-	   short dip rather than a blank frame. `transition` is not redeclared, so
-	   `.messages-loading`'s 80ms guard above keeps precedence while loading. */
+	   (ui-renderer.ts; never a code-theme replace): it rises from the outgoing node's
+	   opacity (`--messages-enter-from`, published on #chat-pane by message-scroll.js;
+	   #chat-pane is never replaced, so it inherits) instead of cutting in, so a slow switch
+	   continues from its dim and a fast one from full opacity. The dim belongs to the
+	   outgoing node: the incoming one is never born `.messages-loading`. `transition` is
+	   not redeclared, so `.messages-loading`'s 80ms guard above keeps precedence. */
 	#messages[data-enter]:not(.messages-loading) {
 		transition-duration: var(--duration-md);
 	}
 	@starting-style {
 		:root[data-motion-ready] #messages[data-enter] {
-			opacity: 0.5;
+			opacity: var(--messages-enter-from, 0.5);
 		}
 	}
 
@@ -60,8 +62,12 @@
 	#prompt-input::placeholder {
 		transition: opacity var(--duration-xs) var(--ease-out);
 	}
+
+	/* No transition into the hold: it is set before the value clears, and a fade-out
+	   would show the placeholder over the ghost. Only the release fades. */
 	#prompt-input[data-placeholder-hold]::placeholder {
 		opacity: 0;
+		transition: none;
 	}
 
 	.messages-stack {
@@ -188,7 +194,9 @@
 	   Transitions, not keyframes: a keyframe gated on a root attribute would start when
 	   the gate opens and replay on rows already on screen. The per-property delay never
 	   touches the row's instant hover fill. */
-	:root[data-motion-ready]:not([data-transcript-quiet]) .recent-session {
+	:root[data-motion-ready]:not([data-transcript-quiet])
+		#messages:not([data-enter])
+		.recent-session {
 		transition:
 			opacity var(--duration-lg) var(--ease-out),
 			translate var(--duration-lg) var(--ease-out);
@@ -198,10 +206,14 @@
 			translate: 0 0.5rem;
 		}
 	}
-	:root[data-motion-ready]:not([data-transcript-quiet]) .recent-session:nth-child(2) {
+	:root[data-motion-ready]:not([data-transcript-quiet])
+		#messages:not([data-enter])
+		.recent-session:nth-child(2) {
 		transition-delay: 40ms;
 	}
-	:root[data-motion-ready]:not([data-transcript-quiet]) .recent-session:nth-child(3) {
+	:root[data-motion-ready]:not([data-transcript-quiet])
+		#messages:not([data-enter])
+		.recent-session:nth-child(3) {
 		transition-delay: 80ms;
 	}
 	.recent-session:is(:focus-visible, :active) {
@@ -809,10 +821,13 @@
 	}
 
 	/* Nested entries inside an already-rendered message. `data-transcript-quiet` (set by
-	   message-scroll.js while a whole transcript or history batch is inserted) and
-	   `data-motion-ready` (page load) keep them from replaying. New markdown blocks fade
+	   message-scroll.js while a whole transcript or history batch is inserted, and by
+	   ui-renderer.ts before a transcript replace), a replaced #messages' own `data-enter`
+	   (it fades as a whole) and `data-motion-ready` (page load) keep them from replaying. New markdown blocks fade
 	   in through message-scroll.js (WAAPI, pure appends only: flow-critique #6). */
-	:root[data-motion-ready]:not([data-transcript-quiet]) .message-stopped-note {
+	:root[data-motion-ready]:not([data-transcript-quiet])
+		#messages:not([data-enter])
+		.message-stopped-note {
 		transition:
 			opacity var(--duration-md) var(--ease-out),
 			translate var(--duration-md) var(--ease-out);
@@ -826,17 +841,23 @@
 	/* Only the live tool row's output wipes in (flow-critique #17): a `data-show` reveal
 	   of older rows (alt+O / alt+M) must never mass-replay it. Only the entry state is
 	   gated on `:last-child`; the transition is not, so a message appended mid-wipe
-	   doesn't drop clip-path from `transition-property` and cut the wipe short. */
+	   doesn't drop clip-path from `transition-property` and cut the wipe short. The
+	   after-change value is `inset(0)`, not `none`: `none` cannot interpolate with the
+	   entry inset, so the wipe would never play. Under reduced motion clip-path is not
+	   allowlisted and snaps; only the opacity fades. */
 	:root[data-motion-ready]:not([data-transcript-quiet])
+		#messages:not([data-enter])
 		#message-list
 		> .message-tool
 		.tool-output-surface {
+		clip-path: inset(0);
 		transition:
 			opacity var(--duration-md) var(--ease-out),
 			clip-path var(--duration-lg) var(--ease-out);
 	}
 	@starting-style {
 		:root[data-motion-ready]:not([data-transcript-quiet])
+			#messages:not([data-enter])
 			#message-list
 			> .message-tool:last-child
 			.tool-output-surface {

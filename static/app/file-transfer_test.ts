@@ -21,6 +21,7 @@ const {
 	composePrompt,
 	convertAvifToJpeg,
 	currentChipState,
+	exitAttachment,
 	extractTransferredFilePaths,
 	fileWithDetectedMimeType,
 	formatFileReferences,
@@ -249,4 +250,71 @@ test("a removed chip exits from the scale it had at the click, not from 1", () =
 		{ opacity: 1 },
 		{ opacity: 0 },
 	]);
+});
+
+test("a removed chip leaves inert and hidden, hands focus on, and its survivors glide over", async () => {
+	const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+	const originalStyle = Object.getOwnPropertyDescriptor(globalThis, "getComputedStyle");
+	const attributes = new Map<string, string>();
+	let removed = false;
+	let focused: unknown;
+	const glides: unknown[][] = [];
+	const node = {
+		style: {} as Record<string, string>,
+		inert: false,
+		setAttribute: (name: string, value: string) => attributes.set(name, value),
+		contains: (other: unknown) => other === node,
+		remove: () => {
+			removed = true;
+		},
+		animate: () => ({ finished: Promise.resolve() }),
+	};
+	const survivor = {
+		focus: (options: unknown) => {
+			focused = options;
+		},
+		// Before the removal it sits after the leaving chip; then it takes the freed slot.
+		getBoundingClientRect: () => ({ left: removed ? 76 : 203, top: 10 }),
+		animate: (...args: unknown[]) => {
+			glides.push(args);
+			return { cancel: () => undefined };
+		},
+	};
+	const tray = {
+		hidden: false,
+		querySelector: (selector: string) =>
+			selector === ".prompt-attachment:not([data-exiting])" ? survivor : null,
+		querySelectorAll: () => [survivor],
+	};
+	Object.defineProperty(globalThis, "document", {
+		configurable: true,
+		value: { activeElement: node, getElementById: () => null },
+	});
+	Object.defineProperty(globalThis, "getComputedStyle", {
+		configurable: true,
+		value: () => ({ opacity: "1", scale: "0.97" }),
+	});
+	try {
+		exitAttachment(tray, node, { path: "/tmp/one.txt" });
+		// At the click: out of the tab order and the accessibility tree, press scale held.
+		assertEquals(node.inert, true);
+		assertEquals(attributes.get("aria-hidden"), "true");
+		assertEquals(attributes.has("data-exiting"), true);
+		assertEquals(node.style.scale, "0.97");
+		assertEquals(node.style.pointerEvents, "none");
+		assertEquals(focused, { preventScroll: true });
+		assertEquals(glides, []);
+		await Promise.resolve();
+		await Promise.resolve();
+		assertEquals(removed, true);
+		assertEquals(glides, [
+			[
+				[{ translate: "127px 0px" }, { translate: "0 0" }],
+				{ duration: 160, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
+			],
+		]);
+	} finally {
+		restoreGlobal("document", originalDocument);
+		restoreGlobal("getComputedStyle", originalStyle);
+	}
 });

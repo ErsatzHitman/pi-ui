@@ -141,6 +141,8 @@ export async function submit(endpoint, prompt, streamingBehavior) {
 	} catch (error) {
 		restoreSubmittedPrompt(prompt);
 		showTransferError(error?.message || "Could not send the prompt.");
+		// The send flow (sending state, held spacer) unwinds on this.
+		document.dispatchEvent(new CustomEvent("pi-ui-prompt-send-failed"));
 		return false;
 	} finally {
 		submitting = false;
@@ -439,22 +441,69 @@ function renderAttachments() {
 		send.disabled = !canSubmit(promptInput()?.value ?? "");
 }
 
-function exitAttachment(tray, node, attachment) {
+/**
+ * A removed chip leaves (fade + shrink from its press scale); the chips after it glide into
+ * the freed slot once it is gone. It stops being a control at once: inert, hidden from
+ * assistive tech, and focus (if it had it) moves to the next chip or the prompt.
+ * Exported for tests.
+ */
+export function exitAttachment(tray, node, attachment) {
 	// Read before [data-exiting] drops the transitions: mid-press-release this is ~0.97.
-	const from = currentChipState(getComputedStyle(node));
+	const style = getComputedStyle(node);
+	const from = currentChipState(style);
+	// Hold the press scale underneath too, so the :active release cannot ease it back up.
+	node.style.scale = style.scale;
 	node.setAttribute("data-exiting", "");
 	node.style.pointerEvents = "none";
+	const hadFocus = node.contains(document.activeElement);
+	node.inert = true;
+	node.setAttribute("aria-hidden", "true");
+	if (hadFocus)
+		(
+			tray.querySelector(".prompt-attachment:not([data-exiting])") ?? promptInput()
+		)?.focus({ preventScroll: true });
 	const done = () => {
+		const before = survivorRects(tray);
 		node.remove();
 		// Revoke only after the exit, or the fading image chip would lose its preview.
 		revokePreview(attachment);
 		syncTrayHidden(tray);
+		glideSurvivors(before);
 	};
 	node.animate(attachmentExitKeyframes(reducedMotion(), from), {
 		duration: duration.sm,
 		easing: easing.out,
 		fill: "forwards",
 	}).finished.then(done, done);
+}
+
+// In-flight survivor glides, so a second removal restarts from where the chip is.
+const glides = new WeakMap();
+
+function survivorRects(tray) {
+	return [...tray.querySelectorAll(".prompt-attachment:not([data-exiting])")].map(
+		(chip) => ({ chip, rect: chip.getBoundingClientRect() }),
+	);
+}
+
+/** FLIP: each survivor starts where it was before the removal and glides to its slot. */
+function glideSurvivors(before) {
+	if (reducedMotion()) return;
+	for (const { chip, rect } of before) {
+		// The pre-removal rect included any in-flight glide; measure the new slot without it.
+		glides.get(chip)?.cancel();
+		const after = chip.getBoundingClientRect();
+		const dx = rect.left - after.left;
+		const dy = rect.top - after.top;
+		if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+		glides.set(
+			chip,
+			chip.animate([{ translate: `${dx}px ${dy}px` }, { translate: "0 0" }], {
+				duration: duration.md,
+				easing: easing.out,
+			}),
+		);
+	}
 }
 
 /** The tray stays shown while its last chip fades out. */

@@ -42,6 +42,7 @@ function restoreSessionSidebar(desktopOpen: boolean): string {
 	el.close();
 	const mobile = matchMedia('(width <= 48rem)').matches;
 	el.closedBy = mobile ? 'any' : 'none';
+	el.inert = mobile || !${desktopOpen};
 	if (!mobile && ${desktopOpen}) el.show();
 	el.querySelector('.session-sidebar-scroller').scrollLeft = 0;
 `;
@@ -74,6 +75,7 @@ const sidebarSwipeRelease = `const dialog = el.closest('dialog');
 	if (dialog.open && Number(dialog.style.getPropertyValue('--drawer-drag')) >= 0.5) {
 		dialog.removeAttribute('data-dragging');
 		dialog.close();
+		dialog.inert = true;
 	}`;
 const focusSessionSidebarShortcut = `el.dispatchEvent(new CommandEvent('command', { command: '--show' }));
 	const target = el.querySelector(
@@ -105,14 +107,15 @@ export function renderSessionSidebar(
 				closedby="any"
 				aria-keyshortcuts={keybindAria("toggle-sessions")}
 				data-signals:_session-sidebar-open__ifmissing="el.open"
-				data-on:toggle={`$_sessionSidebarOpen = el.open`}
+				data-on:toggle={`$_sessionSidebarOpen = el.open; el.inert = !el.open`}
 				data-on:command={`
 					if (evt.command === '--toggle' || evt.command === '--show') {
 						window.piUi.paneMotion?.arm('sessions', !(evt.command === '--toggle' && el.open));
 						el.setAttribute('data-animate-open', '');
 					}
-					if (evt.command === '--toggle' && el.open) el.close();
+					if (evt.command === '--toggle' && el.open) { el.close(); el.inert = true; }
 					else if (evt.command === '--toggle' || evt.command === '--show') {
+					el.inert = false;
 					if (!el.open) el.closedBy === 'any' ? el.showModal() : el.show();
 					el.style.removeProperty('--drawer-drag');
 					el.removeAttribute('data-dragging');
@@ -127,8 +130,8 @@ export function renderSessionSidebar(
 				data-on:click={`
 					if (!el.matches(':modal')) return;
 					const row = evt.target.closest('.session-sidebar-row-button');
-					if (row && row.getAttribute('aria-disabled') !== 'true') el.close();
-					if (!('closedBy' in HTMLDialogElement.prototype) && evt.target === el) el.close();
+					if (row && row.getAttribute('aria-disabled') !== 'true') { el.close(); el.inert = true; }
+					if (!('closedBy' in HTMLDialogElement.prototype) && evt.target === el) { el.close(); el.inert = true; }
 				`}
 				data-signals:_session-sidebar-width__ifmissing={String(width)}
 				data-effect={`document.documentElement.style.setProperty(
@@ -172,6 +175,7 @@ export function renderSessionSidebar(
 					data-on:scrollend={`if (el.scrollLeft < -1 && el.scrollWidth + el.scrollLeft <= el.clientWidth + 1) {
 						el.closest('dialog').removeAttribute('data-dragging');
 						el.closest('dialog').close();
+						el.closest('dialog').inert = true;
 					}`}
 					data-on:scroll__passive={sidebarSwipeScroll}
 					data-on:touchend__passive={sidebarSwipeRelease}

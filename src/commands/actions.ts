@@ -30,7 +30,11 @@ export function cycleThinkingAction(direction: CycleDirection): string {
 export function authDialogAction(mode: "login" | "logout"): string {
 	const endpoint =
 		mode === "login" ? endpoints.authOpenLogin : endpoints.authOpenLogout;
-	return `document.getElementById('command-dialog')?.close(); @post('${endpoint}', { payload: {} })`;
+	// The palette stays open until the server-opened auth dialog does, so its 80ms exit
+	// overlaps the dialog's entry (as on the code-theme path) instead of leaving a
+	// request-long gap where the backdrop un-dims. `data-keep-command-open` stops controls.js
+	// closing the palette on this row's click; the timeout covers a dialog that never opens.
+	return `const palette = document.getElementById('command-dialog'); if (palette?.contains(el)) el.setAttribute('data-keep-command-open', ''); document.getElementById('auth-dialog')?.addEventListener('toggle', (e) => { if (e.newState === 'open') palette?.close(); }, { once: true }); setTimeout(() => palette?.close(), 600); @post('${endpoint}', { payload: {} })`;
 }
 
 function openTreeAction(): string {

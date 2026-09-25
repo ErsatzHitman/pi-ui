@@ -102,10 +102,7 @@ function renderSlashRow(item: AppSlashCommand, index: number): string {
 			data-slash-order={index}
 			data-picker-kind="slash"
 			data-on:click={clickAction}
-			data-show={`
-				$_slashPickerOpen &&
-				window.piUi.pickers.fuzzyMatch($prompt.slice(1), ${JSON.stringify(name)}).matches
-			`}
+			data-show={`window.piUi.pickers.fuzzyMatch($prompt.slice(1), ${JSON.stringify(name)}).matches`}
 		>
 			<div class="picker-row-button">
 				<span class="picker-row-content">
@@ -635,6 +632,7 @@ function renderSessionRow(
 						class="btn session-menu-abort"
 						data-variant="destructive"
 						data-size="icon-xs"
+						data-preserve-attr="data-aborting"
 						aria-label={`Abort ${current ? "current" : "background"} session ${session.title}`}
 						data-on:click__stop={
 							current

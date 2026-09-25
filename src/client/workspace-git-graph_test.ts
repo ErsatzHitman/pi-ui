@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { afterEach, jest, test } from "bun:test";
 
 import { assertEquals } from "#testing/assertions";
 
@@ -6,7 +6,12 @@ import {
 	type GitGraphRow,
 	unloadedWorkspaceGitGraphSnapshot,
 } from "../workspace-git-graph-types.ts";
-import { createDetailClearer, newCommitHashes } from "./workspace-git-graph.ts";
+import {
+	createDetailClearer,
+	detailOpenCapMs,
+	newCommitHashes,
+	openDetailWhenLoaded,
+} from "./workspace-git-graph.ts";
 
 function row(hash: string): GitGraphRow {
 	return {
@@ -102,4 +107,99 @@ test("createDetailClearer: close, reopen, close keeps the content until the last
 	assertEquals(detail.children, 3);
 	await Bun.sleep(80); // ~200ms: the second exit has finished
 	assertEquals(detail.children, 0);
+});
+
+/** A closed commit sheet stub and the log of what its opener did to it, in order. */
+function fakeSheet() {
+	const log: string[] = [];
+	const sheet = { hidden: true, style: { minBlockSize: "" } };
+	return { log, sheet };
+}
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((settle) => {
+		resolve = settle;
+	});
+	return { promise, resolve };
+}
+
+/** Drains pending microtasks (promise continuations) under fake timers. */
+async function flush(): Promise<void> {
+	for (let i = 0; i < 5; i++) await Promise.resolve();
+}
+
+function opener(
+	sheet: ReturnType<typeof fakeSheet>,
+	load: Promise<string>,
+	current = () => true,
+) {
+	return openDetailWhenLoaded({
+		capMs: detailOpenCapMs,
+		detail: sheet.sheet,
+		fadeIn: () => sheet.log.push(`fade hidden=${sheet.sheet.hidden}`),
+		heldHeight: 212,
+		isCurrent: current,
+		load,
+		render: (value) =>
+			sheet.log.push(
+				`render ${value} hidden=${sheet.sheet.hidden} min=${sheet.sheet.style.minBlockSize}`,
+			),
+		showLoading: () => sheet.log.push(`loading hidden=${sheet.sheet.hidden}`),
+	});
+}
+
+afterEach(() => {
+	jest.useRealTimers();
+});
+
+test("openDetailWhenLoaded: a detail inside the cap renders before the sheet opens", async () => {
+	jest.useFakeTimers();
+	const sheet = fakeSheet();
+	const load = deferred<string>();
+	const done = opener(sheet, load.promise);
+	jest.advanceTimersByTime(detailOpenCapMs - 50);
+	await flush();
+	assertEquals(sheet.sheet.hidden, true); // not opened before its content arrives
+	load.resolve("abc");
+	await done;
+	assertEquals(sheet.log, ["render abc hidden=true min="]);
+	assertEquals(sheet.sheet.hidden, false);
+	assertEquals(sheet.sheet.style.minBlockSize, "");
+});
+
+test("openDetailWhenLoaded: a cap miss opens at the held height, then fades the late body in", async () => {
+	jest.useFakeTimers();
+	const sheet = fakeSheet();
+	const load = deferred<string>();
+	const done = opener(sheet, load.promise);
+	jest.advanceTimersByTime(detailOpenCapMs - 1);
+	await flush();
+	assertEquals(sheet.sheet.hidden, true);
+	jest.advanceTimersByTime(1);
+	await flush();
+	assertEquals(sheet.log, ["loading hidden=true"]);
+	assertEquals(sheet.sheet.hidden, false);
+	assertEquals(sheet.sheet.style.minBlockSize, "min(212px, 60%)");
+	load.resolve("abc");
+	await done;
+	assertEquals(sheet.log, [
+		"loading hidden=true",
+		"render abc hidden=false min=min(212px, 60%)",
+		"fade hidden=false",
+	]);
+	assertEquals(sheet.sheet.style.minBlockSize, "");
+});
+
+test("openDetailWhenLoaded: a close or newer selection during the wait never opens the sheet", async () => {
+	jest.useFakeTimers();
+	const sheet = fakeSheet();
+	const load = deferred<string>();
+	let current = true;
+	const done = opener(sheet, load.promise, () => current);
+	current = false;
+	load.resolve("abc");
+	await done;
+	assertEquals(sheet.log, []);
+	assertEquals(sheet.sheet.hidden, true);
 });

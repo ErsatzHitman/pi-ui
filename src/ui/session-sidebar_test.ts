@@ -21,6 +21,32 @@ test("opening Sessions closes Live Workspace too (sidebar-exclusive)", () => {
 	assertStringIncludes(commandHandler, "detail: { open: $_liveWorkspaceOpen }");
 });
 
+test("a closing Sessions pane goes inert through its exit; opening clears it first (C6)", () => {
+	const html = renderSessionSidebar(
+		appRenderSnapshot({ sessions: [], currentSessionPath: undefined }),
+	);
+	const commandHandler = html.split('data-on:command="')[1]?.split('"')[0];
+	if (!commandHandler) throw new Error("command handler not found");
+	assertStringIncludes(
+		commandHandler,
+		"if (evt.command === '--toggle' && el.open) { el.close(); el.inert = true; }",
+	);
+	const clearIndex = commandHandler.indexOf("el.inert = false;");
+	const showIndex = commandHandler.indexOf("el.showModal()");
+	if (clearIndex === -1 || clearIndex > showIndex) {
+		throw new Error("expected inert cleared before show()/showModal()");
+	}
+	// Every other close path (light dismiss, Esc, a row tap, a swipe) settles through toggle.
+	assertStringIncludes(
+		html,
+		'data-on:toggle="$_sessionSidebarOpen = el.open; el.inert = !el.open"',
+	);
+	assertStringIncludes(html, "dialog.close();\n\t\tdialog.inert = true;");
+	assertStringIncludes(html, "el.closest('dialog').inert = true;");
+	// The inline restore leaves a closed drawer inert and a restored-open sidebar focusable.
+	assertStringIncludes(html, "el.inert = mobile || !true;");
+});
+
 test("session sidebar shows an empty state with no sessions and nothing loading", () => {
 	const html = renderSessionSidebar(
 		appRenderSnapshot({

@@ -3,7 +3,12 @@ import { test } from "bun:test";
 import { assertEquals } from "#testing/assertions";
 
 import { bindDismissibleHistory } from "../../static/app/history-stack.js";
-import { bindLiveWorkspace, rubberBand, sheetRelease } from "./live-workspace-open.ts";
+import {
+	bindLiveWorkspace,
+	rubberBand,
+	scrimOpacity,
+	sheetRelease,
+} from "./live-workspace-open.ts";
 
 /** Patches a global via `Object.defineProperty` (see live-workspace-layout_test.ts). */
 function patchGlobal(name: string, value: unknown): () => void {
@@ -54,18 +59,31 @@ function installFakeLiveWorkspace(
 		toggleAttribute() {},
 	};
 	const focusCalls: unknown[] = [];
+	const focus = { inPane: false, toggleFocusedWhileInert: undefined as unknown };
+	// SSR renders the closed pane inert.
 	const pane = {
+		inert: true,
 		querySelector: () => ({ focus: (options?: unknown) => focusCalls.push(options) }),
-		contains: () => false,
+		contains: () => focus.inPane,
 		addEventListener() {},
+	};
+	const toggle = {
+		focus: () => {
+			focus.toggleFocusedWhileInert = pane.inert;
+			focus.inPane = false;
+		},
 	};
 	const shell = { getBoundingClientRect: () => ({ width: layout.viewportWidthPx }) };
 	// Not motion-ready: the pane choreography's arm (pane-motion.ts) stays a no-op here.
 	const documentElement = { hasAttribute: () => false };
 	const body = { dispatchEvent: record(bodyEvents) };
-	const elements = new Map<string, typeof app | typeof pane | typeof shell>([
+	const elements = new Map<
+		string,
+		typeof app | typeof pane | typeof shell | typeof toggle
+	>([
 		["app", app],
 		["live-workspace", pane],
+		["live-workspace-toggle", toggle],
 		["workspace-shell", shell],
 	]);
 	const fakeDocument = {
@@ -126,6 +144,8 @@ function installFakeLiveWorkspace(
 	const binding = bindLiveWorkspace();
 	return {
 		binding,
+		pane,
+		focus,
 		focusCalls,
 		history,
 		appEvents,
@@ -260,6 +280,38 @@ test("closing an overlay pane normally pops its history entry once", () => {
 	} finally {
 		dom.restore();
 	}
+});
+
+test("a closing pane leaves the Tab order after focus has left it; reopening clears inert (C6)", () => {
+	const dom = installFakeLiveWorkspace({
+		initiallyOpen: false,
+		viewportWidthPx: 1600,
+		panePosition: "relative",
+	});
+	try {
+		dom.setOpenClass(true);
+		dom.binding.applyOpen(true);
+		assertEquals(dom.pane.inert, false);
+		// Focus was inside the pane (a tab button) when it closed.
+		dom.focus.inPane = true;
+		dom.setOpenClass(false);
+		dom.binding.applyOpen(false);
+		assertEquals(dom.focus.toggleFocusedWhileInert, false);
+		assertEquals(dom.pane.inert, true);
+		dom.setOpenClass(true);
+		dom.binding.applyOpen(true);
+		assertEquals(dom.pane.inert, false);
+	} finally {
+		dom.restore();
+	}
+});
+
+test("the scrim fades with the sheet's downward travel only (LW-V2-09)", () => {
+	assertEquals(scrimOpacity(0, 400), 1);
+	assertEquals(scrimOpacity(100, 400), 0.75);
+	assertEquals(scrimOpacity(600, 400), 0);
+	// An upward over-drag keeps the scrim at full strength.
+	assertEquals(scrimOpacity(-50, 400), 1);
 });
 
 test("a released sheet drag dismisses on a flick or past 30% of its height (B-X1)", () => {

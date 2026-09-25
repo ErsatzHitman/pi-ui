@@ -283,8 +283,9 @@
 			scale var(--duration-sm) var(--ease-out);
 	}
 
-	/* Abort acknowledged at t0 (mirrors #prompt-action[data-aborting], B-X5); the next row
-	   morph strips the attribute (it is not in the server HTML). */
+	/* Abort acknowledged at t0 (mirrors #prompt-action[data-aborting], B-X5). Row morphs
+	   while the session still runs keep it (`data-preserve-attr`); the button leaves with
+	   the running state. */
 	.session-menu-abort[data-aborting] .session-menu-abort-icon {
 		opacity: 0.5;
 		scale: 0.95;
