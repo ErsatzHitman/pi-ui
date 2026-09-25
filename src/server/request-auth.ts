@@ -10,7 +10,7 @@
 // has something to look like pi-ui with, before there is a cookie to authenticate it.
 import { timingSafeEqual } from "node:crypto";
 
-import { renderLoginPage } from "../ui/login-page.tsx";
+import { type LoginMode, renderLoginPage } from "../ui/login-page.tsx";
 import type { AuthRateLimiter } from "./auth-rate-limit.ts";
 import { endpoints } from "./routes/endpoints.ts";
 
@@ -231,6 +231,8 @@ export type AuthCheck =
 export interface AuthCheckDeps {
 	server?: RequestIpSource;
 	rateLimiter?: AuthRateLimiter;
+	/** Which credential the login page asks for; see login-credentials.ts. */
+	loginMode?: () => LoginMode;
 }
 
 /**
@@ -276,7 +278,9 @@ export function checkAuthToken(
 	if (!valid) {
 		if (provided) limiter?.recordFailure(ip);
 		const response = isBrowserNavigation(request)
-			? loginPageResponse(sanitizeNextPath(url.pathname + url.search))
+			? loginPageResponse(sanitizeNextPath(url.pathname + url.search), {
+					mode: deps.loginMode?.(),
+				})
 			: unauthorizedResponse(request);
 		// A stale cookie (e.g. from before the token was rotated) would otherwise ride
 		// along on every request — each one a failed guess — until it rate-limits its own
@@ -315,9 +319,12 @@ export function checkAuthToken(
  * "Failed to load resource" console line for the document itself, with no machine client
  * ever reading it (those get `unauthorizedResponse`'s plain-text 401 instead; see
  * `isBrowserNavigation`). RM1 audit open issue 2. */
-export function loginPageResponse(next: string, error?: string): Response {
+export function loginPageResponse(
+	next: string,
+	options: { error?: string; mode?: LoginMode; username?: string } = {},
+): Response {
 	return new Response(
-		renderLoginPage({ next, loginPath: endpoints.sessionLogin, error }),
+		renderLoginPage({ next, loginPath: endpoints.sessionLogin, ...options }),
 		{
 			status: 200,
 			headers: {

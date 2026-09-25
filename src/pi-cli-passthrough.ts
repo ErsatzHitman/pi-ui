@@ -103,7 +103,7 @@ function isPiUiOwnFlag(token: string): boolean {
  * immediately with "unknown option: --mode" instead of running a turn.
  *
  * pi-ui recognizes only its own small, closed set of top-level forms: `service`/
- * `autostart` (subcommands), `--version`/`--help`/`-h`, and the handful of server flags in
+ * `autostart`/`login` (subcommands), `--version`/`--help`/`-h`, and the handful of server flags in
  * `serverUsage`. Everything else — including a bare positional prompt, any pi CLI flag
  * pi-ui itself has never heard of, or a genuinely mistyped pi-ui flag — is pi CLI
  * passthrough; the bundled pi CLI has its own clean "unknown option" handling for the
@@ -116,7 +116,7 @@ function isPiUiOwnFlag(token: string): boolean {
 export function isPiCliPassthrough(args: readonly string[]): boolean {
 	const [first] = args;
 	if (first === undefined) return false;
-	if (first === "service" || first === "autostart") return false;
+	if (first === "service" || first === "autostart" || first === "login") return false;
 	if (isVersionRequest(args)) return false;
 	return !isPiUiOwnFlag(first);
 }

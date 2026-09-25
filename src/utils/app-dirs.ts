@@ -78,6 +78,11 @@ export function appConfigPath(): string {
 	return join(appDirectory("config"), "config.json");
 }
 
+/** The username/password login pi-ui's remote sign-in page checks (login-credentials.ts). */
+export function loginCredentialsPath(): string {
+	return join(appDirectory("config"), "login.json");
+}
+
 export function appDataPath(...segments: string[]): string {
 	return join(appDirectory("data"), ...segments);
 }

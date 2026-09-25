@@ -2,8 +2,12 @@
 // browser gets one. Deliberately outside appRoutes/gateRoutes (server-main.ts wires it in
 // unwrapped), since everything gateRoutes wraps requires a token to even reach the
 // handler. Shares its rate limiter with checkAuthToken (request-auth.ts) so guessing the
-// token here counts the same as guessing it anywhere else.
+// token here counts the same as guessing it anywhere else. With a username/password login
+// saved (`pi-ui login set`, login-credentials.ts) the form takes those instead; a correct
+// pair sets the very same token cookie, so the rest of the gate is unchanged. A `token`
+// field is still accepted either way.
 import type { AuthRateLimiter } from "./auth-rate-limit.ts";
+import { readLoginCredentials, verifyLogin } from "./login-credentials.ts";
 import {
 	buildAuthCookie,
 	clientIp,
@@ -21,6 +25,7 @@ export interface SessionLoginRoute {
 export function createSessionLoginRoute(
 	expectedToken: string,
 	rateLimiter: AuthRateLimiter,
+	loginCredentialsPath?: string,
 ): SessionLoginRoute {
 	return {
 		async POST(request, server) {
@@ -31,19 +36,47 @@ export function createSessionLoginRoute(
 				return new Response("Bad request.", { status: 400 });
 			}
 			const next = sanitizeNextPath(stringField(form, "next"));
-			const candidate = stringField(form, "token") ?? "";
+			const token = stringField(form, "token") ?? "";
+			const username = stringField(form, "username") ?? "";
+			const password = stringField(form, "password") ?? "";
+			const credentials = loginCredentialsPath
+				? await readLoginCredentials(loginCredentialsPath)
+				: undefined;
+			const usePassword = !!credentials && !token;
+			const mode = credentials ? "password" : "token";
 			const ip = clientIp(request, server);
 
-			if (!candidate) return loginPageResponse(next, "Enter the auth token.");
+			// An empty submission is not a guess and never counts.
+			if (usePassword && (!username || !password)) {
+				return loginPageResponse(next, {
+					error: "Enter your username and password.",
+					mode,
+					username,
+				});
+			}
+			if (!usePassword && !token)
+				return loginPageResponse(next, { error: "Enter the auth token.", mode });
 			// Like checkAuthToken (request-auth.ts): a blocked IP gets 429 even for the
-			// correct token, or the block would be a success oracle that slows no guesser
-			// down. An empty submission is not a guess and never counts.
+			// correct credentials, or the block would be a success oracle that slows no
+			// guesser down.
 			const blocked = rateLimiter.isBlocked(ip);
 			if (blocked.blocked)
 				return tooManyRequestsResponse(blocked.retryAfterSeconds);
-			if (!timingSafeEqualStrings(candidate, expectedToken)) {
+			const valid = usePassword
+				? await verifyLogin(credentials, username, password)
+				: timingSafeEqualStrings(token, expectedToken);
+			if (!valid) {
 				rateLimiter.recordFailure(ip);
-				return loginPageResponse(next, "That token isn't correct.");
+				return loginPageResponse(
+					next,
+					usePassword
+						? {
+								error: "That username or password isn't correct.",
+								mode,
+								username,
+							}
+						: { error: "That token isn't correct.", mode },
+				);
 			}
 			rateLimiter.recordSuccess(ip);
 

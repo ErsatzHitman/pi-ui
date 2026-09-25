@@ -7,7 +7,14 @@ export interface LoginPageOptions {
 	loginPath: string;
 	/** Shown above the field when a previous attempt failed. */
 	error?: string;
+	/** "password" once `pi-ui login set` has saved a username/password login
+	 * (login-credentials.ts); otherwise the access token is the only credential. */
+	mode?: LoginMode;
+	/** Re-filled into the username field after a failed password sign-in. */
+	username?: string;
 }
+
+export type LoginMode = "token" | "password";
 
 /**
  * The pre-auth login page: served by request-auth.ts to an unauthenticated browser
@@ -21,7 +28,14 @@ export interface LoginPageOptions {
  * (before the person has ever seen the authenticated app), and the launch splash screen
  * a standalone launch shows comes from these same tags either way.
  */
-export function renderLoginPage({ next, loginPath, error }: LoginPageOptions): string {
+export function renderLoginPage({
+	next,
+	loginPath,
+	error,
+	mode = "token",
+	username,
+}: LoginPageOptions): string {
+	const passwordMode = mode === "password";
 	return syncHtml(
 		"<!doctype html>" +
 		(
@@ -48,7 +62,7 @@ export function renderLoginPage({ next, loginPath, error }: LoginPageOptions): s
 							class="login-card raised-surface"
 							method="post"
 							action={loginPath}
-							autocomplete="off"
+							autocomplete={passwordMode ? "on" : "off"}
 						>
 							<header class="login-header">
 								<img
@@ -59,27 +73,70 @@ export function renderLoginPage({ next, loginPath, error }: LoginPageOptions): s
 									height="28"
 								/>
 								<h1>Sign in to pi-ui</h1>
-								<p>This server requires its access token to continue.</p>
+								<p>
+									{passwordMode
+										? "Enter your username and password to continue."
+										: "This server requires its access token to continue."}
+								</p>
 							</header>
 							{error && (
 								<p class="login-error" role="alert" safe>
 									{error}
 								</p>
 							)}
-							<div class="field" data-invalid={error ? "true" : undefined}>
-								<label for="login-token">Access token</label>
-								<input
-									id="login-token"
-									name="token"
-									type="password"
-									autocomplete="current-password"
-									autofocus
-									required
-								/>
-							</div>
+							{passwordMode ? (
+								<>
+									<div
+										class="field"
+										data-invalid={error ? "true" : undefined}
+									>
+										<label for="login-username">Username</label>
+										<input
+											id="login-username"
+											name="username"
+											type="text"
+											autocomplete="username"
+											autocapitalize="none"
+											spellcheck="false"
+											value={username}
+											autofocus={!username}
+											required
+										/>
+									</div>
+									<div
+										class="field"
+										data-invalid={error ? "true" : undefined}
+									>
+										<label for="login-password">Password</label>
+										<input
+											id="login-password"
+											name="password"
+											type="password"
+											autocomplete="current-password"
+											autofocus={!!username}
+											required
+										/>
+									</div>
+								</>
+							) : (
+								<div
+									class="field"
+									data-invalid={error ? "true" : undefined}
+								>
+									<label for="login-token">Access token</label>
+									<input
+										id="login-token"
+										name="token"
+										type="password"
+										autocomplete="current-password"
+										autofocus
+										required
+									/>
+								</div>
+							)}
 							<input type="hidden" name="next" value={next} />
 							<button class="btn" data-size="lg" type="submit">
-								Continue
+								{passwordMode ? "Sign in" : "Continue"}
 							</button>
 						</form>
 					</main>
@@ -145,16 +202,16 @@ const loginPageStyle = `
 		width: 100%;
 	}
 
-	/* Overrides app.css's shared .field > input sizing (2rem tall, 14px text) just for this
-	   field: at least 16px (iOS Safari zooms in on focus below that) and, on coarse
+	/* Overrides app.css's shared .field > input sizing (2rem tall, 14px text) just for these
+	   fields: at least 16px (iOS Safari zooms in on focus below that) and, on coarse
 	   pointers, a real 44px touch target matching the submit button (controls.css's own
 	   coarse-pointer floor for .btn). RM1 audit open issue 7. */
-	.field > input#login-token {
+	.login-card .field > input {
 		font-size: 16px;
 	}
 
 	@media (pointer: coarse) {
-		.field > input#login-token {
+		.login-card .field > input {
 			height: 2.75rem;
 		}
 	}
