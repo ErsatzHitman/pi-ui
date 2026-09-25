@@ -1,56 +1,24 @@
-// End-to-end: a disk-loaded extension, instrumented by the real `RuntimeController`
-// wiring, drives an `ExtensionActivity` through ledger → AppStore → renderer → SSE,
-// and the finished card and its `pi-ui.extension-activity` entry outlive the
-// extension clearing its own status (DESIGN-ext-activity.md §5.3). The model is the
-// scripted faux provider; nothing here reaches a real model.
+// End-to-end: disk-loaded extensions, instrumented by the real `RuntimeController`
+// wiring, drive `ExtensionActivity` records through ledger → AppStore → renderer → SSE,
+// and a finished card (or step) outlives the extension clearing its own status or widget
+// (DESIGN-ext-activity.md §5.3). Every fake extension lives in the shared
+// `#testing/fake-activity-extensions` module so `src/e2e-browser/extension-activity.cdp.ts`
+// drives the exact same signals against a real browser. The model is the scripted faux
+// provider; nothing here reaches a real model.
 import { test } from "bun:test";
 
 import { assertEquals, assertExists, assertStringIncludes } from "#testing/assertions";
 import { createStreamingHarness, waitForCondition } from "#testing/e2e-streaming-harness";
-import { fakeDirectives } from "#testing/fake-stream-provider";
+import {
+	fakeActivityMarkers,
+	fakeActivityTools,
+	writeFakeActivityExtensionFiles,
+} from "#testing/fake-activity-extensions";
+import { fakeDirectives, fakeStreamProviderId } from "#testing/fake-stream-provider";
 import { readUntil, responseReader } from "#testing/streams";
 
 import { extensionActivityEntryType } from "../extension-activity-types.ts";
 import type { TranscriptMessage } from "../state/transcript-state.ts";
-
-/** Vision Proxy stand-in: a slow `before_agent_start` hook that shows a status
- * while it works and returns a `display:false` message the terminal never shows. */
-const fakeVisionSource = `
-export default function (pi) {
-	pi.on("before_agent_start", async (event, ctx) => {
-		if (!String(event.prompt).includes("fake-vision-please")) return;
-		ctx.ui.setStatus("fake-vision", "describing 1 image");
-		await new Promise((resolve) => setTimeout(resolve, 1200));
-		ctx.ui.setStatus("fake-vision", undefined);
-		return {
-			message: { customType: "fake-vision", content: "A red square.", display: false },
-		};
-	});
-}
-`;
-
-/** An extension-registered tool that reports progress through a status line. */
-const fakeProbeSource = `
-export default function (pi) {
-	pi.registerTool({
-		name: "fake_probe",
-		label: "Fake probe",
-		description: "Probes slowly",
-		parameters: { type: "object", properties: {} },
-		execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
-			ctx.ui.setStatus("fake-probe", "probing");
-			await new Promise((resolve) => setTimeout(resolve, 900));
-			ctx.ui.setStatus("fake-probe", undefined);
-			return { content: [{ type: "text", text: "probe ok" }], details: {} };
-		},
-	});
-}
-`;
-
-async function writeFakeActivityExtensions(agentDir: string): Promise<void> {
-	await Bun.write(`${agentDir}/extensions/fake-vision.js`, fakeVisionSource);
-	await Bun.write(`${agentDir}/extensions/fake-probe.js`, fakeProbeSource);
-}
 
 function activityCard(
 	messages: readonly TranscriptMessage[],
@@ -65,17 +33,26 @@ function activityCard(
 
 test("a slow extension hook shows a pink working card and chip, then keeps its result after the status clears", async () => {
 	const harness = await createStreamingHarness({
-		beforeCreate: writeFakeActivityExtensions,
+		beforeCreate: writeFakeActivityExtensionFiles,
 	});
 	try {
 		const tab = new AbortController();
 		const reader = responseReader(harness.openStream(tab.signal));
 		await readUntil(reader, (text) => text.includes("event: datastar-patch-signals"));
 
+		// The faux provider is the only model this harness has to pick from — every
+		// activity card in this file comes from a scripted turn, never a real one.
+		assertEquals(
+			harness.store.models.filter((model) => model.configured),
+			harness.store.models.filter(
+				(model) => model.configured && model.provider === fakeStreamProviderId,
+			),
+		);
+
 		// `prompt()` resolves only after `before_agent_start` handlers return, so
 		// observe the working state while it is still pending.
 		const prompted = harness.controller.prompt(
-			fakeDirectives.text("fake-vision-please"),
+			fakeDirectives.text(fakeActivityMarkers.visionHook),
 		);
 
 		// Called → Currently working: promoted card, pink chip, and the status the
@@ -135,7 +112,9 @@ test("a slow extension hook shows a pink working card and chip, then keeps its r
 		await waitForCondition(
 			() =>
 				harness.store.messages.some((message) =>
-					message.text.includes("Fake reply: fake-vision-please"),
+					message.text.includes(
+						`Fake reply: ${fakeActivityMarkers.visionHook}`,
+					),
 				),
 			{ message: "assistant reply did not arrive" },
 		);
@@ -146,6 +125,16 @@ test("a slow extension hook shows a pink working card and chip, then keeps its r
 			.filter((line) => line.includes(extensionActivityEntryType));
 		assertStringIncludes(lines.join("\n"), '"phase":"start"');
 		assertStringIncludes(lines.join("\n"), '"phase":"finish"');
+
+		// Standing chrome mounted at session_start (`fake-standing`) is never an
+		// activity, however long it stays open.
+		assertEquals(activityCard(harness.store.messages, "fake-standing"), undefined);
+		assertEquals(
+			harness.store.extensionActivityChips.some(
+				(candidate) => candidate.extensionLabel === "Fake Standing",
+			),
+			false,
+		);
 		tab.abort();
 	} finally {
 		await harness.dispose();
@@ -154,29 +143,141 @@ test("a slow extension hook shows a pink working card and chip, then keeps its r
 
 test("an extension-owned tool card is labelled, pink while running, and keeps its activity step", async () => {
 	const harness = await createStreamingHarness({
-		beforeCreate: writeFakeActivityExtensions,
+		beforeCreate: writeFakeActivityExtensionFiles,
 	});
 	try {
 		assertEquals(
-			await harness.controller.prompt(fakeDirectives.tool("fake_probe", {})),
+			await harness.controller.prompt(
+				fakeDirectives.tool(fakeActivityTools.lspCheck, {}),
+			),
 			true,
 		);
-		const probeTool = () =>
+		const lspTool = () =>
 			harness.store.messages.find(
 				(message) =>
-					message.role === "tool" && message.extension?.id === "fake-probe",
+					message.role === "tool" && message.extension?.id === "fake-lsp",
 			);
-		await waitForCondition(() => probeTool()?.state === "running", {
-			message: "fake_probe tool card never ran with its extension stamped",
+		await waitForCondition(() => lspTool()?.state === "running", {
+			message: "fake_lsp_check tool card never ran with its extension stamped",
 		});
 		await waitForCondition(
-			() => probeTool()?.activities?.some((step) => step.state === "done") ?? false,
-			{ message: "fake_probe activity step never finished" },
+			() => lspTool()?.activities?.some((step) => step.state === "done") ?? false,
+			{ message: "fake_lsp_check activity step never finished" },
 		);
-		const tool = probeTool();
+		const tool = lspTool();
 		assertExists(tool);
 		assertEquals(tool.state, "success");
-		assertEquals(activityCard(harness.store.messages, "fake-probe"), undefined);
+		assertEquals(activityCard(harness.store.messages, "fake-lsp"), undefined);
+	} finally {
+		await harness.dispose();
+	}
+}, 30_000);
+
+test("a JEV-style tool step keeps its panel output after the widget closes on a delay", async () => {
+	const harness = await createStreamingHarness({
+		beforeCreate: writeFakeActivityExtensionFiles,
+	});
+	try {
+		assertEquals(
+			await harness.controller.prompt(
+				fakeDirectives.tool(fakeActivityTools.jevConsult, {}),
+			),
+			true,
+		);
+		const jevTool = () =>
+			harness.store.messages.find(
+				(message) =>
+					message.role === "tool" && message.extension?.id === "fake-jev",
+			);
+		await waitForCondition(
+			() => jevTool()?.activities?.some((step) => step.state === "done") ?? false,
+			{ message: "fake_jev_consult activity step never finished" },
+		);
+		const doneTool = jevTool();
+		assertExists(doneTool);
+		assertEquals(doneTool.state, "success");
+
+		// The widget closes 200ms after the tool returns (JEV's own lingering-card
+		// shape) — the step must still be "done", and its output must pick up the
+		// final panel frame instead of losing it.
+		await waitForCondition(
+			() => {
+				const step = jevTool()?.activities?.[0];
+				return (
+					step?.state === "done" &&
+					(step.output ?? []).some((section) =>
+						section.text.includes("consulting jev (3/3)"),
+					)
+				);
+			},
+			{ message: "fake_jev_consult step never picked up the final panel frame" },
+		);
+	} finally {
+		await harness.dispose();
+	}
+}, 30_000);
+
+test("an Advisor-style auto-review shows a standalone card and the display:true row it posts", async () => {
+	const harness = await createStreamingHarness({
+		beforeCreate: writeFakeActivityExtensionFiles,
+	});
+	try {
+		const prompted = harness.controller.prompt(
+			fakeDirectives.text(fakeActivityMarkers.advisorAuto),
+		);
+		await waitForCondition(
+			() =>
+				activityCard(harness.store.messages, "fake-advisor")?.activities?.[0]
+					?.state === "working",
+			{ message: "fake-advisor auto-review card never reached working" },
+		);
+		await waitForCondition(
+			() =>
+				activityCard(harness.store.messages, "fake-advisor")?.activities?.[0]
+					?.state === "done",
+			{ message: "fake-advisor auto-review card never finished" },
+		);
+		const card = activityCard(harness.store.messages, "fake-advisor");
+		assertExists(card);
+		const progress = card.activities?.[0]?.progress ?? card.activities?.[0]?.summary;
+		assertStringIncludes(progress ?? "", "reviewing");
+
+		// `display:true` custom messages still render as their own row, unchanged.
+		await waitForCondition(
+			() =>
+				harness.store.messages.some(
+					(message) =>
+						message.role === "custom" && message.text.includes("LGTM"),
+				),
+			{ message: "the fake-advisor-review row never arrived" },
+		);
+		assertEquals(await prompted, true);
+	} finally {
+		await harness.dispose();
+	}
+}, 30_000);
+
+test("a pi.events fleet publish shows the same pink channel activity a real fleet would", async () => {
+	const harness = await createStreamingHarness({
+		beforeCreate: writeFakeActivityExtensionFiles,
+	});
+	try {
+		const prompted = harness.controller.prompt(
+			fakeDirectives.tool(fakeActivityTools.fleetPublish, {}),
+		);
+		await waitForCondition(
+			() =>
+				activityCard(harness.store.messages, "subagents")?.activities?.[0]
+					?.state === "working",
+			{ message: "the fleet channel activity never reached working" },
+		);
+		assertEquals(await prompted, true);
+		await waitForCondition(
+			() =>
+				activityCard(harness.store.messages, "subagents")?.activities?.[0]
+					?.state === "done",
+			{ message: "the fleet channel activity never finished" },
+		);
 	} finally {
 		await harness.dispose();
 	}
@@ -184,11 +285,13 @@ test("an extension-owned tool card is labelled, pink while running, and keeps it
 
 test("an activity that finishes while its session is backgrounded is recorded in that session and shown on return", async () => {
 	const harness = await createStreamingHarness({
-		beforeCreate: writeFakeActivityExtensions,
+		beforeCreate: writeFakeActivityExtensionFiles,
 	});
 	try {
 		assertEquals(
-			await harness.controller.prompt(fakeDirectives.tool("fake_probe", {})),
+			await harness.controller.prompt(
+				fakeDirectives.tool(fakeActivityTools.lspCheck, {}),
+			),
 			true,
 		);
 		await waitForCondition(
@@ -196,10 +299,10 @@ test("an activity that finishes while its session is backgrounded is recorded in
 				harness.store.messages.some(
 					(message) =>
 						message.role === "tool" &&
-						message.extension?.id === "fake-probe" &&
+						message.extension?.id === "fake-lsp" &&
 						message.state === "running",
 				),
-			{ message: "fake_probe never started" },
+			{ message: "fake_lsp_check never started" },
 		);
 		const sessionPath = harness.store.currentSessionPath;
 		assertExists(sessionPath);
@@ -208,7 +311,7 @@ test("an activity that finishes while its session is backgrounded is recorded in
 		assertEquals((await harness.controller.newSession()).status, "success");
 		assertEquals(
 			harness.store.messages.some(
-				(message) => message.extension?.id === "fake-probe",
+				(message) => message.extension?.id === "fake-lsp",
 			),
 			false,
 		);
@@ -240,7 +343,7 @@ test("an activity that finishes while its session is backgrounded is recorded in
 				harness.store.messages.some(
 					(message) =>
 						message.role === "tool" &&
-						message.extension?.id === "fake-probe" &&
+						message.extension?.id === "fake-lsp" &&
 						(message.activities?.some((step) => step.state === "done") ??
 							false),
 				),
