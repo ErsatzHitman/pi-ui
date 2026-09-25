@@ -6,6 +6,7 @@ import { assertEquals, waitForCondition } from "#testing/assertions";
 
 import { endpoints } from "../../src/server/routes/endpoints.ts";
 import {
+	bindPickers,
 	completeFileValue,
 	copyLastAssistantMessage,
 	extractArgumentQuery,
@@ -210,6 +211,89 @@ test("/copy reports a visible failure when writeText rejects and the fallback fa
 		assertEquals(dom.posts, [
 			{ url: endpoints.prompt, body: { prompt: "/copy unavailable" } },
 		]);
+	} finally {
+		dom.restore();
+	}
+});
+
+/** Fakes the prompt, an open argument picker with one selected row, and the document
+ * listeners `bindPickers` installs — just enough DOM for its Enter/click path. */
+function installArgumentPickerDom(prompt: string) {
+	class FakeElement {}
+	class FakeHTMLElement extends FakeElement {}
+	class FakeTextArea extends FakeHTMLElement {
+		value = prompt;
+		selectionStart = prompt.length;
+		selectionEnd = prompt.length;
+		events: string[] = [];
+		dispatchEvent(event: Event) {
+			this.events.push(event.type);
+			return true;
+		}
+		focus() {}
+		setAttribute() {}
+		removeAttribute() {}
+	}
+	const listeners = new Map<string, (event: unknown) => void>();
+	const input = new FakeTextArea();
+	const popover = Object.assign(new FakeHTMLElement(), { checkVisibility: () => true });
+	const row = Object.assign(new FakeHTMLElement(), {
+		dataset: { pickerValue: "openrouter/llama-4-maverick" },
+		checkVisibility: () => true,
+		getAttribute: (name: string) => (name === "aria-selected" ? "true" : null),
+		closest: (selector: string) =>
+			selector === '[data-picker-kind="argument"]' ? row : null,
+		click: () => listeners.get("click")?.({ target: row, preventDefault() {} }),
+	});
+	const fakeDocument = {
+		activeElement: input,
+		addEventListener: (type: string, listener: (event: unknown) => void) =>
+			listeners.set(type, listener),
+		getElementById: (id: string) =>
+			id === "prompt-input"
+				? input
+				: id === "prompt-argument-popover"
+					? popover
+					: null,
+		querySelectorAll: (selector: string) =>
+			selector === "[data-argument-row]" ? [row] : [],
+	};
+	const restores = [
+		patchGlobal("Element", FakeElement),
+		patchGlobal("HTMLElement", FakeHTMLElement),
+		patchGlobal("HTMLTextAreaElement", FakeTextArea),
+		patchGlobal("document", fakeDocument),
+	];
+	bindPickers({ fuzzyFilter: () => [] });
+	return {
+		input,
+		pressEnter: () =>
+			listeners.get("keydown")?.({
+				target: input,
+				code: "Enter",
+				isComposing: false,
+				ctrlKey: false,
+				metaKey: false,
+				altKey: false,
+				shiftKey: false,
+				preventDefault() {},
+			}),
+		restore: () => {
+			for (const restore of restores.reverse()) restore();
+		},
+	};
+}
+
+test("Enter in an argument picker opened by a late completions response still completes", () => {
+	// Regression: "/model" + Enter completed the slash row to "/model ", then closed the
+	// pickers — forgetting the argument query while its debounced completions request
+	// still reopened the picker. That open picker swallowed every Enter without acting,
+	// leaving the prompt stuck (the user could only reach the model button with a mouse).
+	const dom = installArgumentPickerDom("/model ");
+	try {
+		dom.pressEnter();
+		assertEquals(dom.input.value, "/model openrouter/llama-4-maverick");
+		assertEquals(dom.input.events.includes("pi-ui-argument-close"), true);
 	} finally {
 		dom.restore();
 	}

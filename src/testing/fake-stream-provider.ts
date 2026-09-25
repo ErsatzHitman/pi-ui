@@ -19,6 +19,9 @@ import {
 import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
+import type { JsonObject } from "../utils/json-types.ts";
+import { isJsonObject } from "../utils/type-guards.ts";
+
 /** Provider and model ids the fixture registers; pass `fakeStreamModelRef` to `RuntimeController.setModel`. */
 export const fakeStreamProviderId = "pi-ui-fake-stream";
 export const fakeStreamModelId = "scripted-1";
@@ -50,6 +53,13 @@ export const fakeDirectives = {
 	 * roughly `1000 / intervalMs` events/second. */
 	fleet: (count: number, intervalMs = 10) =>
 		`Dispatch the fleet. [[FLEET:${count}:${intervalMs}]]`,
+	/** A tool call to any registered tool by name, with arbitrary JSON args — for
+	 * scripting a turn against a tool this fixture doesn't itself register, such as
+	 * an extension's own (e.g. `ask_user`, loaded from a real or fixture agent dir
+	 * alongside this provider). Unlike the other directives, the args can contain
+	 * `]` (e.g. an `options` array) without truncating the directive early. */
+	tool: (name: string, args: JsonObject = {}) =>
+		`Call a tool. [[TOOL:${name}:${JSON.stringify(args)}]]`,
 } as const;
 
 function contentToText(content: string | Array<{ type: string; text?: string }>): string {
@@ -60,12 +70,22 @@ function contentToText(content: string | Array<{ type: string; text?: string }>)
 		.join("\n");
 }
 
-function lastUserDirective(context: TranscriptContext): string {
+const directivePattern = /\[\[[A-Z]+/;
+
+/**
+ * The prompt driving the current turn: among the user messages since the last assistant
+ * reply, the one carrying a `[[DIRECTIVE]]`, else the latest. A real extension set (memory
+ * injection, time-sense, ...) appends its own user-role context messages after the prompt
+ * through the `context` event, so "the last user message" is often not the prompt.
+ */
+export function currentTurnPrompt(context: TranscriptContext): string {
+	const turn: string[] = [];
 	for (let index = context.messages.length - 1; index >= 0; index -= 1) {
 		const message = context.messages[index];
-		if (message?.role === "user") return contentToText(message.content);
+		if (message?.role === "assistant") break;
+		if (message?.role === "user") turn.unshift(contentToText(message.content));
 	}
-	return "";
+	return turn.find((text) => directivePattern.test(text)) ?? turn.at(-1) ?? "";
 }
 
 type Directive =
@@ -74,9 +94,29 @@ type Directive =
 	| { kind: "read"; path: string }
 	| { kind: "bigOutput"; lines: number }
 	| { kind: "fleet"; count: number; intervalMs: number }
+	| { kind: "tool"; name: string; args: JsonObject }
 	| { kind: "none" };
 
 function parseDirective(prompt: string): Directive {
+	// Tried first, and anchored to the *last* `]]` in the prompt (`[\s\S]*`, greedy):
+	// a TOOL directive's JSON args may themselves contain `]` (an `options` array,
+	// ask_user's shape), which the generic directive regex below — bounded to
+	// `[^\]]*`, correct for the other directives' plain-text payloads — would cut
+	// off at the first one.
+	const toolMatch = /\[\[TOOL:([a-zA-Z_][\w.-]*):([\s\S]*)\]\]\s*$/.exec(prompt);
+	if (toolMatch) {
+		const [, name, rawArgs] = toolMatch;
+		let args: JsonObject = {};
+		try {
+			const parsed: unknown = JSON.parse(rawArgs ?? "{}");
+			if (isJsonObject(parsed)) args = parsed;
+		} catch {
+			// Malformed args JSON: call the tool with no args rather than failing the
+			// whole scripted turn — a test author's bug shows up as a tool-schema
+			// validation error, which is easier to diagnose than a silent hang.
+		}
+		return { kind: "tool", name, args };
+	}
 	const match = /\[\[(\w+)(?::([^\]]*))?\]\]/.exec(prompt);
 	if (!match) return { kind: "none" };
 	const [, name, raw = ""] = match;
@@ -116,9 +156,27 @@ function bigOutputCommand(lines: number): string {
  * (thinking -> tool call -> tool result -> final text) without any external
  * `setResponses()` bookkeeping from the test.
  */
+/** The tool result this turn is answering, if any — looked up past any injected context
+ * messages an extension appended after it (see `currentTurnPrompt`). */
+export function currentTurnToolResult(context: TranscriptContext) {
+	for (let index = context.messages.length - 1; index >= 0; index -= 1) {
+		const message = context.messages[index];
+		if (message?.role === "toolResult") return message;
+		if (message?.role === "assistant") return undefined;
+		// A directive prompt after the result (a steering message) is answered instead.
+		if (
+			message?.role === "user" &&
+			directivePattern.test(contentToText(message.content))
+		) {
+			return undefined;
+		}
+	}
+	return undefined;
+}
+
 const scriptedTurn: FauxResponseFactory = (context) => {
-	const last = context.messages.at(-1);
-	if (last?.role === "toolResult") {
+	const last = currentTurnToolResult(context);
+	if (last) {
 		const resultText = contentToText(last.content).slice(0, 200);
 		return fauxAssistantMessage(
 			fauxText(
@@ -126,7 +184,7 @@ const scriptedTurn: FauxResponseFactory = (context) => {
 			),
 		);
 	}
-	const directive = parseDirective(lastUserDirective(context));
+	const directive = parseDirective(currentTurnPrompt(context));
 	switch (directive.kind) {
 		case "bash":
 			return fauxAssistantMessage(
@@ -160,6 +218,14 @@ const scriptedTurn: FauxResponseFactory = (context) => {
 						count: directive.count,
 						intervalMs: directive.intervalMs,
 					}),
+				],
+				{ stopReason: "toolUse" },
+			);
+		case "tool":
+			return fauxAssistantMessage(
+				[
+					fauxThinking(`Calling ${directive.name}.`),
+					fauxToolCall(directive.name, directive.args),
 				],
 				{ stopReason: "toolUse" },
 			);

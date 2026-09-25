@@ -4,6 +4,7 @@ import { assertStringIncludes } from "#testing/assertions";
 
 import type { PiUiElement } from "../extension-surface-types.ts";
 import { assertStringExcludes } from "../testing/assertions.ts";
+import type { JsonValue } from "../utils/json-types.ts";
 import { renderPage } from "./page.tsx";
 import {
 	renderPiUiElement,
@@ -138,7 +139,6 @@ test("nested form sections render their fields and actions once", () => {
 			element({
 				ns: "btw",
 				placement: "screen",
-				actions: [{ id: "close", label: "Close" }],
 				data: {
 					sections: [
 						{
@@ -156,8 +156,156 @@ test("nested form sections render their fields and actions once", () => {
 	assertStringIncludes(html, "Ask btw");
 	assertStringIncludes(html, ">Send</button>");
 	assertStringIncludes(html, "$_piuiField_btw_panel_q");
-	// The element declares its own close action, so the built-in Close button is omitted.
-	assertStringExcludes(html, 'command="close"');
+});
+
+test("every sheet gets one header close control instead of a footer Close fallback (btw-compact)", () => {
+	const html = renderPiUiSheets({ extensionElements: [element({})] });
+	// The header close button (native `command=\"close\"`, same mechanism the old footer
+	// fallback used) is the sheet's only close control now — no separate "Close" text button.
+	assertStringIncludes(html, 'aria-label="Close"');
+	assertStringIncludes(html, 'command="close"');
+	assertStringExcludes(html, ">Close</button>");
+});
+
+test("a sheet whose element declares its own 'close' action does not duplicate the header close control (fix pass, pi-mcp-adapter's mcp-setup-panel)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				ns: "mcp",
+				actions: [
+					{ id: "run-setup", label: "Run setup" },
+					{ id: "close", label: "Close" },
+				],
+			}),
+		],
+	});
+	// Exactly one close control — the header icon button. The extension's own declared
+	// `close` action must not also render as a redundant footer "Close" text button.
+	assertStringIncludes(html, 'aria-label="Close"');
+	assertStringExcludes(html, ">Close</button>");
+	// Its other declared actions still render in the footer as usual.
+	assertStringIncludes(html, ">Run setup</button>");
+});
+
+test("a sheet with no declared actions renders no footer at all (btw-compact)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({ data: { sections: [{ kind: "status", text: "hello" }] } }),
+		],
+	});
+	assertStringExcludes(html, "<footer>");
+});
+
+test("an action with an icon renders as an icon-only button, not a labeled one (btw-compact)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				ns: "btw",
+				placement: "screen",
+				data: {
+					sections: [
+						{
+							kind: "form",
+							fields: [{ id: "q", kind: "text", placeholder: "Ask btw…" }],
+							actions: [
+								{
+									id: "submit",
+									label: "Send",
+									variant: "primary",
+									icon: "send",
+								},
+							],
+						},
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, 'aria-label="Send"');
+	assertStringExcludes(html, ">Send</button>");
+});
+
+test("a text field submits on Enter without a surrounding <form> (btw-compact)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [element({ data: { fields: [{ id: "q", kind: "text" }] } })],
+	});
+	assertStringIncludes(html, "evt.key === 'Enter'");
+	assertStringIncludes(html, ".piui-actions .btn");
+});
+
+test("a text field without a visible label still gets an accessible name from its placeholder (btw-compact)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				data: { fields: [{ id: "q", kind: "text", placeholder: "Ask btw…" }] },
+			}),
+		],
+	});
+	assertStringIncludes(html, 'aria-label="Ask btw…"');
+});
+
+test("a 'turns' section renders a compact chat without '› you'/'› btw' markdown headers (btw-compact)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				ns: "btw",
+				placement: "screen",
+				data: {
+					sections: [
+						{
+							kind: "turns",
+							turns: [
+								{ role: "user", text: "Hi. What is going on" },
+								{ role: "assistant", text: "Not much." },
+							],
+						},
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, "piui-turn-user");
+	assertStringIncludes(html, "piui-turn-assistant");
+	assertStringIncludes(html, "Hi. What is going on");
+	assertStringIncludes(html, "Not much.");
+	assertStringExcludes(html, "› you");
+	assertStringExcludes(html, "› btw");
+	assertStringExcludes(html, "**");
+});
+
+test("a 'turns' section carries the role in an sr-only label for assistive tech", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				ns: "btw",
+				title: "btw",
+				placement: "screen",
+				data: {
+					sections: [{ kind: "turns", turns: [{ role: "user", text: "hi" }] }],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, 'class="sr-only"');
+});
+
+test("a 'meta' section renders one muted line", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				data: {
+					sections: [
+						{
+							kind: "meta",
+							text: "openai-codex/gpt-5.6-sol · Thinking: high",
+						},
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, "piui-panel-meta");
+	assertStringIncludes(html, "openai-codex/gpt-5.6-sol · Thinking: high");
 });
 
 test("actions send the namespaced elementId lib/bridge.ts expects", () => {
@@ -165,6 +313,168 @@ test("actions send the namespaced elementId lib/bridge.ts expects", () => {
 	// `lib/bridge.ts` derives the namespace as `elementId.split(":")[0]`; a
 	// bare `element.id` would misroute the namespace-scoped `piui:<ns>` event.
 	assertStringIncludes(html, "elementId: &#34;ask-user:panel&#34;");
+});
+
+// ask-user.ts's `buildBridgeFields()` sends a `select`/`multiselect` field with
+// `options: [{ value, label, description }]` and `searchable: true` once its own
+// `bridgeIsLive()` is fixed (round ux/ask-user-native) — these render it as a
+// native selectable-rows-with-filter list, not a bare `<select>`, so the option
+// descriptions the extension sends are not silently dropped.
+test("a searchable select field renders option descriptions and a filter box, as radio rows sharing one name", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				data: {
+					fields: [
+						{
+							id: "selection",
+							kind: "select",
+							label: "Where to next?",
+							placeholder: "Type to filter...",
+							searchable: true,
+							options: [
+								{
+									value: "career",
+									label: "Career or education",
+									description: "Jobs, school, skills",
+								},
+								{ value: "health", label: "Health", description: "" },
+							],
+						},
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, "Career or education");
+	assertStringIncludes(html, "Jobs, school, skills");
+	assertStringIncludes(html, 'placeholder="Type to filter..."');
+	assertStringIncludes(html, 'type="radio"');
+	// Both rows share one `name` so the browser's native radio-group arrow-key
+	// navigation moves between them without any client-side JS.
+	assertStringIncludes(html, 'name="_piuiField_ask_user_panel_selection_options"');
+	assertStringExcludes(html, "<select");
+});
+
+// ask-user.ts titles its sheet with the question and labels the options field with the
+// same question; showing it twice read as bloat (ux merge). The label stays for
+// assistive tech, visually hidden; a label that differs from the title stays visible.
+test("a field label that repeats the sheet title is visually hidden, not dropped", () => {
+	const question = "Where should we focus next?";
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				title: `${question} (1/2)`,
+				data: {
+					fields: [
+						{
+							id: "selection",
+							kind: "select",
+							label: question,
+							searchable: true,
+							options: [
+								{
+									value: "health",
+									label: "Health",
+									description: "Sleep",
+								},
+							],
+						},
+						{
+							id: "picks",
+							kind: "multiselect",
+							label: question,
+							options: [{ value: "a", label: "A", description: "first" }],
+						},
+						{ id: "freeform", kind: "text", label: "Custom answer" },
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, `<label class="sr-only">${question}</label>`);
+	assertStringIncludes(html, `<legend class="sr-only">${question}</legend>`);
+	assertStringIncludes(
+		html,
+		'<label for="piui-field-ask-user-panel-freeform">Custom answer</label>',
+	);
+});
+
+test("a select field with no description and not marked searchable stays a plain select (no filter box, no regression for other bridge callers)", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				ns: "todo",
+				data: {
+					fields: [
+						{
+							id: "status",
+							kind: "select",
+							label: "Status",
+							options: [{ id: "open", label: "Open" }],
+						},
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, "<select");
+	assertStringExcludes(html, 'type="search"');
+	assertStringExcludes(html, 'type="radio"');
+});
+
+test("a searchable multiselect field renders option descriptions and a filter box alongside its checkboxes", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				data: {
+					fields: [
+						{
+							id: "selections",
+							kind: "multiselect",
+							label: "Pick any",
+							placeholder: "Type to filter...",
+							searchable: true,
+							options: [
+								{ value: "a", label: "Option A", description: "First" },
+								{ value: "b", label: "Option B", description: "Second" },
+							],
+						},
+					],
+				},
+			}),
+		],
+	});
+	assertStringIncludes(html, "Option A");
+	assertStringIncludes(html, "First");
+	assertStringIncludes(html, 'placeholder="Type to filter..."');
+	assertStringIncludes(html, 'type="checkbox"');
+});
+
+test("the select/multiselect filter hides rows whose label and description do not match, client-side, via data-show", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				data: {
+					fields: [
+						{
+							id: "selection",
+							kind: "select",
+							label: "Q",
+							searchable: true,
+							options: [
+								{ value: "career", label: "Career", description: "Jobs" },
+							],
+						},
+					],
+				},
+			}),
+		],
+	});
+	// The row's own visibility expression checks the filter signal against its
+	// own label/description text, case-insensitively, entirely in the browser.
+	assertStringIncludes(html, "data-show=");
+	assertStringIncludes(html, "toLocaleLowerCase");
 });
 
 test("a pinned roster renders as a compact summary strip, not a full row list", () => {
@@ -190,6 +500,10 @@ test("a pinned roster renders as a compact summary strip, not a full row list", 
 	assertStringIncludes(html, ">Open</button>");
 	// The full per-row list belongs to the Live Workspace Extensions tab, not this strip.
 	assertStringExcludes(html, "piui-roster-row");
+	// Sessions and Live Workspace are mutually exclusive (sidebar-exclusive): this "Open"
+	// button opens Live Workspace, so it must also close Sessions if it's open.
+	assertStringIncludes(html, "$_liveWorkspaceOpen = true;");
+	assertStringIncludes(html, "getElementById('session-sidebar')");
 });
 
 test("a pinned progress element keeps its one-line bar inside the summary strip", () => {
@@ -254,4 +568,107 @@ test("roster rows render detail and per-row actions replying with the row id", (
 	assertStringIncludes(html, 'data-variant="destructive"');
 	assertStringIncludes(html, "{&#34;id&#34;:&#34;s1&#34;}");
 	assertStringExcludes(html, "<b>scout</b>");
+});
+
+// UX audit: btw's composer lost keyboard focus after every send — a new turns/status
+// section shifted the id-less form section, so the morph rebuilt the <input> instead of
+// keeping it. A stable per-element, per-field id lets the morph keep the focused field.
+test("text and textarea fields carry a stable id (and a label pointing at it) so a morph keeps the focused field", () => {
+	const render = () =>
+		renderPiUiSheets({
+			extensionElements: [
+				element({
+					ns: "btw",
+					data: {
+						fields: [
+							{ id: "q", kind: "text", label: "Ask" },
+							{ id: "comment", kind: "textarea", label: "Extra context" },
+						],
+					},
+				}),
+			],
+		});
+	const html = render();
+	assertStringIncludes(html, 'id="piui-field-btw-panel-q"');
+	assertStringIncludes(html, 'for="piui-field-btw-panel-q"');
+	assertStringIncludes(html, 'id="piui-field-btw-panel-comment"');
+	assertStringIncludes(html, 'for="piui-field-btw-panel-comment"');
+	assertStringIncludes(render(), 'id="piui-field-btw-panel-q"');
+});
+
+// UX audit: the plan asks for btw's composer to be ONE input row with an inline send icon;
+// the icon button used to wrap onto its own row under the input.
+test("a form section with one single-line field and only icon actions lays out as one inline composer row", () => {
+	const composer = (
+		actions: JsonValue[],
+		fields: JsonValue[] = [{ id: "q", kind: "text" }],
+	) =>
+		renderPiUiSheets({
+			extensionElements: [
+				element({
+					ns: "btw",
+					data: { sections: [{ kind: "form", id: "c", fields, actions }] },
+				}),
+			],
+		});
+	const send = { id: "submit", label: "Send", variant: "primary", icon: "send" };
+	const stop = { id: "cancel", label: "Stop", icon: "stop" };
+	assertStringIncludes(
+		composer([send, stop]),
+		'class="piui-panel-section piui-panel-form piui-composer-row"',
+	);
+	assertStringExcludes(
+		composer([{ id: "submit", label: "Send" }]),
+		"piui-composer-row",
+	);
+	assertStringExcludes(
+		composer([send], [{ id: "q", kind: "textarea" }]),
+		"piui-composer-row",
+	);
+});
+
+// With the composer's <input> now kept across morphs (stable id), nothing reset it after a
+// send any more — the next message was appended to the previous one. Sending clears it.
+test("a composer's primary (send) action clears its field after posting; its stop action keeps the draft", () => {
+	const html = renderPiUiSheets({
+		extensionElements: [
+			element({
+				ns: "btw",
+				data: {
+					sections: [
+						{
+							kind: "form",
+							id: "c",
+							fields: [{ id: "q", kind: "text" }],
+							actions: [
+								{
+									id: "submit",
+									label: "Send",
+									variant: "primary",
+									icon: "send",
+								},
+								{
+									id: "cancel",
+									label: "Stop",
+									variant: "secondary",
+									icon: "stop",
+								},
+							],
+						},
+					],
+				},
+			}),
+		],
+	});
+	const clear = "$_piuiField_btw_panel_q = ''";
+	const send = html.slice(
+		html.indexOf('aria-label="Send"') - 600,
+		html.indexOf('aria-label="Send"'),
+	);
+	const stop = html.slice(
+		html.indexOf('aria-label="Send"'),
+		html.indexOf('aria-label="Stop"'),
+	);
+	assertStringIncludes(send, clear);
+	assertStringExcludes(stop, clear);
 });

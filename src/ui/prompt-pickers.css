@@ -99,17 +99,113 @@
 		max-width: calc(100vw - 2rem);
 		padding: 0;
 	}
-	.model-menu {
+
+	/* Side-by-side providers + models needs room for the model name next to its badges;
+	   at 22rem the name was cut to two or three characters. */
+	.model-popover:has(.model-command[data-multi-pane="true"]) {
+		width: 34rem;
+	}
+	.model-pane {
 		max-height: 17.5rem;
 		margin-block-start: 0.25rem;
+		overflow-y: auto;
+		min-width: 0;
 	}
 	.model-option {
 		content-visibility: auto;
 		contain-intrinsic-block-size: auto 3rem;
 	}
 
+	/* Dual-pane provider -> model picker. Both panes render side by side (see
+	   `renderModelPicker`); a single-provider setup skips the providers pane entirely
+	   and this stays the original one-pane flat list. */
+	.model-picker-body {
+		display: grid;
+		grid-template-columns: 9rem 1fr;
+		flex: 1;
+		min-width: 0;
+		min-height: 0;
+	}
+	.model-provider-pane {
+		border-inline-end: 1px solid var(--border);
+		padding-block: 0.25rem;
+	}
+	.model-provider-option .picker-option-text {
+		min-width: 0;
+	}
+	.model-group-heading {
+		position: sticky;
+		inset-block-start: 0;
+		background: var(--surface-raised);
+		z-index: 1;
+	}
+	.model-back-button {
+		display: none;
+		margin: 0.25rem 0.375rem 0;
+		align-self: flex-start;
+	}
+
+	/* Search spans every provider (grouped, not narrowed to the active one): the
+	   providers pane steps aside and the models pane takes the full popover width. */
+	.model-command[data-searching="true"] .model-provider-pane {
+		display: none;
+	}
+	.model-command[data-searching="true"] .model-picker-body {
+		grid-template-columns: 1fr;
+	}
+
+	/* Phone width: one pane at a time, drilling from providers into that provider's
+	   models (`data-active-pane`), with a back button to return. Desktop/tablet keep
+	   the side-by-side layout above. */
+	@media (width <= 30rem) {
+		.model-command[data-multi-pane="true"] .model-picker-body {
+			grid-template-columns: 1fr;
+		}
+		.model-command[data-multi-pane="true"][data-active-pane="providers"]:not(
+				[data-searching="true"]
+			)
+			.model-model-pane {
+			display: none;
+		}
+		.model-command[data-multi-pane="true"][data-active-pane="models"]:not(
+				[data-searching="true"]
+			)
+			.model-provider-pane {
+			display: none;
+		}
+		.model-command[data-multi-pane="true"][data-active-pane="models"]:not(
+				[data-searching="true"]
+			)
+			.model-back-button {
+			display: inline-flex;
+		}
+	}
+
 	.model-current-indicator {
 		flex-shrink: 0;
+	}
+	.model-option-badges {
+		display: flex;
+		flex-shrink: 0;
+		align-items: center;
+		gap: 0.25rem;
+	}
+
+	/* A denser `.badge` variant, matching the graph's own `.review-graph-ref`
+	   sizing so metadata badges read as one visual language app-wide. */
+	.model-meta-badge {
+		height: auto;
+		padding: 0.0625rem 0.375rem;
+		font-size: var(--text-3xs);
+		font-variant-numeric: tabular-nums;
+		font-family: var(--font-mono);
+	}
+	.model-thinking-badge {
+		padding: 0.1875rem;
+	}
+	.model-thinking-badge .icon-default {
+		width: 0.625rem;
+		height: 0.625rem;
 	}
 	.model-scope-button {
 		width: 0;
@@ -146,6 +242,9 @@
 			inset-inline: auto 0;
 			width: 22rem;
 			max-width: 100%;
+		}
+		#model-select-popover:has(.model-command[data-multi-pane="true"]) {
+			width: 34rem;
 		}
 	}
 }

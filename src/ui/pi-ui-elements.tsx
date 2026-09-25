@@ -1,14 +1,18 @@
+import { closeSessionSidebarAction } from "../commands/actions.ts";
 import {
 	isPiUiSheetElement,
 	type PiUiAction,
 	type PiUiElement,
 	piUiDialogId,
 	piUiDismissedStorageKey,
+	piUiSlug,
 } from "../extension-surface-types.ts";
 import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppStateSnapshot } from "../state/app-store.ts";
 import type { JsonObject, JsonValue } from "../utils/json-types.ts";
 import { isBoolean, isJsonObject, isNumber, isString } from "../utils/type-guards.ts";
+import { Icon } from "./icon.tsx";
+import { ArrowUp, Square, X } from "./icons.ts";
 import { renderMarkdownStreaming } from "./markdown.tsx";
 import { syncHtml } from "./sync-html.ts";
 
@@ -165,9 +169,14 @@ function renderRosterSummary(element: PiUiElement): string {
 	);
 }
 
-/** Opens the Live Workspace pane to the Extensions tab, where the full element renders. */
+/**
+ * Opens the Live Workspace pane to the Extensions tab, where the full element renders. Sessions
+ * and Live Workspace are mutually exclusive (PLAN-ux.md "sidebar-exclusive"), so this closes
+ * Sessions too if it happens to be open.
+ */
 function openLiveWorkspaceExtensionsAction(): string {
 	return `$_liveWorkspaceOpen = true;
+		${closeSessionSidebarAction()}
 		$liveWorkspacePreferences.tab = 'extensions';
 		document.body.dispatchEvent(new CustomEvent(
 			'pi-ui-live-workspace-preferences',
@@ -258,22 +267,28 @@ function renderPiUiSheetDialog(element: PiUiElement): string {
 					<h2 id={`${dialogId(element)}-title`} safe>
 						{element.title ?? element.ns}
 					</h2>
+					{/* A single header close control (Esc/backdrop already close it too) —
+					 * extensions no longer need their own footer "Close" action just to give
+					 * the sheet a close affordance (that was one of btw's duplicate controls). */}
+					<button
+						type="button"
+						class="btn"
+						data-variant="ghost"
+						data-size="icon-sm"
+						commandfor={dialogId(element)}
+						command="close"
+						aria-label="Close"
+						data-tooltip="Close"
+					>
+						<Icon icon={X} />
+					</button>
 				</header>
 				{body || renderPiUiSheetEmptyState()}
-				<footer>
-					{!element.actions?.some((action) => action.id === closeActionId) && (
-						<button
-							type="button"
-							class="btn"
-							data-variant="outline"
-							commandfor={dialogId(element)}
-							command="close"
-						>
-							Close
-						</button>
-					)}
-					{renderPiUiActions(element)}
-				</footer>
+				{renderPiUiActions(element, { suppressCloseAction: true }) && (
+					<footer>
+						{renderPiUiActions(element, { suppressCloseAction: true })}
+					</footer>
+				)}
 			</div>
 		</dialog>,
 	);
@@ -441,6 +456,33 @@ function renderMarkdownBody(element: PiUiElement): string {
 	);
 }
 
+function renderPiUiTurn(element: PiUiElement, value: JsonValue, index: number): string {
+	if (!isJsonObject(value)) return "";
+	const role = textField(value.role) ?? "assistant";
+	const isUser = role === "user";
+	const streaming = isBoolean(value.streaming) && value.streaming;
+	const text = textField(value.text) ?? (streaming ? "…" : "");
+	if (!text) return "";
+	return syncHtml(
+		<div class={`piui-turn piui-turn-${isUser ? "user" : "assistant"}`}>
+			<span class="sr-only" safe>
+				{isUser ? "You" : element.title || element.ns}
+			</span>
+			{isUser ? (
+				<p class="piui-turn-text" safe>
+					{text}
+				</p>
+			) : (
+				<div class="piui-turn-text markdown-content">
+					{renderMarkdownStreaming(text, {
+						cacheKey: `piui:${element.ns}:${element.id}:turn:${index}`,
+					})}
+				</div>
+			)}
+		</div>,
+	);
+}
+
 function renderDiffBody(element: PiUiElement): string {
 	const diffText =
 		textField(element.data.unifiedDiff) ?? textField(element.data.diff) ?? "";
@@ -460,7 +502,10 @@ type PiUiFieldSpec = {
 	kind: string;
 	label?: string;
 	placeholder?: string;
-	options: Array<{ id: string; label: string }>;
+	/** e.g. ask-user.ts's `buildBridgeFields()`: `searchable: true` on a `select`/
+	 * `multiselect` field asks for a live filter box above its option rows. */
+	searchable: boolean;
+	options: Array<{ id: string; label: string; description?: string }>;
 };
 
 function renderPanelBody(element: PiUiElement): string {
@@ -495,8 +540,17 @@ function renderPanelSection(
 		);
 		const sectionActions = parseActions(record.actions);
 		if (sectionFields.length === 0 && sectionActions.length === 0) return "";
+		// One single-line field plus icon-only actions (btw's send/stop) is a composer: keep
+		// the icons inline at the end of the input row instead of wrapping under it.
+		const composerRow =
+			sectionFields.length === 1 &&
+			sectionFields[0]?.kind === "text" &&
+			sectionActions.length > 0 &&
+			sectionActions.every((action) => action.icon);
 		return syncHtml(
-			<div class="piui-panel-section piui-panel-form">
+			<div
+				class={`piui-panel-section piui-panel-form${composerRow ? " piui-composer-row" : ""}`}
+			>
 				{sectionFields.length > 0 && renderFields(element, sectionFields)}
 				{sectionActions.length > 0 && (
 					<div class="piui-actions">
@@ -505,6 +559,13 @@ function renderPanelSection(
 								element,
 								action,
 								fieldValuesExpression(element, sectionFields),
+								undefined,
+								// Sending from a composer clears it for the next message (the
+								// kept-across-morphs <input> no longer resets itself); Stop
+								// keeps a draft typed while the reply streamed.
+								composerRow && action.variant === "primary"
+									? clearFieldsExpression(element, sectionFields)
+									: undefined,
 							),
 						)}
 					</div>
@@ -519,6 +580,29 @@ function renderPanelSection(
 			</div>,
 		);
 	}
+	// A compact one-line muted chip (e.g. btw's "model · thinking level") — deliberately
+	// plainer than `markdown` so a short fact doesn't read as prose (round: btw-compact).
+	if (kind === "meta") {
+		if (!text) return "";
+		return syncHtml(
+			<div class="piui-panel-section piui-panel-meta fine-print" safe>
+				{text}
+			</div>,
+		);
+	}
+	// A compact chat transcript — pairs of `{role: "user" | "assistant", text}` turns,
+	// rendered as visually distinct blocks (a plain trailing bubble for the user, markdown
+	// for the reply) instead of a "**› you** / **› btw**" markdown wall (round: btw-compact,
+	// the sheet still needs role context for screen readers, so it's an sr-only label here).
+	if (kind === "turns") {
+		const turns = arrayFieldOf(record.turns) ?? [];
+		if (turns.length === 0) return "";
+		return syncHtml(
+			<div class="piui-panel-section piui-turns">
+				{turns.map((turn, index) => renderPiUiTurn(element, turn, index))}
+			</div>,
+		);
+	}
 	if (kind === "log") {
 		return syncHtml(
 			<div class="piui-panel-section piui-panel-log" safe>
@@ -526,8 +610,9 @@ function renderPanelSection(
 			</div>,
 		);
 	}
+	const tone = textField(record.tone);
 	return syncHtml(
-		<div class="piui-panel-section piui-panel-status" safe>
+		<div class="piui-panel-section piui-panel-status" data-tone={tone} safe>
 			{text}
 		</div>,
 	);
@@ -541,11 +626,12 @@ function normalizeFields(value: JsonValue | undefined): PiUiFieldSpec[] {
 		const record = raw;
 		const kind = textField(record.kind) ?? "text";
 		const id = textField(record.id) ?? `field-${index}`;
-		const options: Array<{ id: string; label: string }> = [];
+		const options: Array<{ id: string; label: string; description?: string }> = [];
 		if (Array.isArray(record.options)) {
 			for (const option of record.options) {
 				if (!isJsonObject(option)) continue;
 				const optionRecord = option;
+				const description = textField(optionRecord.description);
 				options.push({
 					id: textField(optionRecord.id) ?? textField(optionRecord.value) ?? "",
 					label:
@@ -553,6 +639,7 @@ function normalizeFields(value: JsonValue | undefined): PiUiFieldSpec[] {
 						textField(optionRecord.title) ??
 						textField(optionRecord.id) ??
 						"",
+					description: description ? description : undefined,
 				});
 			}
 		}
@@ -561,6 +648,7 @@ function normalizeFields(value: JsonValue | undefined): PiUiFieldSpec[] {
 			kind,
 			label: textField(record.label) ?? textField(record.title),
 			placeholder: textField(record.placeholder),
+			searchable: isBoolean(record.searchable) ? record.searchable : false,
 			options,
 		});
 	}
@@ -575,13 +663,34 @@ function renderFields(element: PiUiElement, fields: PiUiFieldSpec[]): string {
 	);
 }
 
+/**
+ * A field label that just repeats the sheet title (ask-user.ts titles its sheet with the
+ * question and labels the options field with it too, optionally suffixed " (1/2)") stays
+ * for assistive tech but is visually hidden, so the question is not shown twice.
+ */
+function fieldLabelClass(element: PiUiElement, field: PiUiFieldSpec): string | undefined {
+	const label = field.label?.trim();
+	const title = element.title?.trim();
+	if (!label || !title) return undefined;
+	return title === label || title.startsWith(`${label} (`) ? "sr-only" : undefined;
+}
+
 function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 	const signal = fieldSignal(element, field);
 	if (field.kind === "textarea") {
 		return syncHtml(
 			<div class="field">
-				{field.label && <label safe>{field.label}</label>}
+				{field.label && (
+					<label
+						class={fieldLabelClass(element, field)}
+						for={fieldDomId(element, field)}
+						safe
+					>
+						{field.label}
+					</label>
+				)}
 				<textarea
+					id={fieldDomId(element, field)}
 					class="dialog-editor"
 					placeholder={field.placeholder}
 					data-signals={`{${signal}: ''}`}
@@ -591,31 +700,106 @@ function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 		);
 	}
 	if (field.kind === "select") {
+		// Plain native <select> unless there's something a bare <option> can't show
+		// (a description) or the sender asked for a filter box (`searchable`) — e.g.
+		// ask-user.ts's options carry both, todo.ts's plain status field carries
+		// neither and keeps today's dropdown.
+		const useOptionRows =
+			field.searchable || field.options.some((option) => option.description);
+		if (!useOptionRows) {
+			return syncHtml(
+				<div class="field">
+					{field.label && (
+						<label class={fieldLabelClass(element, field)} safe>
+							{field.label}
+						</label>
+					)}
+					<select data-signals={`{${signal}: ''}`} data-bind={signal}>
+						{field.options.map((option) => (
+							<option value={option.id} safe>
+								{option.label}
+							</option>
+						))}
+					</select>
+				</div>,
+			);
+		}
+		const groupName = optionsGroupName(signal);
+		const filterSig = optionsFilterSignal(signal);
 		return syncHtml(
 			<div class="field">
-				{field.label && <label safe>{field.label}</label>}
-				<select data-signals={`{${signal}: ''}`} data-bind={signal}>
+				{field.label && (
+					<label class={fieldLabelClass(element, field)} safe>
+						{field.label}
+					</label>
+				)}
+				{field.searchable && renderOptionFilter(field, filterSig)}
+				<div class="piui-option-rows" data-signals={`{${signal}: ''}`}>
 					{field.options.map((option) => (
-						<option value={option.id} safe>
-							{option.label}
-						</option>
+						<label
+							class="piui-option-row"
+							data-show={
+								field.searchable
+									? optionRowFilterExpr(filterSig, option)
+									: undefined
+							}
+						>
+							<input
+								type="radio"
+								name={groupName}
+								value={option.id}
+								data-bind={signal}
+							/>
+							<span class="piui-option-row-text">
+								<span class="piui-option-title" safe>
+									{option.label}
+								</span>
+								{option.description && (
+									<span class="piui-option-description" safe>
+										{option.description}
+									</span>
+								)}
+							</span>
+						</label>
 					))}
-				</select>
+				</div>
 			</div>,
 		);
 	}
 	if (field.kind === "multiselect") {
+		const filterSig = optionsFilterSignal(signal);
 		return syncHtml(
 			<fieldset class="field piui-multiselect">
-				{field.label && <legend safe>{field.label}</legend>}
+				{field.label && (
+					<legend class={fieldLabelClass(element, field)} safe>
+						{field.label}
+					</legend>
+				)}
+				{field.searchable && renderOptionFilter(field, filterSig)}
 				<div data-signals={`{${signal}: []}`}>
 					{field.options.map((option) => (
-						<label class="piui-multiselect-option">
+						<label
+							class="piui-multiselect-option piui-option-row"
+							data-show={
+								field.searchable
+									? optionRowFilterExpr(filterSig, option)
+									: undefined
+							}
+						>
 							<input
 								type="checkbox"
 								data-on:change={`$${signal} = evt.target.checked ? [...$${signal}, ${JSON.stringify(option.id)}] : $${signal}.filter((value) => value !== ${JSON.stringify(option.id)})`}
 							/>
-							<span safe>{option.label}</span>
+							<span class="piui-option-row-text">
+								<span class="piui-option-title" safe>
+									{option.label}
+								</span>
+								{option.description && (
+									<span class="piui-option-description" safe>
+										{option.description}
+									</span>
+								)}
+							</span>
 						</label>
 					))}
 				</div>
@@ -624,27 +808,66 @@ function renderField(element: PiUiElement, field: PiUiFieldSpec): string {
 	}
 	return syncHtml(
 		<div class="field">
-			{field.label && <label safe>{field.label}</label>}
+			{field.label && (
+				<label
+					class={fieldLabelClass(element, field)}
+					for={fieldDomId(element, field)}
+					safe
+				>
+					{field.label}
+				</label>
+			)}
 			<input
+				id={fieldDomId(element, field)}
 				type="text"
 				placeholder={field.placeholder}
 				data-signals={`{${signal}: ''}`}
 				data-bind={signal}
 				autocomplete="off"
+				aria-label={field.label ? undefined : field.placeholder}
+				// A single-line field's placeholder routinely promises "Enter to send" (btw's
+				// composer, e.g.) — make that true for every piui text field, not just btw's.
+				data-on:keydown={submitOnEnterScript()}
 			/>
 		</div>,
 	);
 }
 
-function renderPiUiActions(element: PiUiElement): string {
+/**
+ * Enter (without Shift, and not while composing an IME candidate) clicks the nearest
+ * non-destructive/outline action button instead of doing nothing — the primary action for
+ * whichever form this field belongs to, whether that's a top-level field (its action lives
+ * in the sheet's `<footer>`) or a nested form section's own `.piui-actions` (btw's composer).
+ */
+function submitOnEnterScript(): string {
+	return `if (evt.key === 'Enter' && !evt.shiftKey && !evt.isComposing) {
+		evt.preventDefault();
+		const root = evt.target.closest('.piui-sheet-panel, .piui-element') ?? document;
+		const button = root.querySelector('.piui-actions .btn:not([data-variant="outline"]):not([data-variant="destructive"])')
+			?? root.querySelector('.piui-actions .btn');
+		button?.click();
+	}`;
+}
+
+function renderPiUiActions(
+	element: PiUiElement,
+	options?: { suppressCloseAction?: boolean },
+): string {
 	const fields = normalizeFields(element.data.fields);
 	const declared = element.actions ?? [];
 	// Bridge forms such as ask-user.ts's sheet send `fields` without any `actions` and wait
 	// for a `submit` action carrying the field values; give them the button that sends it.
-	const actions: readonly PiUiAction[] =
+	const withSubmit: readonly PiUiAction[] =
 		fields.length > 0 && !declared.some((action) => action.id === submitActionId)
 			? [{ id: submitActionId, label: "Submit", variant: "primary" }, ...declared]
 			: declared;
+	// A sheet's header already carries the one close control (see `renderPiUiSheetDialog`),
+	// which posts the same `close` action id — so an extension's own declared `close` action
+	// (e.g. pi-mcp-adapter's mcp-setup-panel, which keeps one for non-sheet placements) would
+	// otherwise duplicate it as a redundant footer "Close" button.
+	const actions = options?.suppressCloseAction
+		? withSubmit.filter((action) => action.id !== closeActionId)
+		: withSubmit;
 	if (actions.length === 0) return "";
 	return syncHtml(
 		<div class="piui-actions">
@@ -664,25 +887,44 @@ function renderActionButton(
 	action: PiUiAction,
 	valueExpression: string,
 	size?: "xs",
+	afterPost?: string,
 ): string {
-	const post = actionPost(element, action.id, valueExpression);
+	const post = afterPost
+		? `${actionPost(element, action.id, valueExpression)}; ${afterPost}`
+		: actionPost(element, action.id, valueExpression);
+	const onClick = action.confirm
+		? `if (confirm(${JSON.stringify(action.confirm)})) { ${post} }`
+		: post;
+	const variant =
+		action.variant === "primary"
+			? undefined
+			: action.variant === "danger"
+				? "destructive"
+				: "outline";
+	// A compact single input row (btw's composer) wants an inline icon button, not a
+	// labeled one — `label` still carries the accessible name and tooltip text.
+	if (action.icon) {
+		return syncHtml(
+			<button
+				type="button"
+				class="btn"
+				data-variant={variant}
+				data-size={size ? "icon-xs" : "icon"}
+				data-on:click={onClick}
+				aria-label={action.label}
+				data-tooltip={action.label}
+			>
+				<Icon icon={action.icon === "stop" ? Square : ArrowUp} />
+			</button>,
+		);
+	}
 	return syncHtml(
 		<button
 			type="button"
 			class="btn"
-			data-variant={
-				action.variant === "primary"
-					? undefined
-					: action.variant === "danger"
-						? "destructive"
-						: "outline"
-			}
+			data-variant={variant}
 			data-size={size}
-			data-on:click={
-				action.confirm
-					? `if (confirm(${JSON.stringify(action.confirm)})) { ${post} }`
-					: post
-			}
+			data-on:click={onClick}
 			safe
 		>
 			{action.label}
@@ -717,12 +959,62 @@ function dialogId(element: PiUiElement): string {
  * The Datastar signal name holding a field's value. Only identifier characters are kept:
  * `piUiSlug` allows `-`, which Datastar expressions would parse as subtraction.
  */
+/**
+ * A field's stable DOM id. It keeps that exact `<input>` (and its focus) across a morph when
+ * sections before it come and go: btw's composer lost focus after every send without it.
+ */
+function fieldDomId(element: PiUiElement, field: PiUiFieldSpec): string {
+	return `piui-field-${piUiSlug(element.ns)}-${piUiSlug(element.id)}-${piUiSlug(field.id)}`;
+}
+
 function fieldSignal(element: PiUiElement, field: PiUiFieldSpec): string {
 	return `_piuiField_${signalPart(element.ns)}_${signalPart(element.id)}_${signalPart(field.id)}`;
 }
 
 function signalPart(value: string): string {
 	return value.replaceAll(/[^a-zA-Z0-9_]/g, "_");
+}
+
+/** The `name` a `select`/`multiselect` field's option rows share so a `select`
+ * field's `<input type=radio>` rows form one native radio group — giving the
+ * plan's "arrows navigate options" for free from the browser, no client JS. */
+function optionsGroupName(signal: string): string {
+	return `${signal}_options`;
+}
+
+/** The Datastar signal holding a searchable field's live filter text. */
+function optionsFilterSignal(signal: string): string {
+	return `${signal}_filter`;
+}
+
+/** The filter box above a searchable `select`/`multiselect`'s option rows —
+ * same "type to filter, entirely client-side" idiom as font-dialog.tsx's font
+ * search box. */
+function renderOptionFilter(field: PiUiFieldSpec, filterSignal: string): string {
+	return syncHtml(
+		<input
+			type="search"
+			class="piui-option-filter"
+			placeholder={field.placeholder ?? "Type to filter..."}
+			data-signals={`{${filterSignal}: ''}`}
+			data-bind={filterSignal}
+			autocomplete="off"
+		/>,
+	);
+}
+
+/**
+ * A row's `data-show` expression: visible when the filter is empty, or the
+ * filter text (trimmed, lower-cased) is found in the row's own label +
+ * description — matched entirely in the browser against a literal baked into
+ * the row's own markup, same shape as font-dialog.tsx's `data-show` filter.
+ */
+function optionRowFilterExpr(
+	filterSignal: string,
+	option: { label: string; description?: string },
+): string {
+	const haystack = `${option.label} ${option.description ?? ""}`.toLocaleLowerCase();
+	return `!$${filterSignal}.trim() || ${JSON.stringify(haystack)}.includes($${filterSignal}.trim().toLocaleLowerCase())`;
 }
 
 /**
@@ -766,6 +1058,13 @@ function sheetOpenFocusScript(): string {
 	});`;
 }
 
+function clearFieldsExpression(
+	element: PiUiElement,
+	fields: readonly PiUiFieldSpec[],
+): string {
+	return fields.map((field) => `$${fieldSignal(element, field)} = ''`).join("; ");
+}
+
 function fieldValuesExpression(
 	element: PiUiElement,
 	fields: readonly PiUiFieldSpec[],
@@ -784,6 +1083,7 @@ function parseActions(value: JsonValue | undefined): PiUiAction[] {
 		const label = textField(candidate.label);
 		if (id === undefined || label === undefined) continue;
 		const variant = candidate.variant;
+		const icon = candidate.icon;
 		actions.push({
 			id,
 			label,
@@ -792,6 +1092,7 @@ function parseActions(value: JsonValue | undefined): PiUiAction[] {
 					? variant
 					: undefined,
 			confirm: textField(candidate.confirm),
+			icon: icon === "send" || icon === "stop" ? icon : undefined,
 		});
 	}
 	return actions;

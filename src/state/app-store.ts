@@ -5,6 +5,7 @@ import {
 	type TerminalSurface,
 } from "../agent/terminal-surface/types.ts";
 import { appCommandCatalog } from "../commands/catalog.ts";
+import type { ExtensionActivityChip } from "../extension-activity-types.ts";
 import {
 	type ExtensionChannelSnapshot,
 	type PiUiElement,
@@ -23,6 +24,10 @@ import { formatMessageCount } from "../utils/format.ts";
 import type { JsonObject } from "../utils/json-types.ts";
 import { formatShortcut } from "../utils/keyboard.ts";
 import { defaultWorkspacePath } from "../utils/workspace.ts";
+import {
+	type WorkspaceGitGraphSnapshot,
+	unloadedWorkspaceGitGraphSnapshot,
+} from "../workspace-git-graph-types.ts";
 import {
 	type WorkspaceReviewPreferences,
 	type WorkspaceReviewSnapshot,
@@ -44,6 +49,10 @@ export type AppModel = {
 	name: string;
 	configured: boolean;
 	scoped: boolean;
+	/** The model's context window, in tokens, when the provider's catalog reports one. */
+	contextWindow?: number;
+	/** Whether the model supports extended thinking/reasoning. */
+	reasoning?: boolean;
 };
 export type AppThinkingLevel =
 	| "off"
@@ -100,7 +109,14 @@ export type AppExtensionDialog =
 			placeholder?: string;
 			prefill?: string;
 	  };
-export type AppExtensionStatus = { key: string; text: string };
+export type AppExtensionStatus = {
+	key: string;
+	text: string;
+	/** The `ExtensionActivity.id` this status line is currently attributed to,
+	 * when `extension-activity` tracking recognized it as one — lets the
+	 * footer link a status line to its card (see `extension-activity/`). */
+	activityId?: string;
+};
 /**
  * A `pi.registerShortcut()` shortcut — see `src/agent/extension-shortcuts.ts`.
  * `reachableByKeyboard` is false for either of two reasons: `key` collides
@@ -334,6 +350,14 @@ export type AppStateSnapshot = Readonly<{
 	extensionWorkingIndicator: AppExtensionWorkingIndicator | undefined;
 	extensionWorkingMessage: string | undefined;
 	extensionWorkingVisible: boolean;
+	/** Prompt-strip chip row for every open (`started`/`working`)
+	 * `ExtensionActivity` — see `extension-activity/ledger.ts`'s `listOpen()`. */
+	extensionActivityChips: readonly ExtensionActivityChip[];
+	/** The `ExtensionActivity.id` behind the currently-shown working
+	 * indicator/message, when one is attributed — lets the indicator link to
+	 * its card the same way `AppExtensionStatus.activityId` does for a status
+	 * line. */
+	extensionWorkingActivityId: string | undefined;
 	llamaDialog: AppLlamaDialog | undefined;
 	currentModel: string | undefined;
 	currentSessionPath: string | undefined;
@@ -351,6 +375,7 @@ export type AppStateSnapshot = Readonly<{
 	workspaceTreeRevision: number;
 	workspaceReview: WorkspaceReviewSnapshot;
 	workspaceReviewPreferences: WorkspaceReviewPreferences;
+	workspaceGitGraph: WorkspaceGitGraphSnapshot;
 	liveWorkspace: LiveWorkspaceSnapshot;
 	liveWorkspacePreferences: LiveWorkspacePreferences;
 	recentWorkspaces: readonly string[];
@@ -538,6 +563,8 @@ export class AppStore {
 	extensionWorkingIndicator: AppExtensionWorkingIndicator | undefined;
 	extensionWorkingMessage: string | undefined;
 	extensionWorkingVisible = true;
+	extensionActivityChips: ExtensionActivityChip[] = [];
+	extensionWorkingActivityId: string | undefined;
 	llamaDialog: AppLlamaDialog | undefined;
 	currentModel: string | undefined;
 	currentSessionPath: string | undefined;
@@ -552,6 +579,7 @@ export class AppStore {
 	workspaceTreeRevision = 0;
 	workspaceReview = unloadedWorkspaceReviewSnapshot;
 	workspaceReviewPreferences: WorkspaceReviewPreferences = {};
+	workspaceGitGraph: WorkspaceGitGraphSnapshot = unloadedWorkspaceGitGraphSnapshot;
 	liveWorkspace: LiveWorkspaceSnapshot = emptyLiveWorkspaceSnapshot;
 	liveWorkspacePreferences: LiveWorkspacePreferences = {};
 	recentWorkspaces: string[] = [];
@@ -657,6 +685,10 @@ export class AppStore {
 				: undefined,
 			extensionWorkingMessage: this.extensionWorkingMessage,
 			extensionWorkingVisible: this.extensionWorkingVisible,
+			extensionActivityChips: this.extensionActivityChips.map((chip) => ({
+				...chip,
+			})),
+			extensionWorkingActivityId: this.extensionWorkingActivityId,
 			llamaDialog: this.llamaDialog ? structuredClone(this.llamaDialog) : undefined,
 			currentModel: this.currentModel,
 			currentSessionPath: this.currentSessionPath,
@@ -674,6 +706,7 @@ export class AppStore {
 			workspaceTreeRevision: this.workspaceTreeRevision,
 			workspaceReview: this.workspaceReview,
 			workspaceReviewPreferences: { ...this.workspaceReviewPreferences },
+			workspaceGitGraph: this.workspaceGitGraph,
 			// `LiveWorkspaceController.snapshot()` (the only producer, see `setLiveWorkspace`)
 			// always builds a brand-new object graph, so this reference is never mutated
 			// after the fact either — safe to hand out without `structuredClone`-ing again.
@@ -1139,10 +1172,17 @@ export class AppStore {
 		message?: string;
 		visible: boolean;
 		indicator?: AppExtensionWorkingIndicator;
+		activityId?: string;
 	}): void {
 		this.extensionWorkingMessage = options.message;
 		this.extensionWorkingVisible = options.visible;
 		this.extensionWorkingIndicator = options.indicator;
+		this.extensionWorkingActivityId = options.activityId;
+		this.commit();
+	}
+	/** Prompt-strip chip row — see `AppStateSnapshot.extensionActivityChips`. */
+	setExtensionActivityChips(chips: ExtensionActivityChip[]): void {
+		this.extensionActivityChips = chips.map((chip) => ({ ...chip }));
 		this.commit();
 	}
 	setDocumentTitle(title: string): void {
@@ -1262,6 +1302,7 @@ export class AppStore {
 		this.workspaceFilesRevision = 0;
 		this.workspaceTreeRevision = 0;
 		this.workspaceReview = unloadedWorkspaceReviewSnapshot;
+		this.workspaceGitGraph = unloadedWorkspaceGitGraphSnapshot;
 		this.presentation?.pickersChanged();
 		this.presentation?.workspaceReviewChanged();
 		this.commit();
@@ -1281,6 +1322,12 @@ export class AppStore {
 	}
 	setWorkspaceReviewPreferences(value: WorkspaceReviewPreferences): void {
 		this.workspaceReviewPreferences = value;
+		this.presentation?.workspaceReviewChanged();
+		this.commit();
+	}
+	setWorkspaceGitGraph(value: WorkspaceGitGraphSnapshot): void {
+		if (this.workspaceGitGraph.revision === value.revision) return;
+		this.workspaceGitGraph = value;
 		this.presentation?.workspaceReviewChanged();
 		this.commit();
 	}

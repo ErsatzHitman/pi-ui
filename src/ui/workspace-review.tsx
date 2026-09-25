@@ -1,9 +1,6 @@
 import { activeKeybind, keybindActions, keybindAria } from "../keybinds.ts";
-import { workspaceTreeStyle } from "../workspace-review-tree.ts";
+import type { WorkspaceGitGraphSnapshot } from "../workspace-git-graph-types.ts";
 import {
-	changesRatioDefault,
-	changesRatioMax,
-	changesRatioMin,
 	gitPaneRatioDefault,
 	gitPaneRatioMax,
 	gitPaneRatioMin,
@@ -12,10 +9,9 @@ import {
 	reviewSidebarWidthMin,
 	type WorkspaceReviewPreferences,
 	type WorkspaceReviewSnapshot,
-	workspaceChangeStats,
 } from "../workspace-review-types.ts";
 import { Icon } from "./icon.tsx";
-import { SquareSplitHorizontal, SquareSplitVertical, TextWrap, X } from "./icons.ts";
+import { TextWrap, X } from "./icons.ts";
 import { ShortcutKbd } from "./keyboard.tsx";
 import { syncHtml } from "./sync-html.ts";
 
@@ -79,8 +75,8 @@ export function renderWorkspaceReview(
 	treeRevision: number,
 	snapshot: WorkspaceReviewSnapshot,
 	preferences: WorkspaceReviewPreferences,
+	gitGraph: WorkspaceGitGraphSnapshot,
 ): string {
-	const stats = workspaceChangeStats(snapshot.changes);
 	return syncHtml(
 		<section
 			id="workspace-review"
@@ -104,6 +100,12 @@ export function renderWorkspaceReview(
 			<div
 				id="review-body"
 				class="review-body"
+				data-review-tab={
+					snapshot.isGitRepository && preferences.tab !== "files"
+						? "git"
+						: "files"
+				}
+				data-attr:data-review-tab="$_workspaceReviewGitAvailable && $workspaceReviewPreferences.tab !== 'files' ? 'git' : 'files'"
 				data-style={`{
 					'--review-sidebar-width': ($workspaceReviewPreferences.reviewSidebarWidth || ${reviewSidebarWidthDefault}) + 'px',
 				}`}
@@ -132,9 +134,6 @@ export function renderWorkspaceReview(
 				<aside
 					id="review-git-sidebar"
 					class="review-sidebar"
-					data-style={`{
-						'--review-changes-ratio': $workspaceReviewPreferences.changesRatio || ${changesRatioDefault},
-					}`}
 					style={
 						!snapshot.isGitRepository || preferences.tab === "files"
 							? "display: none"
@@ -146,95 +145,43 @@ export function renderWorkspaceReview(
 					"
 				>
 					{renderWorkspaceModeHeader("git", snapshot.isGitRepository)}
-					<section
-						id="review-changes-section"
-						class="raised-surface review-sidebar-panel review-changes"
-						hidden={snapshot.changes.length === 0}
-						data-attr:hidden="$_workspaceReviewChangeCount === 0"
-					>
-						<header class="review-sidebar-header">
-							<span>Changes</span>
+					<section class="raised-surface review-sidebar-panel review-changes">
+						<header
+							id="review-changes-summary"
+							class="review-sidebar-header"
+							hidden={gitGraph.changeCount === 0}
+							data-attr:hidden="$_workspaceReviewChangeCount === 0"
+						>
+							<span>Uncommitted changes</span>
 							<span
 								id="review-change-count"
 								title="Changed files and untracked folders"
 								class="fine-print review-change-count"
 								data-text="$_workspaceReviewChangeCount"
 							>
-								{snapshot.changeCount}
-							</span>
-							<span
-								class="review-change-totals"
-								title="Tracked line changes"
-								data-attr:hidden="!$_workspaceReviewStatsKnown"
-								hidden={!stats.tracked}
-							>
-								<span
-									id="review-total-additions"
-									class="review-additions"
-									data-text="'+' + $_workspaceReviewAdditions"
-								>
-									+{stats.additions}
-								</span>
-								<span
-									id="review-total-deletions"
-									class="review-deletions"
-									data-text="'-' + $_workspaceReviewDeletions"
-								>
-									-{stats.deletions}
-								</span>
+								{gitGraph.changeCount}
 							</span>
 						</header>
 						<div
-							id="review-tree"
-							class="review-tree"
-							style={workspaceTreeStyle}
-							aria-label="Git changes"
-							tabindex="-1"
-							data-show="$_workspaceReviewChangeCount > 0"
-						/>
-						<div
-							id="review-tree-empty"
+							id="review-changes-clean"
 							class="review-tree-empty"
-							style={
-								snapshot.changes.length > 0 ? "display: none" : undefined
-							}
+							style={gitGraph.changeCount > 0 ? "display: none" : undefined}
 							data-show="$_workspaceReviewChangeCount === 0"
 						>
 							Working tree clean
 						</div>
 					</section>
-					<div
-						id="review-changes-separator"
-						class="resize-handle"
-						data-orientation="horizontal"
-						role="separator"
-						tabindex="0"
-						hidden={snapshot.changes.length === 0}
-						data-attr:hidden="$_workspaceReviewChangeCount === 0"
-						aria-label="Resize Changes and History"
-						aria-orientation="horizontal"
-						aria-valuemin={changesRatioMin * 100}
-						aria-valuemax={changesRatioMax * 100}
-						data-attr:aria-valuenow={`Math.round(($workspaceReviewPreferences.changesRatio || ${changesRatioDefault}) * 100)`}
-						attrs={resizeHandleAttributes({
-							axis: "vertical",
-							defaultValue: changesRatioDefault,
-							maximum: changesRatioMax,
-							minimum: changesRatioMin,
-							preference: "changesRatio",
-							scale: "Math.max(1, el.parentElement.clientHeight - el.parentElement.firstElementChild.offsetHeight - el.offsetHeight)",
-						})}
-					/>
-					<section class="raised-surface review-sidebar-panel">
-						<header class="review-sidebar-header">History</header>
+					<section class="raised-surface review-sidebar-panel review-branches">
+						<header class="review-sidebar-header">
+							<span>Branches</span>
+						</header>
 						<div
-							id="review-history"
-							class="review-history"
-							aria-label="Commit history"
+							id="review-branch-list"
+							class="review-branch-list"
+							role="list"
+							aria-label="Local branches"
 							tabindex="-1"
-						>
-							<p class="review-loading">Loading history…</p>
-						</div>
+						/>
 					</section>
 				</aside>
 
@@ -404,72 +351,15 @@ export function renderWorkspaceReview(
 							<ShortcutKbd
 								shortcut={activeKeybind("focus-workspace-editor")}
 							/>
-							<div class="segmented-control" aria-label="Diff scope">
-								<button
-									id="review-mode-all"
-									type="button"
-									class="review-segment-text"
-									aria-pressed="true"
-								>
-									All
-								</button>
-								<button
-									id="review-mode-selected"
-									type="button"
-									class="review-segment-text"
-									aria-pressed="false"
-								>
-									Selected
-								</button>
-							</div>
-							<div
-								class="segmented-control review-icon-control"
-								aria-label="Diff layout"
-							>
-								<button
-									id="review-layout-split"
-									type="button"
-									class="review-segment-icon"
-									aria-pressed="true"
-									aria-label="Split diff layout"
-								>
-									<Icon icon={SquareSplitHorizontal} />
-								</button>
-								<button
-									id="review-layout-stacked"
-									type="button"
-									class="review-segment-icon"
-									aria-pressed="false"
-									aria-label="Stacked diff layout"
-								>
-									<Icon icon={SquareSplitVertical} />
-								</button>
-							</div>
-							<div class="segmented-control review-icon-control">
-								<button
-									id="review-wrap"
-									type="button"
-									class="review-segment-icon"
-									aria-pressed="true"
-									aria-label="Wrap long lines"
-								>
-									<Icon icon={TextWrap} />
-								</button>
-							</div>
-							<span
-								id="review-comment-status"
-								class="error-foreground review-comment-status"
-								hidden
-								aria-live="polite"
-							/>
 							<button
-								id="review-submit-comments"
+								id="review-graph-more"
 								type="button"
-								class="btn review-submit"
+								class="btn"
+								data-variant="outline"
 								data-size="xs"
-								hidden
+								hidden={!gitGraph.hasMore}
 							>
-								Submit review
+								Load more
 							</button>
 							<button
 								type="button"
@@ -483,14 +373,19 @@ export function renderWorkspaceReview(
 							</button>
 						</div>
 					</header>
-					<header id="review-detail-header" hidden />
 					<div class="review-diff-canvas">
 						<div
-							id="review-diff-view"
-							class="review-scroll-view review-diff-view"
-							aria-label="Code changes"
+							id="review-graph"
+							class="review-scroll-view review-graph"
+							aria-label="Commit graph"
 							aria-keyshortcuts={keybindAria("focus-workspace-editor")}
 							tabindex="-1"
+						/>
+						<aside
+							id="review-detail-header"
+							class="review-graph-detail"
+							aria-label="Commit detail"
+							hidden
 						/>
 						<div id="review-empty" class="review-empty">
 							{snapshot.isGitRepository
@@ -525,6 +420,7 @@ export function renderWorkspaceReview(
 				treeRevision,
 				snapshot,
 				preferences,
+				gitGraph,
 			)}
 			<dialog
 				id="workspace-entry-dialog"
@@ -665,6 +561,7 @@ function workspaceReviewDataElement(
 	treeRevision: number,
 	snapshot: WorkspaceReviewSnapshot,
 	preferences: WorkspaceReviewPreferences,
+	gitGraph: WorkspaceGitGraphSnapshot,
 ): JSX.Element {
 	return (
 		<script id="workspace-review-data" type="application/json">
@@ -673,6 +570,7 @@ function workspaceReviewDataElement(
 				treeRevision,
 				preferences,
 				snapshot,
+				gitGraph,
 				workspacePath,
 			}).replaceAll("<", "\\u003c")}
 		</script>
@@ -685,6 +583,7 @@ function renderWorkspaceReviewDataRegion(
 	treeRevision: number,
 	snapshot: WorkspaceReviewSnapshot,
 	preferences: WorkspaceReviewPreferences,
+	gitGraph: WorkspaceGitGraphSnapshot,
 ): JSX.Element {
 	return (
 		<div id="workspace-review-data-region" hidden>
@@ -694,6 +593,7 @@ function renderWorkspaceReviewDataRegion(
 				treeRevision,
 				snapshot,
 				preferences,
+				gitGraph,
 			)}
 		</div>
 	);
@@ -705,6 +605,7 @@ export function renderWorkspaceReviewData(
 	treeRevision: number,
 	snapshot: WorkspaceReviewSnapshot,
 	preferences: WorkspaceReviewPreferences,
+	gitGraph: WorkspaceGitGraphSnapshot,
 ): string {
 	return syncHtml(
 		workspaceReviewDataElement(
@@ -713,6 +614,7 @@ export function renderWorkspaceReviewData(
 			treeRevision,
 			snapshot,
 			preferences,
+			gitGraph,
 		),
 	);
 }

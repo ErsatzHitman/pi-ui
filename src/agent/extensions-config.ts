@@ -35,9 +35,39 @@ export type ExtensionsMode = "tui" | "rpc";
 
 export type ExtensionsConfig = Readonly<{
 	mode: ExtensionsMode;
+	/**
+	 * Draw extension `setHeader`/`setFooter` components (a TUI banner, a
+	 * terminal status line) as terminal surfaces around the prompt. Off by
+	 * default: they are terminal chrome that duplicates pi-ui's own prompt
+	 * footer (workspace, extension statuses, model, thinking, usage), and they
+	 * render as a foreign terminal block inside the prompt card. The calls are
+	 * still accepted, as RPC mode does, so extensions never see an error.
+	 */
+	terminalChrome: boolean;
+	/**
+	 * Track and render every extension's Called/Working/Output/Completed
+	 * lifecycle as durable cards (`src/extension-activity/`), the way subagent
+	 * activity is already shown. On by default; set `false` to fully disable
+	 * instrumentation (no wrapping, no cards, no persistence) — see
+	 * `DESIGN-ext-activity.md` §2.6.
+	 */
+	activityTracking: boolean;
+	/**
+	 * Persist extension activity as `pi-ui.extension-activity` `CustomEntry`
+	 * records so cards survive a session switch, restart or `/resume`. On by
+	 * default; set `false` to keep activity live-only for the running process
+	 * (still tracked and rendered, just not written to the session file). Has
+	 * no effect when `activityTracking` is `false`.
+	 */
+	activityPersist: boolean;
 }>;
 
-export const defaultExtensionsConfig: ExtensionsConfig = { mode: "tui" };
+export const defaultExtensionsConfig: ExtensionsConfig = {
+	mode: "tui",
+	terminalChrome: false,
+	activityTracking: true,
+	activityPersist: true,
+};
 
 /** The env var extensions' `lib/bridge.ts` can check to keep their PIUI-bridge
  * (native HTML) path live even when pi-ui binds them as `"tui"`. Set once, before
@@ -50,7 +80,12 @@ export function parseExtensionsConfig(value: JsonValue | undefined): ExtensionsC
 		isString(value.mode) && isExtensionsMode(value.mode)
 			? value.mode
 			: defaultExtensionsConfig.mode;
-	return { mode };
+	return {
+		mode,
+		terminalChrome: value.terminalChrome === true,
+		activityTracking: value.activityTracking !== false,
+		activityPersist: value.activityPersist !== false,
+	};
 }
 
 function isExtensionsMode(value: string): value is ExtensionsMode {

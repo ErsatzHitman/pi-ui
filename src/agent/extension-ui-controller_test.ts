@@ -364,6 +364,64 @@ test("extension UI projects status, widgets, working state, and editor text", ()
 	assertEquals(store.extensionWorkingMessage, undefined);
 });
 
+test("setStatusActivityId attaches an ExtensionActivity id to a status line, and clearing it drops the field", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	ui.setStatus("fake-vision", "describing 1 image…");
+	assertEquals(store.extensionStatuses, [
+		{ key: "fake-vision", text: "describing 1 image…" },
+	]);
+
+	controller.setStatusActivityId("fake-vision", "xa-1");
+	assertEquals(store.extensionStatuses, [
+		{ key: "fake-vision", text: "describing 1 image…", activityId: "xa-1" },
+	]);
+
+	controller.setStatusActivityId("fake-vision", undefined);
+	assertEquals(store.extensionStatuses, [
+		{ key: "fake-vision", text: "describing 1 image…" },
+	]);
+});
+
+test("setStatusActivityId for a key with no current status is a no-op (nothing to republish)", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	controller.setStatusActivityId("not-set", "xa-1");
+	assertEquals(store.extensionStatuses, []);
+});
+
+test("clearing a status also drops its activityId, so a later re-set starts unattributed", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	ui.setStatus("fake-vision", "describing 1 image…");
+	controller.setStatusActivityId("fake-vision", "xa-1");
+	ui.setStatus("fake-vision", undefined);
+	ui.setStatus("fake-vision", "describing 1 image…");
+	assertEquals(store.extensionStatuses, [
+		{ key: "fake-vision", text: "describing 1 image…" },
+	]);
+});
+
+test("setWorkingActivityId attaches an ExtensionActivity id to the working indicator, and cancelAll clears it", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	ui.setWorkingMessage("Indexing...");
+	assertEquals(store.extensionWorkingActivityId, undefined);
+
+	controller.setWorkingActivityId("xa-2");
+	assertEquals(store.extensionWorkingActivityId, "xa-2");
+	assertEquals(store.extensionWorkingMessage, "Indexing...");
+
+	controller.cancelAll();
+	assertEquals(store.extensionWorkingActivityId, undefined);
+});
+
 test("extension UI intercepts PIUI bridge payloads instead of showing them as notices", () => {
 	const store = new AppStore();
 	const controller = new ExtensionUiController(store);
@@ -629,9 +687,30 @@ test("a custom() surface's real Theme reflects the client's reported color schem
 	assertEquals(defaultThemeName, "pi-ui-dark");
 });
 
-test("setWidget/setFooter/setHeader component factories mount persistent terminal surfaces", () => {
+test("extension setFooter/setHeader are accepted but not drawn by default", () => {
 	const store = new AppStore();
 	const controller = new ExtensionUiController(store);
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	ui.setWidget("panel", () => staticComponent(["widget line"]) as never);
+	ui.setFooter(() => staticComponent(["footer line"]) as never);
+	ui.setHeader(() => staticComponent(["header line"]) as never);
+	assertEquals(
+		store.snapshot().terminalSurfaces.map((s) => s.kind),
+		["widget"],
+	);
+
+	ui.setFooter(undefined);
+	ui.setHeader(undefined);
+	assertEquals(
+		store.snapshot().terminalSurfaces.map((s) => s.kind),
+		["widget"],
+	);
+});
+
+test("setWidget/setFooter/setHeader component factories mount persistent terminal surfaces", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store, { terminalChrome: true });
 	const ui = controller.context(() => true, fakeRuntimeKey());
 
 	ui.setWidget("panel", () => staticComponent(["widget line"]) as never);
@@ -736,4 +815,44 @@ test("ExtensionUiController strips ANSI styling from extension notices", () => {
 	ui.notify("\u001b[1mRTK\u001b[0m: \u001b[32mON\u001b[0m", "info");
 
 	assertEquals(store.snapshot().messages.at(-1)?.text, "RTK: ON");
+});
+
+test("a widget factory's committed frames reach onWidgetFrame with their key and raw lines, other surfaces don't", () => {
+	const store = new AppStore();
+	const frames: { key: string; lines: readonly string[] }[] = [];
+	const controller = new ExtensionUiController(store, {
+		terminalChrome: true,
+		onWidgetFrame: (key, lines) => frames.push({ key, lines }),
+	});
+	const ui = controller.context(() => true, fakeRuntimeKey());
+
+	ui.setWidget(
+		"jev-decompose",
+		() => staticComponent(["\u001b[1mJev\u001b[0m", "consulting jev"]) as never,
+	);
+	ui.setFooter(() => staticComponent(["footer line"]) as never);
+	assertEquals(frames.length > 0, true);
+	assertEquals(
+		frames.every((frame) => frame.key === "jev-decompose"),
+		true,
+	);
+	assertEquals(frames.at(-1)?.lines.slice(0, 2), [
+		"\u001b[1mJev\u001b[0m",
+		"consulting jev",
+	]);
+});
+
+test("a throwing onWidgetFrame hook never breaks rendering the widget", () => {
+	const store = new AppStore();
+	const controller = new ExtensionUiController(store, {
+		onWidgetFrame: () => {
+			throw new Error("hook exploded");
+		},
+	});
+	const ui = controller.context(() => true, fakeRuntimeKey());
+	ui.setWidget("panel", () => staticComponent(["widget line"]) as never);
+	assertEquals(
+		store.snapshot().terminalSurfaces.map((surface) => surface.kind),
+		["widget"],
+	);
 });

@@ -1,18 +1,83 @@
 import { test } from "bun:test";
 
 import {
+	assert,
 	assertEquals,
 	assertFalse,
 	assertStringIncludes,
 	assertThrows,
 } from "#testing/assertions";
 
+import { isPiCliPassthrough } from "./pi-cli-passthrough.ts";
 import { serverAutostartConfig, systemdService } from "./server-autostart.ts";
 import {
 	buildServiceInstallAutostartConfig,
 	createShutdown,
 	formatCliError,
+	isEntryPoint,
 } from "./server-main.ts";
+
+// subagents stream: reproduces "sub-agents don't work under pi-ui" (PLAN-ux.md §subagents).
+// `~/.pi/agent/extensions/subagents.ts` `piInvocation()` re-invokes "the running pi" —
+// under pi-ui that is this same executable/entry point — with plain pi CLI arguments
+// (`--mode json -p --no-session ...`). Before the fix, those never reached
+// `parseServerOptions` as anything but an unrecognized server flag, so every sub-agent
+// child died immediately with "unknown option: --mode" instead of running a turn.
+test("isPiCliPassthrough: a bare `pi-ui` (no args) is the server, not passthrough", () => {
+	assertFalse(isPiCliPassthrough([]));
+});
+
+test("isPiCliPassthrough: pi-ui's own flags stay the server, not passthrough", () => {
+	assertFalse(isPiCliPassthrough(["--host", "0.0.0.0", "--port", "8080"]));
+	assertFalse(isPiCliPassthrough(["--host=0.0.0.0"]));
+	assertFalse(isPiCliPassthrough(["--port=8080"]));
+	assertFalse(isPiCliPassthrough(["--remote"]));
+	assertFalse(isPiCliPassthrough(["--insecure-no-auth"]));
+	assertFalse(isPiCliPassthrough(["--auth-token", "secret"]));
+	assertFalse(isPiCliPassthrough(["--auth-token=secret"]));
+	assertFalse(isPiCliPassthrough(["--workspace", "/srv/ws"]));
+	assertFalse(isPiCliPassthrough(["--workspace=/srv/ws"]));
+	assertFalse(isPiCliPassthrough(["--help"]));
+	assertFalse(isPiCliPassthrough(["-h"]));
+	assertFalse(isPiCliPassthrough(["--version"]));
+});
+
+test("isPiCliPassthrough: `service`/`autostart` stay pi-ui subcommands, not passthrough", () => {
+	assertFalse(isPiCliPassthrough(["service", "install"]));
+	assertFalse(isPiCliPassthrough(["service", "uninstall"]));
+	assertFalse(isPiCliPassthrough(["autostart", "enable"]));
+	assertFalse(isPiCliPassthrough(["autostart", "disable"]));
+});
+
+test("isPiCliPassthrough: exactly the argv piInvocation() builds for a sub-agent is passthrough", () => {
+	assert(
+		isPiCliPassthrough([
+			"--mode",
+			"json",
+			"-p",
+			"--no-session",
+			"--no-extensions",
+			"--no-skills",
+			"--no-tools",
+			"--append-system-prompt",
+			"C:\\temp\\pi-subagents-xyz\\prompt-scout.md",
+			"do the thing",
+		]),
+	);
+});
+
+test('isPiCliPassthrough: a bare positional prompt (`pi "task"`) is passthrough', () => {
+	assert(isPiCliPassthrough(["do the thing"]));
+});
+
+test("isPiCliPassthrough: an unrecognized flag is passthrough, not a pi-ui usage error", () => {
+	// pi-ui only special-cases its own small, closed set of top-level forms; anything else
+	// (including a mistyped one) falls through to the bundled pi CLI, which has its own
+	// "unknown option" handling — this is what makes an unmodified extension's re-invocation
+	// (any pi CLI flag pi-ui itself has never heard of) work without pi-ui special-casing
+	// every pi CLI flag individually.
+	assert(isPiCliPassthrough(["--models", "sonnet,haiku"]));
+});
 
 // These tests exercise the exact function `main()`'s `pi-ui service install` branch calls
 // (`buildServiceInstallAutostartConfig`), not a hand-built `serverAutostartConfig` /
@@ -231,4 +296,31 @@ test("shutdown's closeActiveConnections is still overridable for callers that ne
 	);
 	await shutdown();
 	assertEquals(calls, ["stop(false)", "dispose"]);
+});
+
+test("isEntryPoint: true when this module's own path is the one that ran (source, same separators)", () => {
+	assert(isEntryPoint("/home/x/src/server-main.ts", "/home/x/src/server-main.ts"));
+});
+
+test("isEntryPoint: true across a Windows backslash vs. compiled-binary forward-slash mismatch (root-caused Bun.build compile bug: bun 1.4.2's import.meta.main reports false for a Windows exe compiled through the Bun.build() JS API, even though Bun.main correctly resolves to this module's own path — this is why dist/pi-ui.exe from scripts/build.ts silently exited)", () => {
+	assert(isEntryPoint("B:\\~BUN\\root\\pi-ui.exe", "B:/~BUN/root/pi-ui.exe"));
+});
+
+test("isEntryPoint: true when both paths use backslashes (bun src/server-main.ts from source on Windows)", () => {
+	assert(
+		isEntryPoint("C:\\repo\\src\\server-main.ts", "C:\\repo\\src\\server-main.ts"),
+	);
+});
+
+test("isEntryPoint: false when a different file ran (e.g. this module was only imported, as server-main_test.ts does)", () => {
+	assertFalse(
+		isEntryPoint(
+			"C:\\repo\\src\\server-main.ts",
+			"C:\\repo\\src\\server-main_test.ts",
+		),
+	);
+});
+
+test("isEntryPoint: false for two unrelated compiled-binary paths", () => {
+	assertFalse(isEntryPoint("B:/~BUN/root/pi-ui.exe", "B:/~BUN/root/other.exe"));
 });

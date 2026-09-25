@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import os from "node:os";
 
-import { assertFalse, assertStringIncludes } from "#testing/assertions";
+import { assertEquals, assertFalse, assertStringIncludes } from "#testing/assertions";
 
 import {
 	renderFilePickerResults,
@@ -58,6 +58,26 @@ test("slash picker completes user-defined commands instead of running them", () 
 	assertStringIncludes(html, "window.piUi.pickers.complete(&#34;plan&#34;)");
 	assertStringIncludes(html, "window.piUi.pickers.complete(&#34;compact&#34;)");
 	assertStringIncludes(html, "payload: { prompt: &#34;/reload&#34; }");
+});
+
+test("choosing the slash picker's /model row opens the model picker, not a bare completion", () => {
+	// Regression: typing "/model" + Enter accepted the slash row, which completed the
+	// prompt to "/model " and opened argument completions instead of the model picker —
+	// the user was left in a list they could not pick from with the keyboard.
+	const html = renderSlashPicker(
+		appRenderSnapshot({
+			slashCommands: [
+				{
+					name: "model",
+					description: "Select model (opens selector UI)",
+					source: "system",
+					argumentHint: "<provider/model>",
+				},
+			],
+		}),
+	);
+	assertStringIncludes(html, "payload: { prompt: &#34;/model&#34; }");
+	assertFalse(html.includes("window.piUi.pickers.complete(&#34;model&#34;)"));
 });
 
 test("file suggestions have stable option ids without nested focus targets", () => {
@@ -333,6 +353,272 @@ test("model picker distinguishes missing auth from an unselected model", () => {
 	assertStringIncludes(withoutSelection, "Claude Sonnet");
 });
 
+test("model picker refreshes keyboard state when it opens, not when it closes", () => {
+	// Regression: the popover used to reset `.active`/aria-activedescendant only on
+	// `evt.newState === 'closed'`, so a freshly-opened picker had no active row and a
+	// bare Enter (before ever pressing an arrow key) silently did nothing — the user had
+	// to reach for the mouse. `/model` with no argument (and Enter on the slash picker's
+	// `/model` row) must let arrow keys + Enter select immediately on open.
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "claude-sonnet",
+					provider: "anthropic",
+					name: "Claude Sonnet",
+					configured: true,
+					scoped: false,
+				},
+			],
+			currentModel: "anthropic/claude-sonnet",
+		}),
+	);
+	assertStringIncludes(html, "evt.newState === 'open'");
+	assertStringIncludes(html, "window.piUi.modelPicker.reset(el)");
+	assertFalse(html.includes("evt.newState === 'closed'"));
+});
+
+test("model picker is a dual-pane provider -> model picker", () => {
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "claude-sonnet",
+					provider: "anthropic",
+					name: "Claude Sonnet",
+					configured: true,
+					scoped: false,
+				},
+				{
+					id: "claude-haiku",
+					provider: "anthropic",
+					name: "Claude Haiku",
+					configured: true,
+					scoped: false,
+				},
+				{
+					id: "gpt-5.6",
+					provider: "openai-codex",
+					name: "GPT 5.6",
+					configured: false,
+					scoped: false,
+				},
+			],
+			currentModel: "anthropic/claude-sonnet",
+		}),
+	);
+
+	// Provider pane: one row per provider, with a model count and current-provider marker.
+	assertStringIncludes(html, 'id="model-provider-menu"');
+	assertStringIncludes(html, 'aria-label="Providers"');
+	assertStringIncludes(html, 'id="model-provider-9-anthropic"');
+	assertStringIncludes(html, 'id="model-provider-12-openai-codex"');
+	assertStringIncludes(html, 'data-provider="anthropic"');
+	assertStringIncludes(html, 'aria-current="true"');
+	assertStringIncludes(html, "2 models");
+	assertStringIncludes(html, "1 model");
+	assertStringIncludes(html, "no auth");
+
+	// The current provider (backing the current model) gets the same visible
+	// selection-dot marker as the current model row — not just a faint
+	// aria-current attribute (audit: "only faintly highlighted").
+	assertStringIncludes(
+		html,
+		'id="model-provider-9-anthropic" role="menuitem" class="model-option model-provider-option" data-preserve-attr="class" data-provider="anthropic" aria-current="true"',
+	);
+	assertStringIncludes(
+		html,
+		'</span><span class="selection-dot model-current-indicator" aria-hidden="true"></span></div><div id="model-provider-12-openai-codex"',
+	);
+	assertStringIncludes(
+		html,
+		'id="model-provider-12-openai-codex" role="menuitem" class="model-option model-provider-option" data-preserve-attr="class" data-provider="openai-codex" aria-current="false"',
+	);
+	assertStringIncludes(
+		html,
+		'<span class="selection-dot model-current-indicator" hidden aria-hidden="true"></span></div></div></div><div role="menu" id="model-select-menu"',
+	);
+
+	// Model pane: grouped by provider, one group per provider.
+	assertStringIncludes(html, 'id="model-select-menu"');
+	assertStringIncludes(html, 'data-provider-group="anthropic"');
+	assertStringIncludes(html, 'data-provider-group="openai-codex"');
+	assertStringIncludes(html, "Claude Sonnet");
+	assertStringIncludes(html, "Claude Haiku");
+	assertStringIncludes(html, "GPT 5.6");
+
+	// The current model is pre-selected: its provider is the initial active provider/pane.
+	assertStringIncludes(html, 'data-active-provider="anthropic"');
+	assertStringIncludes(html, 'data-active-pane="models"');
+	assertStringIncludes(html, 'data-multi-pane="true"');
+
+	// Mobile drill-down needs a way back to the provider list.
+	assertStringIncludes(html, "data-pane-back");
+});
+
+test("model rows show context-window and thinking badges from model metadata", () => {
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "claude-sonnet",
+					provider: "anthropic",
+					name: "Claude Sonnet",
+					configured: true,
+					scoped: false,
+					contextWindow: 200_000,
+					reasoning: true,
+				},
+				{
+					id: "gpt-5-mini",
+					provider: "openai-codex",
+					name: "GPT 5 mini",
+					configured: true,
+					scoped: false,
+					contextWindow: 128_000,
+					reasoning: false,
+				},
+				{
+					id: "legacy-model",
+					provider: "openai-codex",
+					name: "Legacy",
+					configured: true,
+					scoped: false,
+				},
+			],
+			currentModel: "anthropic/claude-sonnet",
+		}),
+	);
+
+	// Context-window badge, formatted the same way prompt-status.tsx's usage bar does.
+	assertStringIncludes(
+		html,
+		'<span class="badge model-meta-badge" data-variant="secondary" title="200k token context window">200k</span>',
+	);
+	assertStringIncludes(
+		html,
+		'<span class="badge model-meta-badge" data-variant="secondary" title="128k token context window">128k</span>',
+	);
+	// Thinking/reasoning badge, reusing the shared Brain icon (also used by the
+	// thinking-level picker button).
+	assertStringIncludes(
+		html,
+		'<span class="badge model-meta-badge model-thinking-badge" data-variant="secondary" title="Supports extended thinking" aria-label="Supports extended thinking">',
+	);
+	// A model with no context-window/reasoning metadata gets no badge wrapper at all.
+	assertStringIncludes(html, 'data-model-id="legacy-model"');
+	const legacyRowStart = html.indexOf('id="model-option-openai-codex%2Flegacy-model"');
+	const legacyRowEnd = html.indexOf('id="model-group-body', legacyRowStart);
+	assertFalse(html.slice(legacyRowStart, legacyRowEnd).includes("model-option-badges"));
+});
+
+test("model picker protects client-owned narrowing state from server re-renders", () => {
+	// Regression (verifier fix pass): `applyActiveProvider()` (static/app/model-picker.js)
+	// narrows the models pane by setting `hidden` on every non-active
+	// `[data-provider-group]`, and `data-active-pane`/`data-active-provider`/
+	// `data-searching` on the `.command` root track which pane/provider/search state is
+	// live. None of this is server-rendered (the SSR markup below never sets `hidden` on
+	// a provider group, nor `data-searching` at all), so without `data-preserve-attr`
+	// Datastar's morph strips it back out on the next unrelated re-render of this dirty
+	// region (e.g. another connected client changing the model, or this client toggling a
+	// model's star) while the popover is still open — every provider's models reappear at
+	// once and the active pane/provider/search flags silently reset. `.model-option` rows
+	// a few lines below already guard themselves this way (`data-preserve-attr="class
+	// hidden"`); the provider-group wrapper and the command root need the same guard.
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "claude-sonnet",
+					provider: "anthropic",
+					name: "Claude Sonnet",
+					configured: true,
+					scoped: false,
+				},
+				{
+					id: "gpt-5.6",
+					provider: "openai-codex",
+					name: "GPT 5.6",
+					configured: false,
+					scoped: false,
+				},
+			],
+			currentModel: "anthropic/claude-sonnet",
+		}),
+	);
+
+	assertStringIncludes(
+		html,
+		'data-provider-group="anthropic" data-preserve-attr="hidden"',
+	);
+	assertStringIncludes(
+		html,
+		'data-provider-group="openai-codex" data-preserve-attr="hidden"',
+	);
+	assertStringIncludes(
+		html,
+		'data-preserve-attr="data-active-pane data-active-provider data-searching"',
+	);
+});
+
+test("model picker falls back to the providers pane with no model selected yet", () => {
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "claude-sonnet",
+					provider: "anthropic",
+					name: "Claude Sonnet",
+					configured: true,
+					scoped: false,
+				},
+			],
+			currentModel: undefined,
+		}),
+	);
+	assertStringIncludes(html, 'data-active-pane="providers"');
+	assertStringIncludes(html, 'data-active-provider="anthropic"');
+});
+
+test("provider names matching the picker's own fixed ids don't collide with them", () => {
+	// A provider name comes from an extension's own registration and is arbitrary — a
+	// provider literally named "menu" or "heading" must not produce
+	// id="model-provider-menu"/id="model-provider-heading", which would collide with this
+	// picker's own fixed `#model-provider-menu` (the whole providers pane) and
+	// `#model-provider-heading` (the pane's own "Providers" heading).
+	const html = renderModelPicker(
+		appRenderSnapshot({
+			models: [
+				{
+					id: "model-a",
+					provider: "menu",
+					name: "Model A",
+					configured: true,
+					scoped: false,
+				},
+				{
+					id: "model-b",
+					provider: "heading",
+					name: "Model B",
+					configured: true,
+					scoped: false,
+				},
+			],
+			currentModel: "menu/model-a",
+		}),
+	);
+	// The fixed ids still appear exactly once each (the picker's own static elements).
+	assertEquals(countOccurrences(html, 'id="model-provider-menu"'), 1);
+	assertEquals(countOccurrences(html, 'id="model-provider-heading"'), 1);
+	// The two providers get distinct, non-colliding derived ids instead.
+	assertStringIncludes(html, 'id="model-provider-4-menu"');
+	assertStringIncludes(html, 'id="model-provider-7-heading"');
+	assertStringIncludes(html, 'id="model-group-body-4-menu"');
+	assertStringIncludes(html, 'id="model-group-body-7-heading"');
+	assertStringIncludes(html, 'id="model-group-4-menu"');
+	assertStringIncludes(html, 'id="model-group-7-heading"');
+});
+
 test("model picker shows only the final model name in its trigger", () => {
 	const html = renderModelPicker(
 		appRenderSnapshot({
@@ -382,4 +668,8 @@ test("file picker fragments escape dynamic values and expose list semantics", ()
 
 function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+	return haystack.split(needle).length - 1;
 }

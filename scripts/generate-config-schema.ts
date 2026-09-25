@@ -13,6 +13,12 @@ import {
 	liveWorkspaceTabs,
 } from "../src/live-workspace-types.ts";
 import {
+	defaultVoiceConfig,
+	voiceMaxSecondsMax,
+	voiceMaxSecondsMin,
+	voicePromptMaxLength,
+} from "../src/server/voice/voice-config.ts";
+import {
 	sessionSidebarWidthDefault,
 	sessionSidebarWidthMax,
 	sessionSidebarWidthMin,
@@ -106,6 +112,34 @@ const schema = Type.Object(
 								"gated extension behavior, all rendered as terminal surfaces. " +
 								'"rpc" is the pre-terminal-surface behavior, kept as an escape ' +
 								"hatch.",
+						}),
+					),
+					terminalChrome: Type.Optional(
+						Type.Boolean({
+							default: defaultExtensionsConfig.terminalChrome,
+							description:
+								"Draw extension setHeader/setFooter components (TUI banners and " +
+								"terminal status lines) around the prompt. Off by default: pi-ui's " +
+								"own prompt footer already shows the workspace, extension " +
+								"statuses, model, thinking level and usage.",
+						}),
+					),
+					activityTracking: Type.Optional(
+						Type.Boolean({
+							default: defaultExtensionsConfig.activityTracking,
+							description:
+								"Track and render every extension's Called/Working/Output/" +
+								"Completed lifecycle as durable cards, the way subagent activity " +
+								"is shown. On by default.",
+						}),
+					),
+					activityPersist: Type.Optional(
+						Type.Boolean({
+							default: defaultExtensionsConfig.activityPersist,
+							description:
+								"Persist extension activity cards so they survive a session " +
+								"switch, restart or /resume. On by default; has no effect when " +
+								"activityTracking is false.",
 						}),
 					),
 				},
@@ -270,6 +304,61 @@ const schema = Type.Object(
 				description:
 					"Check npm for a newer upstream @hyperpuncher/pi-ui release and show an update notice. Off by default: upgrading from that notice replaces this build with upstream's.",
 			}),
+		),
+		voice: Type.Optional(
+			Type.Object(
+				{
+					enabled: Type.Optional(
+						Type.Boolean({
+							default: defaultVoiceConfig.enabled,
+							description:
+								"Show the voice input (mic) button in the prompt bar.",
+						}),
+					),
+					model: Type.Optional(
+						Type.String({
+							minLength: 1,
+							default: defaultVoiceConfig.model,
+							description: "Groq speech-to-text model.",
+						}),
+					),
+					language: Type.Optional(
+						Type.String({
+							pattern: "^([a-z]{2,3}(-[A-Za-z]+)?)?$",
+							default: defaultVoiceConfig.language,
+							description: "ISO-639-1 language code; empty = auto-detect.",
+						}),
+					),
+					prompt: Type.Optional(
+						Type.String({
+							maxLength: voicePromptMaxLength,
+							default: defaultVoiceConfig.prompt,
+							description:
+								"Vocabulary/spelling hint sent with each transcription.",
+						}),
+					),
+					maxSeconds: Type.Optional(
+						Type.Integer({
+							minimum: voiceMaxSecondsMin,
+							maximum: voiceMaxSecondsMax,
+							default: defaultVoiceConfig.maxSeconds,
+							description:
+								"Longest recording; voice input finishes automatically at this length.",
+						}),
+					),
+					baseUrl: Type.Optional(
+						Type.String({
+							format: "uri",
+							default: defaultVoiceConfig.baseUrl,
+							description: "OpenAI-compatible transcription API base URL.",
+						}),
+					),
+				},
+				{
+					description: "Voice input (speech-to-text) settings.",
+					additionalProperties: false,
+				},
+			),
 		),
 	},
 	{

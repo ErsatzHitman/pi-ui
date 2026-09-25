@@ -5,7 +5,7 @@ import { ensureTool } from "../../node_modules/@earendil-works/pi-coding-agent/d
 import { parseAutoTitleConfig, type AutoTitleConfig } from "../agent/auto-title.ts";
 import {
 	applyExtensionsHostMarker,
-	type ExtensionsMode,
+	type ExtensionsConfig,
 	parseExtensionsConfig,
 } from "../agent/extensions-config.ts";
 import { RuntimeController } from "../agent/runtime-controller.ts";
@@ -15,6 +15,7 @@ import { defaultFonts, setActiveFonts, validFonts } from "../fonts.ts";
 import { parseKeybindOverrides, setActiveKeybinds } from "../keybinds.ts";
 import { normalizeLiveWorkspacePreferences } from "../live-workspace-types.ts";
 import { setActiveCodeTheme } from "../pierre-theme.ts";
+import { resolveExclusiveRightPane } from "../right-pane-preferences.ts";
 import {
 	normalizeSessionSidebarPreferences,
 	sessionSidebarWidthDefault,
@@ -35,6 +36,10 @@ import { SessionImageStore } from "./session-image-store.ts";
 import { createStaticAssetServer } from "./static-assets.ts";
 import { staticRoot } from "./static-path.ts";
 import { TransferredFileStore } from "./transferred-files.ts";
+import { createGroqTranscriber } from "./voice/groq-transcriber.ts";
+import { parseVoiceConfig } from "./voice/voice-config.ts";
+import { resolveGroqApiKey } from "./voice/voice-key.ts";
+import { createVoiceService } from "./voice/voice-service.ts";
 import { WorkspaceReviewController } from "./workspace-review-controller.ts";
 
 /** RFC 8292 `sub` contact URI a push service may use if this server's VAPID
@@ -51,16 +56,33 @@ export async function createApp() {
 	const fonts = validFonts(appConfig.fonts) ?? defaultFonts();
 	const autoTitle = parseAutoTitleConfig(appConfig.autoTitle);
 	const extensions = parseExtensionsConfig(appConfig.extensions);
+	const voiceConfig = parseVoiceConfig(appConfig.voice);
+	const voiceService = createVoiceService({
+		config: voiceConfig,
+		resolveKey: () => resolveGroqApiKey(),
+		transcriber: createGroqTranscriber({ appVersion: staticAssets.version }),
+	});
 	// Must run before the first `RuntimeController.create()` below, which loads
 	// extensions synchronously with session creation.
 	applyExtensionsHostMarker(extensions);
 	const workspaceReviewPreferences = normalizeWorkspaceReviewPreferences(
 		appConfig.gitView,
 	);
-	const liveWorkspacePreferences = normalizeLiveWorkspacePreferences(
+	const rawLiveWorkspacePreferences = normalizeLiveWorkspacePreferences(
 		appConfig.liveWorkspace,
 	);
 	const sessionSidebar = normalizeSessionSidebarPreferences(appConfig.sessionSidebar);
+	// Sessions and Live Workspace share the right-hand area and are mutually exclusive; an old
+	// config saved before that rule existed can have both `open: true` (see
+	// `right-pane-preferences.ts`).
+	const { sessionSidebarOpen, liveWorkspaceOpen } = resolveExclusiveRightPane(
+		sessionSidebar.open !== false,
+		rawLiveWorkspacePreferences.open === true,
+	);
+	const liveWorkspacePreferences = {
+		...rawLiveWorkspacePreferences,
+		open: liveWorkspaceOpen,
+	};
 	setActiveCodeTheme(codeTheme);
 	setActiveFonts(fonts);
 	const preloadShellHighlighterPromise = loadPierreLanguage("bash");
@@ -95,6 +117,9 @@ export async function createApp() {
 	const host = await RuntimeController.create(store, undefined, {
 		autoTitle,
 		extensionsMode: extensions.mode,
+		extensionsTerminalChrome: extensions.terminalChrome,
+		extensionsActivityTracking: extensions.activityTracking,
+		extensionsActivityPersist: extensions.activityPersist,
 		transitionController: transitions,
 		sendWebPush: (details, background) =>
 			pushService.notifySessionFinished(details, background),
@@ -117,24 +142,18 @@ export async function createApp() {
 		transferredFiles,
 		pushPublicKey: vapidKeys.publicKeyRaw.toString("base64url"),
 		pushSubscriptions,
+		voice: voiceService,
 		appVersion: staticAssets.version,
 		keybindHints: appConfig.keybindHints !== false,
 		minimalMode: appConfig.minimalMode === true,
-		sessionSidebarOpen: sessionSidebar.open !== false,
+		sessionSidebarOpen,
 		sessionSidebarWidth: sessionSidebar.width ?? sessionSidebarWidthDefault,
 		toolOutputHidden: appConfig.toolOutputHidden === true,
 		toolbarHidden: appConfig.toolbarHidden === true,
 		themeLab: process.env.PI_UI_THEME_LAB === "1",
 		serveStatic: (request) => staticAssets.serve(request),
 		openWorkspace: (path) =>
-			openWorkspace(
-				path,
-				store,
-				resources,
-				transitions,
-				autoTitle,
-				extensions.mode,
-			),
+			openWorkspace(path, store, resources, transitions, autoTitle, extensions),
 	};
 	let disposal: Promise<void> | undefined;
 	return {
@@ -160,7 +179,7 @@ async function openWorkspace(
 	resources: RouteResources,
 	transitions: SessionTransitionController,
 	autoTitle: AutoTitleConfig,
-	extensionsMode: ExtensionsMode,
+	extensions: ExtensionsConfig,
 ): Promise<boolean> {
 	const requestedPath = workspacePath.trim();
 	const transition = await transitions.run(
@@ -173,7 +192,10 @@ async function openWorkspace(
 			if (!resources.host) {
 				resources.host = await RuntimeController.create(store, realPath, {
 					autoTitle,
-					extensionsMode,
+					extensionsMode: extensions.mode,
+					extensionsTerminalChrome: extensions.terminalChrome,
+					extensionsActivityTracking: extensions.activityTracking,
+					extensionsActivityPersist: extensions.activityPersist,
 					refreshWorkspaces: false,
 					transitionController: transitions,
 				});

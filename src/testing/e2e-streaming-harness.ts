@@ -20,7 +20,10 @@ import { mkdir, rm } from "node:fs/promises";
 
 import { makeTempDir } from "#testing/temp";
 
-import { RuntimeController } from "../agent/runtime-controller.ts";
+import {
+	RuntimeController,
+	type RuntimeControllerActivationOptions,
+} from "../agent/runtime-controller.ts";
 import { DatastarClientHub } from "../server/datastar-client-hub.ts";
 import { AppStore } from "../state/app-store.ts";
 import { UiRenderer } from "../ui/ui-renderer.ts";
@@ -45,13 +48,25 @@ export interface StreamingHarness {
 
 const agentDirEnvVar = "PI_CODING_AGENT_DIR";
 
-export async function createStreamingHarness(): Promise<StreamingHarness> {
+export type StreamingHarnessOptions = Readonly<{
+	/** Runs after the fake provider file is written and before the runtime is
+	 * created — e.g. to drop extra fixture extensions into
+	 * `${agentDir}/extensions/` so the real SDK loader discovers them. */
+	beforeCreate?: (agentDir: string) => Promise<void>;
+	/** Extra `RuntimeController` options, e.g. the `extensions.activity*` switches. */
+	controllerOptions?: RuntimeControllerActivationOptions;
+}>;
+
+export async function createStreamingHarness(
+	options: StreamingHarnessOptions = {},
+): Promise<StreamingHarness> {
 	const root = await makeTempDir({ prefix: "pi-ui-e2e-streaming-" });
 	const agentDir = `${root}/agent`;
 	const cwd = `${root}/workspace`;
 	await mkdir(agentDir, { recursive: true });
 	await mkdir(cwd, { recursive: true });
 	await writeFakeStreamProviderExtensionFile(agentDir);
+	await options.beforeCreate?.(agentDir);
 
 	const previousAgentDir = process.env[agentDirEnvVar];
 	process.env[agentDirEnvVar] = agentDir;
@@ -67,7 +82,11 @@ export async function createStreamingHarness(): Promise<StreamingHarness> {
 		const hub = new DatastarClientHub();
 		const renderer = new UiRenderer(store, hub);
 
-		controller = await RuntimeController.create(store, cwd, {});
+		controller = await RuntimeController.create(
+			store,
+			cwd,
+			options.controllerOptions ?? {},
+		);
 		// Narrow once, outside the closures below: TS can't carry the post-assignment
 		// narrowing of a captured `let` through an arrow function boundary.
 		const readyController = controller;

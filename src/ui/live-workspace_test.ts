@@ -31,6 +31,19 @@ test("the toggle button carries the pane's keybind and toggle signal", () => {
 	assertStringIncludes(html, 'id="live-workspace-toggle"');
 	assertStringIncludes(html, "$_liveWorkspaceOpen = !$_liveWorkspaceOpen");
 	assertStringIncludes(html, "alt");
+	// It's one segment of the "Sessions | Live" switch (PLAN-ux.md "sidebar-exclusive"), so it
+	// needs a visible label, not just an icon+tooltip.
+	assertStringIncludes(html, ">Live<");
+});
+
+test("opening Live Workspace closes Sessions too (sidebar-exclusive)", () => {
+	const html = renderLiveWorkspaceToggle(appRenderSnapshot({}));
+	assertStringIncludes(html, "if ($_liveWorkspaceOpen) {");
+	assertStringIncludes(html, "getElementById('session-sidebar')");
+	assertStringIncludes(
+		html,
+		"sessionSidebar.dispatchEvent(new CommandEvent('command', { command: '--toggle' }))",
+	);
 });
 
 test("the pane shell starts hidden and inert until the open signal flips", () => {
@@ -240,6 +253,35 @@ test("the agents tab offers to open a tracked background session", () => {
 	assertStringIncludes(html, "~/project");
 	assertStringIncludes(html, "Open");
 	assertStringIncludes(html, "/sessions/bg.jsonl");
+});
+
+test("a running agent row carries its status as a data attribute for the shared pink 'working' color", () => {
+	const html = renderLiveWorkspaceData(
+		snapshot({
+			agents: [
+				{
+					id: "subagents:reviewer",
+					kind: "channel-entry",
+					source: "subagents:fleet",
+					label: "reviewer",
+					status: "running",
+					depth: 0,
+				},
+				{
+					id: "subagents:done",
+					kind: "channel-entry",
+					source: "subagents:fleet",
+					label: "done-agent",
+					status: "completed",
+					depth: 0,
+				},
+			],
+		}),
+		{ tab: "agents" },
+		emptyUsage,
+	);
+	assertStringIncludes(html, 'data-live-workspace-agent-status="running"');
+	assertStringIncludes(html, 'data-live-workspace-agent-status="completed"');
 });
 
 test("the agents tab reports an empty roster when nothing is tracked", () => {

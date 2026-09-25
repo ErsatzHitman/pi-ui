@@ -15,6 +15,10 @@ import type { TranscriptMessageTitlePart } from "../state/transcript-state.ts";
 import { escapeHtml } from "../utils/html.ts";
 import { highlightBash } from "./bash-highlight.ts";
 import { DateTime } from "./date-time.tsx";
+import {
+	renderExtensionActivityMessage,
+	renderExtensionActivitySteps,
+} from "./extension-activity.tsx";
 import { Icon } from "./icon.tsx";
 import { ChevronRight, Loader } from "./icons.ts";
 import { ShortcutKbd } from "./keyboard.tsx";
@@ -485,6 +489,9 @@ export function renderMessage(message: AppMessage): string {
 	) {
 		return renderContextMessage(message);
 	}
+	if (message.role === "extension-activity") {
+		return renderExtensionActivityMessage(message);
+	}
 	return renderToolMessage(message);
 }
 
@@ -810,12 +817,22 @@ function toolMessageStatus(message: AppMessage): ToolMessageStatus {
 
 function renderToolMessage(message: AppMessage): string {
 	const status = toolMessageStatus(message);
+	// An extension-owned tool (§3/§4.3 "extension-owned running tool dots") gets the
+	// same pink "working" color as its own activity cards and the prompt chips,
+	// instead of the default running color, while it runs.
+	const runningClass = message.extension ? "status-dot-active" : undefined;
 	return syncHtml(
 		<article
 			class="message message-tool tool-timeline-item"
 			data-message-id={message.id}
+			data-tool-extension={message.extension?.id}
 		>
-			<StatusDot class="tool-state-dot" state={status.state} label={status.label} />
+			<StatusDot
+				class="tool-state-dot"
+				runningClass={runningClass}
+				state={status.state}
+				label={status.label}
+			/>
 			<header class="tool-header" data-show="!$_minimalMode && !$_toolOutputHidden">
 				<span class="tool-title">
 					{renderToolTitle(message.title ?? "Tool", message.titleParts)}
@@ -833,6 +850,11 @@ function renderToolMessage(message: AppMessage): string {
 					{renderToolTitle(message.title ?? "Tool", message.titleParts)}
 				</span>
 			</p>
+			{message.activities && message.activities.length > 0 && (
+				<div data-show="!$_minimalMode">
+					{renderExtensionActivitySteps(message.activities)}
+				</div>
+			)}
 			<div data-show="!$_minimalMode && !$_toolOutputHidden">
 				{renderToolOutput(message)}
 			</div>

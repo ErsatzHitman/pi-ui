@@ -445,7 +445,15 @@ test("shows tools without rendering each streamed argument delta", () => {
 		}),
 		context,
 	);
-	assertEquals(state.updates.length, 1);
+	// toolcall_end stamps the preview message with its now-known toolCallId
+	// (transcript-state.ts's toolCallId — never cleared, unlike
+	// tools.messageIds — is what an anchored ExtensionActivity later
+	// reverse-scans for; DESIGN-ext-activity.md §2.4 "Anchored").
+	assertEquals(state.updates.length, 2);
+	assertEquals(state.updates.at(-1), {
+		id: "message-1",
+		patch: { toolCallId: "call" },
+	});
 	reduceSessionEvent(
 		event({
 			type: "tool_execution_start",
@@ -463,6 +471,7 @@ test("shows tools without rendering each streamed argument delta", () => {
 		id: "message-1",
 		patch: {
 			text: "start:write",
+			toolCallId: "call",
 			title: "running",
 			state: "running",
 			format: "pre",
@@ -510,7 +519,12 @@ test("reduces one complete tool lifecycle and clears all tool maps", () => {
 		id: "message-1",
 		role: "tool",
 		text: "start:bash",
-		options: { title: "running", state: "running", format: "pre" },
+		options: {
+			title: "running",
+			state: "running",
+			format: "pre",
+			toolCallId: "call",
+		},
 	});
 	assertEquals(state.updates, [
 		{

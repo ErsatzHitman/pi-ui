@@ -1,31 +1,19 @@
-import { execFile } from "node:child_process";
-
-import { parsePatchFiles } from "@pierre/diffs";
-
 import { outputCommand } from "../utils/command.ts";
 import { isNotFound } from "../utils/fs-errors.ts";
 import { sortWorkspaceReviewEntries } from "../workspace-review-tree.ts";
 import {
-	type WorkspaceCommit,
-	type WorkspaceCommitDetail,
 	emptyWorkspaceReviewSnapshot,
 	type WorkspaceFileChange,
 	type WorkspaceFileStatus,
-	workspaceReviewHistoryPageSize,
 	type WorkspaceReviewSnapshot,
 } from "../workspace-review-types.ts";
 export type {
-	WorkspaceCommit,
-	WorkspaceCommitDetail,
 	WorkspaceFileChange,
 	WorkspaceReviewSnapshot,
 } from "../workspace-review-types.ts";
 
 type GitResult = Readonly<{ code: number; stderr: string; stdout: string }>;
-const commitLogFormat = "--format=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e";
 const decoder = new TextDecoder();
-export const maximumWorkspaceDiffBytes = 2 * 1024 * 1024;
-const maximumAllDiffFiles = 100;
 
 /** An inconclusive ignore check must never suppress a workspace refresh. */
 export async function areWorkspacePathsIgnored(
@@ -80,12 +68,11 @@ export type WorkspaceReviewMetadataCache = {
 };
 
 async function readWorkspaceMetadata(root: string) {
-	const [headResult, logResult, branchResult] = await Promise.all([
+	const [headResult, branchResult] = await Promise.all([
 		git(root, "rev-parse", "--verify", "HEAD"),
-		git(root, "log", "-n", String(workspaceReviewHistoryPageSize), commitLogFormat),
 		git(root, "symbolic-ref", "--quiet", "--short", "HEAD"),
 	]);
-	return { root, headResult, logResult, branchResult };
+	return { root, headResult, branchResult };
 }
 
 export async function readWorkspaceReview(
@@ -108,42 +95,25 @@ export async function readWorkspaceReview(
 		"--untracked-files=normal",
 		"-z",
 	);
-	const upstreamPromise = git(
-		root,
-		"rev-list",
-		`--max-count=${workspaceReviewHistoryPageSize}`,
-		"@{upstream}..HEAD",
-	);
 	const metadata =
 		metadataCache?.value?.root === root
 			? metadataCache.value
 			: await readWorkspaceMetadata(root);
-	const { headResult, logResult, branchResult } = metadata;
-	// Failed reads must be retried, not retained as an empty history.
+	const { headResult, branchResult } = metadata;
+	// Failed reads must be retried, not retained as a stale branch/HEAD.
 	if (
 		metadataCache &&
 		headResult.code === 0 &&
-		logResult.code === 0 &&
 		(branchResult.code === 0 || branchResult.code === 1)
 	)
 		metadataCache.value = metadata;
-	const upstreamResult = await upstreamPromise;
 	const branch =
 		branchResult.code === 0
 			? branchResult.stdout.trim()
 			: headResult.code === 0
 				? `detached@${headResult.stdout.trim().slice(0, 7)}`
 				: null;
-	const commits =
-		logResult.code === 0
-			? parseCommitLog(logResult.stdout, unpushedHashes(upstreamResult))
-			: [];
-	const metadataRevisionInputs = [
-		headResult.stdout,
-		upstreamResult.code,
-		upstreamResult.stdout,
-		branchResult.stdout,
-	];
+	const metadataRevisionInputs = [headResult.stdout, branchResult.stdout];
 	const [statusResult, summaryResult] = await Promise.all([
 		statusPromise,
 		summaryPromise,
@@ -177,263 +147,10 @@ export async function readWorkspaceReview(
 	return {
 		branch,
 		changes,
-		commits,
 		isGitRepository: true,
 		changeCount,
 		revision: await hash(JSON.stringify([revisionInputs, counts])),
 	};
-}
-
-// Diff contents never belong in the live workspace snapshot. Read them only
-// for an explicit review request, bounded before buffering or parsing them.
-export async function readWorkspaceDiff(
-	workspacePath: string,
-	path?: string,
-	signal?: AbortSignal,
-): Promise<string> {
-	const root = await findGitRoot(workspacePath);
-	if (!root) throw new WorkspaceReviewError(404, "Git repository not found.");
-	const status = await boundedGit(
-		root,
-		["status", "--porcelain=v1", "--untracked-files=all", "-z"],
-		signal,
-	);
-	const entries = parsePorcelainEntries(status);
-	const selected =
-		path === undefined ? entries : entries.filter((entry) => entry.path === path);
-	if (path !== undefined && selected.length === 0)
-		throw new WorkspaceReviewError(404, "Changed file not found.");
-	if (selected.length > maximumAllDiffFiles)
-		throw new WorkspaceReviewError(
-			413,
-			"Too many changes for All files. Select a file to review.",
-		);
-	if (selected.length === 0) return "";
-	const options = [
-		"diff",
-		"--find-renames",
-		"--no-color",
-		"--no-ext-diff",
-		"--no-textconv",
-		"--unified=3",
-	];
-	const tracked = selected.filter((entry) => entry.code !== "??");
-	let patch = "";
-	if (tracked.length > 0) {
-		const head = await git(root, "rev-parse", "--verify", "HEAD");
-		const paths = tracked.flatMap((entry) =>
-			entry.sourcePath ? [entry.path, entry.sourcePath] : [entry.path],
-		);
-		patch = await boundedGit(
-			root,
-			[...options, ...(head.code === 0 ? ["HEAD"] : ["--cached"]), "--", ...paths],
-			signal,
-		);
-	}
-	for (const entry of selected.filter((entry) => entry.code === "??")) {
-		patch += await boundedGit(
-			root,
-			[...options, "--no-index", "--", "/dev/null", entry.path],
-			signal,
-			maximumWorkspaceDiffBytes - Buffer.byteLength(patch),
-		);
-	}
-	return patch;
-}
-
-function boundedGit(
-	root: string,
-	args: string[],
-	signal?: AbortSignal,
-	maxBuffer = maximumWorkspaceDiffBytes,
-): Promise<string> {
-	signal?.throwIfAborted();
-	if (maxBuffer <= 0)
-		throw new WorkspaceReviewError(
-			413,
-			"Diff too large to preview. Select a smaller file.",
-		);
-	return new Promise((resolve, reject) => {
-		execFile(
-			"git",
-			["-C", root, "--literal-pathspecs", "-c", "core.quotePath=false", ...args],
-			{
-				encoding: "utf8",
-				maxBuffer,
-				signal,
-				windowsHide: true,
-				env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
-			},
-			(error, stdout) => {
-				if (signal?.aborted) reject(signal.reason);
-				else if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
-					reject(
-						new WorkspaceReviewError(
-							413,
-							"Diff too large to preview. Select a smaller file.",
-						),
-					);
-				else if (error && !(args[0] === "diff" && error.code === 1))
-					reject(error);
-				else resolve(stdout);
-			},
-		);
-	});
-}
-
-export async function discardWorkspaceChange(
-	workspacePath: string,
-	changePath: string,
-): Promise<void> {
-	const root = await findGitRoot(workspacePath);
-	if (!root) throw new WorkspaceReviewError(404, "Git repository not found.");
-	const statusResult = await git(
-		root,
-		"status",
-		"--porcelain=v1",
-		"--untracked-files=all",
-		"-z",
-	);
-	assertGit(statusResult, "read repository status");
-	const entry = parsePorcelainEntries(statusResult.stdout).find(
-		({ path }) => path === changePath,
-	);
-	if (!entry) throw new WorkspaceReviewError(409, "This file is no longer changed.");
-
-	if (entry.code === "??") {
-		const result = await git(root, "clean", "-f", "--", entry.path);
-		assertGit(result, "discard untracked file");
-		return;
-	}
-
-	const head = await git(root, "rev-parse", "--verify", "HEAD");
-	const paths = entry.sourcePath ? [entry.path, entry.sourcePath] : [entry.path];
-	const result =
-		head.code === 0
-			? await git(
-					root,
-					"restore",
-					"--source=HEAD",
-					"--staged",
-					"--worktree",
-					"--",
-					...paths,
-				)
-			: await git(root, "rm", "-f", "--", ...paths);
-	assertGit(result, "discard file changes");
-}
-
-export class WorkspaceReviewError extends Error {
-	constructor(
-		readonly status: number,
-		message: string,
-	) {
-		super(message);
-		this.name = "WorkspaceReviewError";
-	}
-}
-
-export async function readWorkspaceCommit(
-	workspacePath: string,
-	hash: string,
-): Promise<WorkspaceCommitDetail | undefined> {
-	if (!/^[0-9a-f]{40}$/i.test(hash)) return undefined;
-	const root = await findGitRoot(workspacePath);
-	if (!root) return undefined;
-	const [metadataResult, statusResult, patchResult, upstreamResult] = await Promise.all(
-		[
-			git(root, "show", "-s", commitLogFormat, hash),
-			git(
-				root,
-				"diff-tree",
-				"--root",
-				"--no-commit-id",
-				"--name-status",
-				"-r",
-				"-z",
-				"--find-renames",
-				"--diff-merges=first-parent",
-				hash,
-			),
-			git(
-				root,
-				"show",
-				"--format=",
-				"--no-color",
-				"--no-ext-diff",
-				"--find-renames",
-				"--diff-merges=first-parent",
-				"--root",
-				"--unified=3",
-				hash,
-				"--",
-			),
-			git(root, "merge-base", "--is-ancestor", hash, "@{upstream}"),
-		],
-	);
-	if (metadataResult.code !== 0 || statusResult.code !== 0 || patchResult.code !== 0)
-		return undefined;
-	const commit = parseCommitLog(
-		metadataResult.stdout,
-		commitPushSet(upstreamResult, hash),
-	)[0];
-	if (!commit) return undefined;
-	return {
-		changes: addStats(parseNameStatus(statusResult.stdout), patchResult.stdout),
-		commit,
-		patch: patchResult.stdout,
-	};
-}
-
-export async function readWorkspaceHistory(
-	workspacePath: string,
-	offset: number,
-): Promise<WorkspaceCommit[]> {
-	if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000) return [];
-	const root = await findGitRoot(workspacePath);
-	if (!root) return [];
-	const [logResult, upstreamResult] = await Promise.all([
-		git(
-			root,
-			"log",
-			"-n",
-			String(workspaceReviewHistoryPageSize),
-			`--skip=${offset}`,
-			commitLogFormat,
-		),
-		git(
-			root,
-			"rev-list",
-			`--max-count=${workspaceReviewHistoryPageSize}`,
-			`--skip=${offset}`,
-			"@{upstream}..HEAD",
-		),
-	]);
-	return logResult.code === 0
-		? parseCommitLog(logResult.stdout, unpushedHashes(upstreamResult))
-		: [];
-}
-
-export function parseCommitLog(
-	output: string,
-	unpushed?: ReadonlySet<string>,
-): WorkspaceCommit[] {
-	const commits: WorkspaceCommit[] = [];
-	for (const rawRecord of output.split("\x1e")) {
-		const record = rawRecord.replace(/^\n+|\n+$/g, "");
-		if (!record) continue;
-		const [hash, shortHash, author, authoredAt, subject] = record.split("\x1f");
-		if (!hash || !shortHash || !authoredAt) continue;
-		commits.push({
-			author,
-			authoredAt,
-			hash,
-			pushed: unpushed ? !unpushed.has(hash) : null,
-			shortHash,
-			subject,
-		});
-	}
-	return commits;
 }
 
 export function parsePorcelainStatus(output: string): WorkspaceFileChange[] {
@@ -508,25 +225,6 @@ function addNumStats(
 	return changes.map((change) => ({ ...change, ...stats.get(change.path) }));
 }
 
-function addStats(
-	changes: readonly WorkspaceFileChange[],
-	patch: string,
-): WorkspaceFileChange[] {
-	const stats = new Map<string, { additions: number; deletions: number }>();
-	for (const parsed of parsePatchFiles(patch)) {
-		for (const file of parsed.files) {
-			let additions = 0;
-			let deletions = 0;
-			for (const hunk of file.hunks) {
-				additions += hunk.additionLines;
-				deletions += hunk.deletionLines;
-			}
-			stats.set(file.name, { additions, deletions });
-		}
-	}
-	return changes.map((change) => ({ ...change, ...stats.get(change.path) }));
-}
-
 function statusFromCode(code: string): WorkspaceFileStatus {
 	if (code === "??") return "untracked";
 	if (code.includes("R") || code.includes("C")) return "renamed";
@@ -538,19 +236,6 @@ function statusFromCode(code: string): WorkspaceFileStatus {
 async function hash(value: string): Promise<string> {
 	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
 	return new Uint8Array(digest).toHex();
-}
-
-function commitPushSet(result: GitResult, hash: string): ReadonlySet<string> | undefined {
-	if (result.code === 0) return new Set();
-	if (result.code === 1) return new Set([hash]);
-	return undefined;
-}
-
-function unpushedHashes(result: GitResult): ReadonlySet<string> | undefined {
-	if (result.code !== 0) return undefined;
-	const hashes = new Set(result.stdout.split("\n"));
-	hashes.delete("");
-	return hashes;
 }
 
 function assertGit(result: GitResult, action: string): void {

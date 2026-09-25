@@ -3,7 +3,6 @@ import { Compile } from "typebox/compile";
 
 import { isBoolean, isNumber, isRecord, type JsonRecord } from "./utils/type-guards.ts";
 
-export const workspaceReviewHistoryPageSize = 50;
 export const gitPaneRatioDefault = 0.5;
 export const gitPaneRatioMin = 0.35;
 export const gitPaneRatioMax = 0.65;
@@ -16,8 +15,6 @@ export const changesRatioMax = 0.7;
 
 export type WorkspaceFileStatus = WorkspaceFileChange["status"];
 export type WorkspaceFileChange = Static<typeof workspaceFileChangeSchema>;
-export type WorkspaceCommit = Static<typeof workspaceCommitSchema>;
-export type WorkspaceCommitDetail = Static<typeof workspaceCommitDetailSchema>;
 
 export function hasTrackedWorkspaceChanges(
 	changes: readonly WorkspaceFileChange[],
@@ -92,7 +89,6 @@ export type WorkspaceReviewSnapshot = Static<typeof workspaceReviewSnapshotSchem
 export const emptyWorkspaceReviewSnapshot: WorkspaceReviewSnapshot = {
 	branch: null,
 	changes: [],
-	commits: [],
 	isGitRepository: false,
 	changeCount: 0,
 	revision: "non-git",
@@ -118,51 +114,17 @@ const workspaceFileChangeSchema = Type.ReadonlyObject(
 	}),
 );
 
-const workspaceCommitSchema = Type.ReadonlyObject(
-	Type.Object({
-		author: Type.String(),
-		authoredAt: Type.String(),
-		hash: Type.String(),
-		pushed: Type.Union([Type.Boolean(), Type.Null()]),
-		shortHash: Type.String(),
-		subject: Type.String(),
-	}),
-);
-
-const workspaceCommitDetailSchema = Type.ReadonlyObject(
-	Type.Object({
-		changes: Type.ReadonlyObject(Type.Array(workspaceFileChangeSchema)),
-		commit: workspaceCommitSchema,
-		patch: Type.String(),
-	}),
-);
-
 const workspaceReviewSnapshotSchema = Type.ReadonlyObject(
 	Type.Object({
 		branch: Type.Union([Type.String(), Type.Null()]),
 		changes: Type.ReadonlyObject(Type.Array(workspaceFileChangeSchema)),
-		commits: Type.ReadonlyObject(Type.Array(workspaceCommitSchema)),
 		isGitRepository: Type.Boolean(),
 		changeCount: Type.Number(),
 		revision: Type.String(),
 	}),
 );
 
-const workspaceCommitDetailValidator = Compile(workspaceCommitDetailSchema);
-const workspaceCommitHistoryValidator = Compile(Type.Array(workspaceCommitSchema));
 const workspaceReviewSnapshotValidator = Compile(workspaceReviewSnapshotSchema);
-
-export function isWorkspaceCommitDetail<Value>(
-	value: Value,
-): value is Value & WorkspaceCommitDetail {
-	return workspaceCommitDetailValidator.Check(value);
-}
-
-export function isWorkspaceCommitHistory<Value>(
-	value: Value,
-): value is Value & WorkspaceCommit[] {
-	return workspaceCommitHistoryValidator.Check(value);
-}
 
 export function isWorkspaceReviewSnapshot<Value>(
 	value: Value,

@@ -145,6 +145,21 @@
 					],
 					"default": "tui",
 					"description": "How pi SDK extensions are bound. \"tui\" (default) unlocks custom() overlays, component widgets, and ctx.mode === \"tui\" gated extension behavior, all rendered as terminal surfaces. \"rpc\" is the pre-terminal-surface behavior, kept as an escape hatch."
+				},
+				"terminalChrome": {
+					"type": "boolean",
+					"default": false,
+					"description": "Draw extension setHeader/setFooter components (TUI banners and terminal status lines) around the prompt. Off by default: pi-ui's own prompt footer already shows the workspace, extension statuses, model, thinking level and usage."
+				},
+				"activityTracking": {
+					"type": "boolean",
+					"default": true,
+					"description": "Track and render every extension's Called/Working/Output/Completed lifecycle as durable cards, the way subagent activity is shown. On by default."
+				},
+				"activityPersist": {
+					"type": "boolean",
+					"default": true,
+					"description": "Persist extension activity cards so they survive a session switch, restart or /resume. On by default; has no effect when activityTracking is false."
 				}
 			},
 			"description": "How pi-ui binds pi SDK extensions.",
@@ -361,6 +376,10 @@
 				"focus-workspace-editor": {
 					"type": "string",
 					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
+				},
+				"voice-input": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9^/]+( [a-zA-Z0-9^/]+)*$"
 				}
 			},
 			"description": "Keyboard shortcut overrides by action id, for example ctrl O, ctrl alt O, or alt shift T.",
@@ -446,6 +465,49 @@
 			"type": "boolean",
 			"default": false,
 			"description": "Check npm for a newer upstream @hyperpuncher/pi-ui release and show an update notice. Off by default: upgrading from that notice replaces this build with upstream's."
+		},
+		"voice": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"default": true,
+					"description": "Show the voice input (mic) button in the prompt bar."
+				},
+				"model": {
+					"type": "string",
+					"minLength": 1,
+					"default": "whisper-large-v3-turbo",
+					"description": "Groq speech-to-text model."
+				},
+				"language": {
+					"type": "string",
+					"pattern": "^([a-z]{2,3}(-[A-Za-z]+)?)?$",
+					"default": "",
+					"description": "ISO-639-1 language code; empty = auto-detect."
+				},
+				"prompt": {
+					"type": "string",
+					"maxLength": 896,
+					"default": "",
+					"description": "Vocabulary/spelling hint sent with each transcription."
+				},
+				"maxSeconds": {
+					"type": "integer",
+					"minimum": 10,
+					"maximum": 1800,
+					"default": 300,
+					"description": "Longest recording; voice input finishes automatically at this length."
+				},
+				"baseUrl": {
+					"type": "string",
+					"format": "uri",
+					"default": "https://api.groq.com/openai/v1",
+					"description": "OpenAI-compatible transcription API base URL."
+				}
+			},
+			"description": "Voice input (speech-to-text) settings.",
+			"additionalProperties": false
 		}
 	},
 	"$schema": "https://json-schema.org/draft/2020-12/schema",

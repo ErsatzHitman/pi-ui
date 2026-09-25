@@ -319,6 +319,7 @@ export class UiRenderer implements AppStorePresentation {
 					snapshot.workspaceTreeRevision,
 					snapshot.workspaceReview,
 					snapshot.workspaceReviewPreferences,
+					snapshot.workspaceGitGraph,
 				),
 				"{}",
 				[],
@@ -390,11 +391,28 @@ export class UiRenderer implements AppStorePresentation {
 			return;
 		}
 		const html = this.messages.renderMessageElement(id);
-		if (html)
-			this.hub.patchElement(html, "#message-list", {
-				mode: "append",
-				scripts: ["window.piUi.messageScroll.trimOldMessages()"],
+		if (!html) return;
+		const scripts = ["window.piUi.messageScroll.trimOldMessages()"];
+		// `TranscriptState.appendMessage` doesn't always add to the tail of its own
+		// array: a live `role: "user"` message is inserted *before* a run of
+		// already-rendered standalone extension-activity cards it precedes, so a
+		// `before_agent_start`-triggered card doesn't stay pinned above the very
+		// prompt it describes for the rest of the live session (see that method's
+		// doc comment). A blind `mode: "append"` to `#message-list` would ignore
+		// that and always place the new element after every existing one, no
+		// matter where the backend model put it — so when this message isn't at
+		// the end of `store.messages`, patch it in immediately before whichever
+		// message currently follows it instead.
+		const index = this.store.messages.findIndex((message) => message.id === id);
+		const nextMessage = index >= 0 ? this.store.messages[index + 1] : undefined;
+		if (nextMessage) {
+			this.hub.patchElement(html, `[data-message-id="${nextMessage.id}"]`, {
+				mode: "before",
+				scripts,
 			});
+			return;
+		}
+		this.hub.patchElement(html, "#message-list", { mode: "append", scripts });
 	}
 	messageUpdated(id: string): void {
 		if (this.hub.clientCount === 0) return;
@@ -575,6 +593,7 @@ export class UiRenderer implements AppStorePresentation {
 					snapshot.workspaceTreeRevision,
 					snapshot.workspaceReview,
 					snapshot.workspaceReviewPreferences,
+					snapshot.workspaceGitGraph,
 				) +
 				renderLiveWorkspaceData(
 					snapshot.liveWorkspace,

@@ -155,6 +155,12 @@ export type TerminalSurfaceControllerOptions = {
 	/** Called with the full current surface list after every coalesced frame commit or disposal. */
 	onUpdate: (surfaces: readonly TerminalSurface[]) => void;
 	/**
+	 * Called with one surface's raw (still ANSI-styled) rendered lines after each of its
+	 * coalesced frame commits — lets an observer read what a component actually drew (the
+	 * extension-activity tracker keeps a panel's latest frame). Errors are swallowed.
+	 */
+	onFrame?: (id: string, rawLines: readonly string[]) => void;
+	/**
 	 * The requesting client's last reported whole-viewport terminal-cell grid
 	 * (`AppStore.clientViewportCells`, via `POST /extensions/terminal/viewport`
 	 * — `static/app/terminal-keys.js`'s `reportViewportCells`), read fresh on
@@ -403,6 +409,16 @@ export class TerminalSurfaceController {
 	dispose(id: string): void {
 		const mount = this.#mounts.get(id);
 		if (!mount || mount.disposed) return;
+		// A `requestRender(force: false)` inside the last `schedule()` window
+		// (up to one frame at `surfaceFrameHz`, ~33 ms at 30 fps) leaves a
+		// snapshot coalesced but not yet committed. Flush it — synchronously,
+		// and before `mount.disposed` is set, since `#commitFrame` bails out
+		// once it is — so a same-key remount (`mountPersistent` calls this
+		// first) or an explicit `setWidget(key, undefined)` settles the prior
+		// owner's *true last state* as its final frame, not whatever frame
+		// happened to have already committed. A no-op when nothing is
+		// pending (`flush()` with no snapshot only commits if `dirty`).
+		mount.scheduler.flush();
 		mount.disposed = true;
 		mount.scheduler.clear();
 		mount.tui.stop();
@@ -549,6 +565,13 @@ export class TerminalSurfaceController {
 			revision: mount.revision,
 		});
 		this.#publish();
+		if (this.options.onFrame) {
+			try {
+				this.options.onFrame(id, rawLines);
+			} catch {
+				// An observer must never break rendering the surface itself.
+			}
+		}
 	}
 
 	#publish(): void {

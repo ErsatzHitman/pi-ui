@@ -1,6 +1,6 @@
 import { toggleMinimalModeAction, toggleToolOutputAction } from "../commands/actions.ts";
 import { activeFontStacks } from "../fonts.ts";
-import { activeKeybind, keybindActions } from "../keybinds.ts";
+import { activeKeybind, keybindActions, keybindAria } from "../keybinds.ts";
 import { liveWorkspaceRatioDefault } from "../live-workspace-types.ts";
 import { getPierreThemes } from "../pierre-theme.ts";
 import { isRemoteMode } from "../remote-mode.ts";
@@ -51,6 +51,10 @@ export type PageRenderOptions = {
 	 * `PushManager.subscribe`. Omitted (rather than a magic empty string) when
 	 * a caller — a test, mainly — doesn't care about push. */
 	pushPublicKey?: string;
+	/** `RouteContext.voice.status()`. Defaults to `disabled`: an omitting
+	 * caller (a test, mainly) gets the same "hide the mic button" behavior a
+	 * real server would show with `voice.enabled: false`. */
+	voice?: { status: "ready" | "no-key" | "disabled"; maxSeconds: number };
 };
 
 export function renderPage(
@@ -65,6 +69,7 @@ export function renderPage(
 		toolbarHidden = false,
 		themeLab = false,
 		pushPublicKey,
+		voice = { status: "disabled", maxSeconds: 300 },
 	}: PageRenderOptions = {},
 ): string {
 	const staticBase = `/static/${appVersion}`;
@@ -164,6 +169,9 @@ export function renderPage(
 					data-toolbar-hidden={toolbarHidden}
 					data-remote-mode={isRemoteMode()}
 					data-push-public-key={pushPublicKey}
+					data-voice-endpoint={endpoints.voiceTranscribe}
+					data-voice-status={voice.status}
+					data-voice-max-seconds={voice.maxSeconds}
 					data-signals={initialSignals}
 					data-signals:_minimal-mode__ifmissing={minimalMode ? "true" : "false"}
 					data-signals:_tool-output-hidden__ifmissing={
@@ -207,12 +215,6 @@ export function renderPage(
 							filterSignals: { include: /^workspaceReviewPreferences\\./ },
 						});
 					`}
-					data-on:pi-ui-workspace-review-submit={`
-						$workspaceReviewComments = evt.detail;
-						@post('${endpoints.workspaceReviewSubmit}', {
-							filterSignals: { include: /^workspaceReviewComments\\./ },
-						});
-					`}
 					data-on:pi-ui-live-workspace-preferences={`
 						$liveWorkspacePreferences = {
 							...$liveWorkspacePreferences,
@@ -226,7 +228,6 @@ export function renderPage(
 						_isDraggingFile: false,
 						_sessionLoading: false,
 						_newSessionPending: false,
-						workspaceReviewComments: { comments: [] },
 						workspaceReviewPreferences: state.workspaceReviewPreferences,
 						liveWorkspacePreferences: state.liveWorkspacePreferences,
 						sessionDeletePath: "",
@@ -342,30 +343,47 @@ export function renderPage(
 							<div class="toolbar">
 								{renderToolbar(state, true)}
 								<div class="toolbar-end">
-									{renderLiveWorkspaceToggle(state)}
-									<button
-										id="session-sidebar-toggle"
-										type="button"
-										class="btn session-sidebar-toggle"
-										data-variant="ghost"
-										data-attr:data-variant="$_sessionSidebarOpen ? 'secondary' : 'ghost'"
-										data-size="icon-sm"
-										aria-label="Toggle sessions"
-										commandfor="session-sidebar"
-										command="--toggle"
-										aria-controls="session-sidebar"
-										aria-expanded="false"
-										data-attr:aria-expanded="$_sessionSidebarOpen ? 'true' : 'false'"
-										data-tooltip="Toggle sessions"
-										data-tooltip-delay
-										data-align="end"
+									{/*
+									 * PLAN-ux.md "sidebar-exclusive": Sessions and Live Workspace share the
+									 * right-hand area and are mutually exclusive, so one segmented switch
+									 * (reusing `.segmented-control`) replaces what used to be two separate
+									 * toggle buttons. Each segment keeps its own id, keybind and toggle
+									 * wiring; opening either one closes the other (`closeSessionSidebarAction`
+									 * / `toggleLiveWorkspaceAction` in `commands/actions.ts`).
+									 */}
+									<div
+										class="segmented-control right-pane-switch"
+										role="group"
+										aria-label="Sessions or Live Workspace"
 									>
-										<Icon icon={PanelRight} />
-										<ShortcutTooltip
-											label="Toggle sessions"
-											shortcut={activeKeybind("toggle-sessions")}
-										/>
-									</button>
+										<button
+											id="session-sidebar-toggle"
+											type="button"
+											aria-pressed="false"
+											data-attr:aria-pressed="$_sessionSidebarOpen ? 'true' : 'false'"
+											commandfor="session-sidebar"
+											command="--toggle"
+											aria-controls="session-sidebar"
+											aria-expanded="false"
+											data-attr:aria-expanded="$_sessionSidebarOpen ? 'true' : 'false'"
+											aria-keyshortcuts={keybindAria(
+												"toggle-sessions",
+											)}
+											data-tooltip="Toggle sessions"
+											data-tooltip-delay
+											data-align="end"
+										>
+											<Icon icon={PanelRight} />
+											<span>Sessions</span>
+											<ShortcutTooltip
+												label="Toggle sessions"
+												shortcut={activeKeybind(
+													"toggle-sessions",
+												)}
+											/>
+										</button>
+										{renderLiveWorkspaceToggle(state)}
+									</div>
 								</div>
 							</div>
 							{renderWorkspaceReview(
@@ -374,6 +392,7 @@ export function renderPage(
 								state.workspaceTreeRevision,
 								state.workspaceReview,
 								state.workspaceReviewPreferences,
+								state.workspaceGitGraph,
 							)}
 							{renderLiveWorkspace(
 								state.liveWorkspace,

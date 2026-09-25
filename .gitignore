@@ -11,6 +11,8 @@ static/build/
 /plans
 /docs/*
 !/docs/remote.md
+!/docs/voice.md
 
 /scratch/
 /.playwright-cli/
+/.cdp-shots/

@@ -18,6 +18,7 @@ const focusKeybindIds = [
 	"focus-workspace-files",
 	"focus-workspace-changes",
 	"focus-workspace-editor",
+	"voice-input",
 ] as const;
 
 export type FocusKeybindId = (typeof focusKeybindIds)[number];
@@ -40,6 +41,7 @@ const focusKeybindDefaults: Record<FocusKeybindId, string> = {
 	"focus-workspace-files": "alt F",
 	"focus-workspace-changes": "alt G",
 	"focus-workspace-editor": "alt E",
+	"voice-input": "alt V",
 };
 
 const modalGuardedKeybinds: ReadonlySet<KeybindId> = new Set([
@@ -51,6 +53,7 @@ const modalGuardedKeybinds: ReadonlySet<KeybindId> = new Set([
 	"focus-workspace-files",
 	"focus-workspace-changes",
 	"focus-workspace-editor",
+	"voice-input",
 ]);
 
 const defaultDefinitions = buildDefaultDefinitions();

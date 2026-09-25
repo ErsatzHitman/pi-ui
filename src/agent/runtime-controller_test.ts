@@ -8,13 +8,24 @@ import type {
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 
-import { assertEquals, assertRejects, waitForCondition } from "#testing/assertions";
+import {
+	assertEquals,
+	assertExists,
+	assertRejects,
+	waitForCondition,
+} from "#testing/assertions";
 
+import type { ExtensionActivity, ExtensionRef } from "../extension-activity-types.ts";
 import {
 	AppStore,
 	type AppStorePresentation,
 	type UiCommitEffect,
 } from "../state/app-store.ts";
+import {
+	type TranscriptMessage,
+	type TranscriptMessageOptions,
+	TranscriptState,
+} from "../state/transcript-state.ts";
 import type { SessionDoneNotification } from "../system-notifications.ts";
 import {
 	RuntimeController,
@@ -808,6 +819,148 @@ test("RuntimeController does not re-bind extensions for /reload (the SDK's own s
 
 	assertEquals(bindExtensionsCount(fake) - before, 0);
 	assertEquals(fake.reloadCount, 1);
+	await controller.dispose();
+});
+
+const activityRef: ExtensionRef = {
+	id: "probe",
+	label: "Probe",
+	path: "/probe.ts",
+	source: "local",
+};
+
+function anchoredActivity(overrides: Partial<ExtensionActivity> = {}): ExtensionActivity {
+	return {
+		v: 1,
+		id: "xa-1",
+		extension: activityRef,
+		trigger: { kind: "hook", event: "tool_call" },
+		title: "tool_call",
+		state: "working",
+		startedAt: 0,
+		output: [],
+		anchor: { toolCallId: "call-1" },
+		...overrides,
+	};
+}
+
+type ActivitySink = Readonly<{
+	appendMessage: (
+		role: TranscriptMessage["role"],
+		text: string,
+		options: TranscriptMessageOptions,
+	) => string;
+	updateMessage: (id: string, patch: Partial<Omit<TranscriptMessage, "id">>) => void;
+	transcript: Pick<TranscriptState, "allMessages" | "getMessage">;
+}>;
+
+function foregroundActivitySink(state: AppStore): ActivitySink {
+	return {
+		appendMessage: (role, text, options) => state.appendMessage(role, text, options),
+		updateMessage: (id, patch) => state.updateMessage(id, patch),
+		transcript: state.transcript,
+	};
+}
+
+function activityUpserter(
+	controller: RuntimeController,
+	sink: ActivitySink,
+): (activity: ExtensionActivity) => void {
+	const target = controller as unknown as {
+		upsertExtensionActivityMessage(
+			sink: ActivitySink,
+			activity: ExtensionActivity,
+		): void;
+	};
+	return (activity) => target.upsertExtensionActivityMessage(sink, activity);
+}
+
+test("an anchored activity whose owning tool message never shows up keeps patching its standalone fallback card's text/state on every update", async () => {
+	// Regression test: `upsertExtensionActivityMessage` used to cache an
+	// anchored activity's *standalone fallback* card id (created when
+	// `findToolMessageId` found nothing) the same way it caches a genuine
+	// tool-message id. Every later update then took the "found the tool
+	// message" branch — patching only `{activities, extension}` — so the
+	// fallback card's own `text`/`state` froze at whatever they were on
+	// creation instead of continuing to reflect the activity's progress.
+	const state = new AppStore();
+	const fake = fakeRuntime();
+	const controller = await activate(state, [fake], "/workspace");
+	const upsert = activityUpserter(controller, foregroundActivitySink(state));
+
+	// No `role: "tool"` message carrying `toolCallId: "call-1"` exists yet —
+	// `findToolMessageId` finds nothing, so this must fall back to a
+	// standalone card.
+	upsert(anchoredActivity({ state: "working", progress: "starting" }));
+
+	assertEquals(state.messages.length, 1);
+	const created = state.messages.at(-1);
+	assertExists(created);
+	assertEquals(created.role, "extension-activity");
+	assertEquals(created.text, "starting");
+	assertEquals(created.state, "running");
+
+	// The activity finishes — still no tool message ever appears for
+	// "call-1" — so this must keep patching the SAME standalone card, and
+	// must refresh its text/state, not just its `activities` list.
+	upsert(
+		anchoredActivity({ state: "done", progress: undefined, summary: "finished ok" }),
+	);
+
+	assertEquals(state.messages.length, 1);
+	const updated = state.messages.at(-1);
+	assertExists(updated);
+	assertEquals(updated.id, created.id);
+	assertEquals(updated.text, "finished ok");
+	assertEquals(updated.state, "success");
+
+	await controller.dispose();
+});
+
+test("a still-open standalone activity re-finds its existing card after the id cache is reset instead of appending a duplicate", async () => {
+	// `bindSessionState` clears `activityMessageIds` on every (re)bind — a
+	// `/reload` replay or a background session's `restoreChat` — while the
+	// activity itself may still be running and keep sending updates.
+	const state = new AppStore();
+	const controller = await activate(state, [fakeRuntime()], "/workspace");
+	const upsert = activityUpserter(controller, foregroundActivitySink(state));
+	const standalone = anchoredActivity({ anchor: undefined, progress: "starting" });
+	upsert(standalone);
+	assertEquals(state.messages.length, 1);
+	const created = state.messages.at(-1);
+	assertExists(created);
+
+	(
+		controller as unknown as { activityMessageIds: Map<string, unknown> }
+	).activityMessageIds.clear();
+	upsert({ ...standalone, state: "done", progress: undefined, summary: "done now" });
+
+	assertEquals(state.messages.length, 1);
+	assertEquals(state.messages.at(-1)?.id, created.id);
+	assertEquals(state.messages.at(-1)?.text, "done now");
+	await controller.dispose();
+});
+
+test("a backgrounded session's activity card is written into that session's own transcript, not the foreground's", async () => {
+	const state = new AppStore();
+	const controller = await activate(state, [fakeRuntime()], "/workspace");
+	const background = new TranscriptState(state.transcript.emptyChatHint);
+	const upsert = activityUpserter(controller, {
+		appendMessage: (role, text, options) =>
+			background.appendMessage(role, text, options),
+		updateMessage: (id, patch) => {
+			background.updateMessage(id, patch);
+		},
+		transcript: background,
+	});
+	const standalone = anchoredActivity({ anchor: undefined, progress: "describing" });
+	upsert(standalone);
+	upsert({ ...standalone, state: "done", summary: "A red square." });
+
+	assertEquals(state.messages.length, 0);
+	assertEquals(background.allMessages.length, 1);
+	assertEquals(background.allMessages[0]?.role, "extension-activity");
+	assertEquals(background.allMessages[0]?.text, "A red square.");
 	await controller.dispose();
 });
 
