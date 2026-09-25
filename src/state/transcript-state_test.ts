@@ -32,6 +32,53 @@ test("transcript state appends, streams, updates, and finishes messages", () => 
 	);
 });
 
+test("a live user message is inserted before a trailing run of standalone extension-activity cards", () => {
+	// Reproduces the FIX PASS 2 bug: a `before_agent_start`-triggered activity
+	// card is promoted and appended (by `RuntimeController.upsertExtensionActivityMessage`)
+	// while the hook is still running, strictly before the SDK's own `message_start`
+	// for the user's prompt arrives. A plain trailing `appendMessage` would leave
+	// the card pinned above the prompt it describes for the rest of the live
+	// session — this must reorder it live, not only on a full replay.
+	const state = new TranscriptState(hint);
+	state.appendMessage("assistant", "earlier turn's reply");
+	const cardId = state.appendMessage("extension-activity", "", {
+		state: "running",
+	});
+	const userId = state.appendMessage("user", "the prompt the card is about");
+
+	assertEquals(
+		state.allMessages.map((message) => message.id),
+		["m-1", userId, cardId],
+	);
+	assertEquals(state.getMessageIndex(userId), 1);
+	assertEquals(state.getMessageIndex(cardId), 2);
+});
+
+test("a run of several trailing standalone activity cards all move together, in order", () => {
+	const state = new TranscriptState(hint);
+	const firstCard = state.appendMessage("extension-activity", "", {});
+	const secondCard = state.appendMessage("extension-activity", "", {});
+	const userId = state.appendMessage("user", "prompt");
+
+	assertEquals(
+		state.allMessages.map((message) => message.id),
+		[userId, firstCard, secondCard],
+	);
+});
+
+test("an anchored extension-activity card (toolCallId set) is left where it is, not moved", () => {
+	const state = new TranscriptState(hint);
+	const anchoredCard = state.appendMessage("extension-activity", "", {
+		toolCallId: "call-1",
+	});
+	const userId = state.appendMessage("user", "prompt");
+
+	assertEquals(
+		state.allMessages.map((message) => message.id),
+		[anchoredCard, userId],
+	);
+});
+
 test("transcript snapshots restore independent domain state and queue metadata", () => {
 	const original = new TranscriptState(hint);
 	original.replaceMessages([

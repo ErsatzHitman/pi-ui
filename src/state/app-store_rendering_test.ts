@@ -156,6 +156,62 @@ test("new messages append to the stable message list", async () => {
 	}
 });
 
+test("a live user message is patched in before a standalone extension-activity card, not appended after it", async () => {
+	// FIX PASS 2: the backend model (`TranscriptState.appendMessage`) inserts a
+	// live `role: "user"` message before a trailing run of standalone
+	// extension-activity cards, but the SSE patch that lands the new DOM node
+	// must follow suit — a blind `mode: "append"` to `#message-list` would put
+	// it after every existing element regardless of where the backend put it.
+	const state = createState();
+	const controller = new AbortController();
+	try {
+		const reader = await openInitializedStateStream(state, controller.signal);
+		state.appendMessage("assistant", "an earlier turn");
+		await readUntil(reader, (text) => text.includes("an earlier turn"));
+
+		// The card is promoted and committed while the hook is still pending —
+		// strictly before the SDK's own `message_start` for the prompt it
+		// describes, exactly like `RuntimeController.upsertExtensionActivityMessage`.
+		const extension = {
+			id: "fake-vision",
+			label: "Fake Vision",
+			path: "/ext/fake-vision.ts",
+			source: "local",
+		};
+		const cardId = state.appendMessage("extension-activity", "", {
+			extension,
+			activities: [
+				{
+					v: 1 as const,
+					id: "xa-1",
+					extension,
+					trigger: { kind: "hook" as const, event: "before_agent_start" },
+					title: "before_agent_start",
+					state: "working" as const,
+					startedAt: 0,
+					output: [],
+				},
+			],
+		});
+		await readUntil(reader, (text) => text.includes(cardId));
+
+		const userId = state.appendMessage("user", "the prompt the card is about");
+		const patch = await readUntil(reader, (text) =>
+			text.includes("the prompt the card is about"),
+		);
+
+		assertIncludes(patch, `data: selector [data-message-id="${cardId}"]`);
+		assertIncludes(patch, "data: mode before");
+		assertNotIncludes(patch, "data: selector #message-list\r");
+		assertEqual(
+			projectedMessages(state).map((message) => message.id),
+			["m-1", userId, cardId],
+		);
+	} finally {
+		controller.abort();
+	}
+});
+
 test("parallel message updates all reach their final state", async () => {
 	const state = createState();
 	const controller = new AbortController();

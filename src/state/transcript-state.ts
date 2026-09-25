@@ -206,17 +206,67 @@ export class TranscriptState {
 	): string {
 		this.messageSeq += 1;
 		const id = `m-${this.messageSeq}`;
-		this.transcriptMessages.push({
+		const message: TranscriptMessage = {
 			id,
 			role,
 			text,
 			timestamp: new Date(),
 			...options,
-		});
-		this.messageIndexById.set(id, this.transcriptMessages.length - 1);
+		};
+		// A live `role: "user"` message is inserted *before* any run of standalone
+		// extension-activity cards (`toolCallId` unset) already sitting at the tail —
+		// never after them, even though this append is chronologically last. Without
+		// this, a `before_agent_start`-triggered card (promoted and committed by
+		// `RuntimeController.upsertExtensionActivityMessage` while the hook is still
+		// running — see `handleEvent`, which calls `observeExtensionActivityEvent`
+		// before this reducer runs) stays pinned above the very prompt it describes
+		// for the rest of the live session: nothing ever re-appends or reorders it
+		// afterwards, unlike `transcript-projector.ts`'s `anchorActivitiesAfterTheirUserTurn`,
+		// which only runs on a full replay (reload of a dead server, `/resume`,
+		// session switch, tree navigation) and never on an ordinary live append. This
+		// mirrors that replay pass's rule exactly ("nothing between" the run and the
+		// user row) so a live card and a replayed one land in the same place.
+		const insertAt =
+			role === "user"
+				? this.trailingStandaloneActivityRunStart()
+				: this.transcriptMessages.length;
+		this.transcriptMessages.splice(insertAt, 0, message);
+		this.reindexFrom(insertAt);
 		if (role === "assistant") this.activeAssistantId = id;
 		if (role === "thought") this.activeThoughtId = id;
 		return id;
+	}
+
+	/**
+	 * The index where a maximal run of trailing standalone extension-activity
+	 * cards begins — messages with `role: "extension-activity"` and no
+	 * `toolCallId` (an anchored/fallback card with `toolCallId` set is left
+	 * alone, exactly as `transcript-projector.ts`'s replay pass leaves it).
+	 * Returns `transcriptMessages.length` (append at the very end, the
+	 * previous behavior) when the tail holds no such run.
+	 */
+	private trailingStandaloneActivityRunStart(): number {
+		let index = this.transcriptMessages.length;
+		while (index > 0) {
+			const candidate = this.transcriptMessages[index - 1];
+			if (
+				candidate?.role !== "extension-activity" ||
+				candidate.toolCallId !== undefined
+			) {
+				break;
+			}
+			index -= 1;
+		}
+		return index;
+	}
+
+	/** Refreshes `messageIndexById` for every message from `start` onward,
+	 * after an insertion (rather than a plain trailing push) shifted them. */
+	private reindexFrom(start: number): void {
+		for (let index = start; index < this.transcriptMessages.length; index += 1) {
+			const message = this.transcriptMessages[index];
+			if (message) this.messageIndexById.set(message.id, index);
+		}
 	}
 
 	updateMessage(id: string, patch: Partial<Omit<TranscriptMessage, "id">>): boolean {

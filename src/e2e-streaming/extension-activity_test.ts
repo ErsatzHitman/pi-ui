@@ -142,6 +142,80 @@ test("a slow extension hook shows a pink working card and chip, then keeps its r
 	}
 }, 30_000);
 
+test("a before_agent_start card lands after the user message it belongs to, on a live append with no reload", async () => {
+	// FIX PASS 2: `anchorActivitiesAfterTheirUserTurn` only runs inside
+	// `TranscriptProjector.load()` (a full replay — reload of a dead server,
+	// `/resume`, session switch, tree navigation). The live incremental append
+	// path (`RuntimeController.upsertExtensionActivityMessage`, driven by
+	// `observeExtensionActivityEvent`, which `handleEvent` calls *before* the
+	// session-event reducer appends the SDK's own `message_start` for the
+	// user's prompt) must not leave the card pinned above that prompt for the
+	// rest of the live session. No reload happens in this test at all — this
+	// is the ordinary "submit a prompt" path.
+	const harness = await createStreamingHarness({
+		beforeCreate: writeFakeActivityExtensionFiles,
+	});
+	try {
+		const promptText = fakeDirectives.text(fakeActivityMarkers.visionHook);
+		const prompted = harness.controller.prompt(promptText);
+
+		// The card is promoted (appended) while `before_agent_start` is still
+		// running — strictly before the SDK appends its own `message_start` for
+		// the user's prompt (`prompt()` only resolves after that hook returns).
+		// This is the exact live-append moment the bug happens at: at this
+		// instant, the card exists but the user message it belongs to does not
+		// yet, so it necessarily lands after the card in append order unless the
+		// fix reorders it once the user message does arrive.
+		await waitForCondition(
+			() => activityCard(harness.store.messages, "fake-vision") !== undefined,
+			{ message: "fake-vision card never appeared" },
+		);
+
+		// Once the user message actually arrives (and for the rest of the live
+		// session after that — including once the turn and the card are done),
+		// it must be ordered before the card, not after it.
+		await waitForCondition(
+			() =>
+				harness.store.messages.some(
+					(message) =>
+						message.role === "user" && message.text.includes(promptText),
+				),
+			{ message: "the user message never arrived" },
+		);
+		const cardIdx = harness.store.messages.findIndex(
+			(message) => message.role === "extension-activity",
+		);
+		const userIdx = harness.store.messages.findIndex(
+			(message) => message.role === "user" && message.text.includes(promptText),
+		);
+		assertEquals(userIdx >= 0, true);
+		assertEquals(cardIdx >= 0, true);
+		assertEquals(
+			userIdx < cardIdx,
+			true,
+			`expected the user message (idx ${userIdx}) before the activity card (idx ${cardIdx})`,
+		);
+
+		// Still true once the turn (and the card) has finished, still with no reload.
+		await waitForCondition(
+			() =>
+				activityCard(harness.store.messages, "fake-vision")?.activities?.[0]
+					?.state === "done",
+			{ message: "fake-vision card never finished" },
+		);
+		const doneCardIdx = harness.store.messages.findIndex(
+			(message) => message.role === "extension-activity",
+		);
+		const doneUserIdx = harness.store.messages.findIndex(
+			(message) => message.role === "user" && message.text.includes(promptText),
+		);
+		assertEquals(doneUserIdx < doneCardIdx, true);
+		assertEquals(await prompted, true);
+	} finally {
+		await harness.dispose();
+	}
+}, 30_000);
+
 test("an extension-owned tool card is labelled, pink while running, and keeps its activity step", async () => {
 	const harness = await createStreamingHarness({
 		beforeCreate: writeFakeActivityExtensionFiles,
