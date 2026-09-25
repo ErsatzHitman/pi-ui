@@ -10,6 +10,9 @@ import {
 	registerDismissibleSurface,
 } from "./history-stack.js";
 
+/** A close pops its entry one task later (so a same-handoff open can reuse it). */
+const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 test("opening a dismissible surface pushes one history entry", () => {
 	const pushed: unknown[] = [];
 	const guard = createDismissibleHistoryGuard({
@@ -22,7 +25,7 @@ test("opening a dismissible surface pushes one history entry", () => {
 	assertEquals(pushed.length, 1);
 });
 
-test("closing a surface normally (Cancel/Escape/backdrop) pops its history entry", () => {
+test("closing a surface normally (Cancel/Escape/backdrop) pops its history entry", async () => {
 	let backCalls = 0;
 	const guard = createDismissibleHistoryGuard({
 		pushState: () => {},
@@ -30,10 +33,11 @@ test("closing a surface normally (Cancel/Escape/backdrop) pops its history entry
 	});
 	guard.notifyOpen();
 	guard.notifyClose();
+	await nextTask();
 	assertEquals(backCalls, 1);
 });
 
-test("a real back-button press closes the top-most surface without a double pop", () => {
+test("a real back-button press closes the top-most surface without a double pop", async () => {
 	let backCalls = 0;
 	let closed = 0;
 	const guard = createDismissibleHistoryGuard({
@@ -54,15 +58,17 @@ test("a real back-button press closes the top-most surface without a double pop"
 	// A close reported after that (e.g. the dialog's asynchronous `toggle` event) has no
 	// pushed entry left to pop, so it must not navigate back past pi-ui's own history.
 	guard.notifyClose();
+	await nextTask();
 	assertEquals(backCalls, 0);
 });
 
-test("the popstate caused by the guard's own back() does not close another surface", () => {
+test("the popstate caused by the guard's own back() does not close another surface", async () => {
 	let closed = 0;
 	const guard = createDismissibleHistoryGuard({ pushState: () => {}, back: () => {} });
 	guard.notifyOpen();
 	guard.notifyOpen();
 	guard.notifyClose();
+	await nextTask();
 	guard.handlePopstate(
 		() => true,
 		() => (closed += 1),
@@ -76,13 +82,14 @@ test("the popstate caused by the guard's own back() does not close another surfa
 	assertEquals(closed, 1);
 });
 
-test("a close with no pushed entry never navigates back", () => {
+test("a close with no pushed entry never navigates back", async () => {
 	let backCalls = 0;
 	const guard = createDismissibleHistoryGuard({
 		pushState: () => {},
 		back: () => (backCalls += 1),
 	});
 	guard.notifyClose();
+	await nextTask();
 	assertEquals(backCalls, 0);
 });
 
@@ -106,7 +113,7 @@ test("registering and unregistering a non-dialog dismissible surface never throw
 	unregister();
 });
 
-test("a later independent close is handled normally again after a back press", () => {
+test("a later independent close is handled normally again after a back press", async () => {
 	let backCalls = 0;
 	const guard = createDismissibleHistoryGuard({
 		pushState: () => {},
@@ -121,10 +128,11 @@ test("a later independent close is handled normally again after a back press", (
 
 	guard.notifyOpen();
 	guard.notifyClose();
+	await nextTask();
 	assertEquals(backCalls, 1);
 });
 
-test("non-dialog surfaces report open/close through the bound guard (A#17)", () => {
+test("non-dialog surfaces report open/close through the bound guard (A#17)", async () => {
 	let pushes = 0;
 	let backs = 0;
 	const guard = createDismissibleHistoryGuard({
@@ -136,6 +144,7 @@ test("non-dialog surfaces report open/close through the bound guard (A#17)", () 
 	notifyExternalSurfaceOpen();
 	assertEquals(pushes, 1);
 	notifyExternalSurfaceClose();
+	await nextTask();
 	assertEquals(backs, 1);
 });
 
@@ -171,7 +180,7 @@ function fakeTarget() {
 	};
 }
 
-test("bindDismissibleHistory pushes an entry when a modal dialog opens and pops it on close (m14)", () => {
+test("bindDismissibleHistory pushes an entry when a modal dialog opens and pops it on close (m14)", async () => {
 	const originalDialog = (globalThis as { HTMLDialogElement?: unknown })
 		.HTMLDialogElement;
 	(globalThis as { HTMLDialogElement?: unknown }).HTMLDialogElement = FakeDialog;
@@ -191,6 +200,7 @@ test("bindDismissibleHistory pushes an entry when a modal dialog opens and pops 
 		assertEquals(pushes, 1);
 
 		documentTarget.dispatch("toggle", { target: dialog, newState: "closed" });
+		await nextTask();
 		assertEquals(backs, 1);
 	} finally {
 		(globalThis as { HTMLDialogElement?: unknown }).HTMLDialogElement =
@@ -223,7 +233,7 @@ test("bindDismissibleHistory ignores a non-modal dialog's toggle (the docked ses
 	}
 });
 
-test("bindDismissibleHistory closes the top-most tracked dialog on a real popstate (m14)", () => {
+test("bindDismissibleHistory closes the top-most tracked dialog on a real popstate (m14)", async () => {
 	const originalDialog = (globalThis as { HTMLDialogElement?: unknown })
 		.HTMLDialogElement;
 	(globalThis as { HTMLDialogElement?: unknown }).HTMLDialogElement = FakeDialog;
@@ -251,6 +261,7 @@ test("bindDismissibleHistory closes the top-most tracked dialog on a real popsta
 		assertEquals(closed, 1);
 		// The dialog's own close() re-dispatched `toggle`, but the bind layer had already
 		// untracked it before calling close(), so that toggle must not pop a second entry.
+		await nextTask();
 		assertEquals(backs, 0);
 	} finally {
 		(globalThis as { HTMLDialogElement?: unknown }).HTMLDialogElement =
@@ -258,7 +269,7 @@ test("bindDismissibleHistory closes the top-most tracked dialog on a real popsta
 	}
 });
 
-test("bindDismissibleHistory pops an orphaned dialog's entry once it leaves the DOM (m14)", () => {
+test("bindDismissibleHistory pops an orphaned dialog's entry once it leaves the DOM (m14)", async () => {
 	const originalDialog = (globalThis as { HTMLDialogElement?: unknown })
 		.HTMLDialogElement;
 	const originalObserver = (globalThis as { MutationObserver?: unknown })
@@ -291,6 +302,7 @@ test("bindDismissibleHistory pops an orphaned dialog's entry once it leaves the 
 		// ever firing `toggle`; the MutationObserver layer must still pop its entry.
 		dialog.isConnected = false;
 		observerCallback?.();
+		await nextTask();
 		assertEquals(backs, 1);
 	} finally {
 		(globalThis as { HTMLDialogElement?: unknown }).HTMLDialogElement =
@@ -298,4 +310,143 @@ test("bindDismissibleHistory pops an orphaned dialog's entry once it leaves the 
 		(globalThis as { MutationObserver?: unknown }).MutationObserver =
 			originalObserver;
 	}
+});
+
+test("a close and an open in one handoff reuse the entry instead of back + push (F1)", async () => {
+	let pushes = 0;
+	let replaces = 0;
+	const steps: number[] = [];
+	const guard = createDismissibleHistoryGuard({
+		pushState: () => (pushes += 1),
+		replaceState: () => (replaces += 1),
+		back: (n = 1) => steps.push(n),
+	});
+	guard.notifyOpen(); // the command palette
+	guard.notifyClose(); // closes...
+	guard.notifyOpen(); // ...and the font picker opens in the same turn
+	await nextTask();
+	assertEquals(pushes, 1);
+	assertEquals(replaces, 1);
+	assertEquals(steps, []);
+	// Depth is unchanged: closing the picker pops exactly the one entry left.
+	guard.notifyClose();
+	await nextTask();
+	assertEquals(steps, [1]);
+});
+
+test("an older surface closing under a newer one never navigates back (F1/F2 handoff)", async () => {
+	const steps: number[] = [];
+	const guard = createDismissibleHistoryGuard({
+		pushState: () => {},
+		replaceState: () => {},
+		back: (n = 1) => steps.push(n),
+	});
+	guard.notifyOpen(); // the command palette
+	guard.notifyOpen(); // the server-opened auth dialog
+	guard.notifyClose({ topmost: false }); // the palette closes underneath it
+	await nextTask();
+	assertEquals(steps, []);
+	// Closing the auth dialog drops its entry and the palette's surplus one together.
+	guard.notifyClose();
+	await nextTask();
+	assertEquals(steps, [2]);
+});
+
+test("a back press after an older surface closed underneath also drops its surplus entry", async () => {
+	const steps: number[] = [];
+	let closed = 0;
+	const guard = createDismissibleHistoryGuard({
+		pushState: () => {},
+		replaceState: () => {},
+		back: (n = 1) => steps.push(n),
+	});
+	guard.notifyOpen();
+	guard.notifyOpen();
+	guard.notifyClose({ topmost: false });
+	guard.handlePopstate(
+		() => true,
+		() => (closed += 1),
+	);
+	await nextTask();
+	assertEquals(closed, 1);
+	assertEquals(steps, [1]);
+	// The guard's own pop is not mistaken for another back press.
+	guard.handlePopstate(
+		() => true,
+		() => (closed += 1),
+	);
+	assertEquals(closed, 1);
+});
+
+test("a normal close still pops exactly one entry", async () => {
+	const steps: number[] = [];
+	const guard = createDismissibleHistoryGuard({
+		pushState: () => {},
+		replaceState: () => {
+			throw new Error("must not be called");
+		},
+		back: (n = 1) => steps.push(n),
+	});
+	guard.notifyOpen();
+	guard.notifyClose();
+	await nextTask();
+	assertEquals(steps, [1]);
+});
+
+test("bindDismissibleHistory reports a dialog closing under a newer one as not top-most", async () => {
+	const originalDialog = (globalThis as { HTMLDialogElement?: unknown })
+		.HTMLDialogElement;
+	(globalThis as { HTMLDialogElement?: unknown }).HTMLDialogElement = FakeDialog;
+	try {
+		const steps: number[] = [];
+		const guard = createDismissibleHistoryGuard({
+			pushState: () => {},
+			replaceState: () => {},
+			back: (n = 1) => steps.push(n),
+		});
+		const documentTarget = fakeTarget();
+		bindDismissibleHistory(guard, documentTarget, fakeTarget());
+
+		const palette = new FakeDialog(true);
+		const auth = new FakeDialog(true);
+		palette.open = true;
+		documentTarget.dispatch("toggle", { target: palette, newState: "open" });
+		auth.open = true;
+		documentTarget.dispatch("toggle", { target: auth, newState: "open" });
+		palette.open = false;
+		documentTarget.dispatch("toggle", { target: palette, newState: "closed" });
+		await nextTask();
+		assertEquals(steps, []);
+
+		auth.open = false;
+		documentTarget.dispatch("toggle", { target: auth, newState: "closed" });
+		await nextTask();
+		assertEquals(steps, [2]);
+	} finally {
+		(globalThis as { HTMLDialogElement?: unknown }).HTMLDialogElement =
+			originalDialog;
+	}
+});
+
+test("a surface opening while the guard's own back() is in flight pushes after its popstate (F1)", async () => {
+	const log: string[] = [];
+	const guard = createDismissibleHistoryGuard({
+		pushState: () => log.push("push"),
+		replaceState: () => log.push("replace"),
+		back: (n = 1) => log.push(`back ${n}`),
+	});
+	guard.notifyOpen(); // the command palette
+	guard.notifyClose(); // closes; its back() runs one task later...
+	await nextTask();
+	guard.notifyOpen(); // ...and the auth dialog opens before that traversal's popstate
+	assertEquals(log, ["push", "back 1"]);
+	guard.handlePopstate(
+		() => true,
+		() => log.push("closed"),
+	);
+	// The guard's own popstate: nothing closes, and the deferred entry is pushed only now.
+	assertEquals(log, ["push", "back 1", "push"]);
+	guard.notifyClose();
+	await nextTask();
+	assertEquals(log, ["push", "back 1", "push", "back 1"]);
 });

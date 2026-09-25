@@ -29,8 +29,8 @@
 		background: light-dark(oklch(0% 0 none / 32%), oklch(0% 0 none / 55%));
 		opacity: 0;
 		transition:
-			opacity 180ms var(--ease-out),
-			display 180ms allow-discrete;
+			opacity var(--duration-md) var(--ease-out),
+			display var(--duration-md) allow-discrete;
 		transition-behavior: allow-discrete;
 	}
 
@@ -41,12 +41,30 @@
 
 	#app.live-workspace-open #live-workspace-backdrop:not([hidden]) {
 		opacity: 1;
+
+		/* Enter at the drawer duration; the base rule's shorter duration is the exit. */
+		transition-duration: var(--duration-lg);
 	}
 
+	/* Gated on readiness like the reduced-motion pane entry below: under reduced motion
+	   base.css's !important durations out-rank the load guard, and load stays instant. */
 	@starting-style {
-		#app.live-workspace-open #live-workspace-backdrop:not([hidden]) {
+		:root[data-motion-ready]
+			#app.live-workspace-open
+			#live-workspace-backdrop:not([hidden]) {
 			opacity: 0;
 		}
+	}
+
+	/* Motion round 2: every trigger animates (pointer, alt+L, Escape, palette, Back, PIUI).
+	   Only the first style after load (a persisted open preference) is instant. */
+	:root:not([data-motion-ready]) :is(#live-workspace, #live-workspace-backdrop) {
+		transition: none;
+	}
+
+	/* Still displayed through its exit in every mode: a tap there must not land on it. */
+	#app:not(.live-workspace-open) #live-workspace {
+		pointer-events: none;
 	}
 
 	/*
@@ -64,6 +82,10 @@
 		z-index: 60;
 		display: none;
 		max-height: min(80dvh, 34rem);
+
+		/* One column that never grows past the pane: the coarse-pointer tab floor would
+		   otherwise widen an auto track and push the header off a narrow pane (LW-V2-02). */
+		grid-template-columns: minmax(0, 1fr);
 		grid-template-rows: auto minmax(0, 1fr);
 		border-start-start-radius: var(--radius-xl);
 		border-start-end-radius: var(--radius-xl);
@@ -73,14 +95,17 @@
 		box-shadow: var(--shadow-lg);
 		translate: 0 100%;
 		transition:
-			translate 180ms var(--ease-out),
-			display 180ms allow-discrete;
+			translate var(--duration-md) var(--ease-drawer),
+			display var(--duration-md) allow-discrete;
 		transition-behavior: allow-discrete;
 	}
 
 	#app.live-workspace-open #live-workspace {
 		display: grid;
 		translate: 0 0;
+
+		/* Enter at the drawer duration; the base rule's shorter duration is the exit. */
+		transition-duration: var(--duration-lg);
 	}
 
 	@starting-style {
@@ -97,6 +122,33 @@
 		margin-block: 0.5rem;
 		border-radius: 999px;
 		background: var(--border);
+	}
+
+	/* Sheet drag (live-workspace-open.ts bindSheetDrag): the handle and the header's empty
+	   area track the finger instead of panning the page. Sheet only; wider, the header is
+	   an ordinary toolbar. */
+	@media (width <= 48rem) {
+		#live-workspace-drag-handle,
+		.live-workspace-header {
+			touch-action: none;
+		}
+
+		/* The sheet shows its drag handle as a third grid item: give it its own row, or the
+		   header lands in the 1fr row and collapses to 0 once the body outgrows max-height. */
+		#live-workspace {
+			grid-template-rows: auto auto minmax(0, 1fr);
+		}
+
+		/* An upward over-drag lifts the sheet off the bottom edge: this canvas skirt (the
+		   fixed pane is its containing block) fills the gap. Below the viewport at rest. */
+		#live-workspace::after {
+			content: "";
+			position: absolute;
+			inset-inline: 0;
+			top: 100%;
+			height: 50dvh;
+			background: var(--surface-canvas);
+		}
 	}
 
 	#live-workspace-separator {
@@ -116,13 +168,22 @@
 		display: flex;
 
 		/* A#26: icon-only buttons (see live-workspace.tsx) never need to wrap, even at the
-		   drawer's 26rem width with all 5 tabs — no-wrap keeps that a guarantee, not a hope. */
+		   drawer's 20rem width with all 5 tabs — no-wrap keeps that a guarantee, not a hope. */
 		flex-wrap: nowrap;
 		gap: 0.125rem;
+
+		/* The 2.75rem coarse-pointer floor can outgrow a narrow pane: the strip shrinks and
+		   its tabs (never squeezed below the floor) scroll sideways instead of pushing the
+		   bell and close buttons out (LW-V2-02). It does not grow: the segmented track's
+		   background would stretch past the last tab. */
+		min-width: 0;
+		overflow-x: auto;
+		scrollbar-width: none;
 	}
 
 	.live-workspace-tab-button {
 		display: flex;
+		flex-shrink: 0;
 		align-items: center;
 		justify-content: center;
 		width: 1.75rem;
@@ -145,15 +206,26 @@
 		color: var(--text);
 	}
 
-	.live-workspace-tab-button:hover {
-		color: var(--text);
+	@media (hover: hover) and (pointer: fine) {
+		.live-workspace-tab-button:hover {
+			color: var(--text);
+		}
 	}
 
-	/* Matches styles/controls.css's systemic `.btn` touch-target floor; these aren't `.btn`. */
+	/* Matches styles/controls.css's systemic `.btn` touch-target floor; these aren't `.btn`.
+	   The height always keeps it. Five 2.75rem tabs outgrow the 286px docked pane and the
+	   320px drawer: there the tabs narrow together (never below the fine-pointer 1.75rem)
+	   so every icon stays whole, instead of the strip scrolling with a half-cut tab at its
+	   edge (PN3-7). Where they fit (the phone sheet), nothing changes. */
 	@media (pointer: coarse) {
-		.live-workspace-tab-button {
+		/* Out-ranks the shared `.segmented-control > button` padding, which would squeeze
+		   a narrowed tab's icon (the svg is max-width: 100%). */
+		.segmented-control > .live-workspace-tab-button {
+			flex-shrink: 1;
 			width: 2.75rem;
+			min-width: 1.75rem;
 			height: 2.75rem;
+			padding-inline: 0;
 		}
 	}
 
@@ -173,6 +245,12 @@
 		overflow-y: auto;
 		padding: 0.75rem;
 	}
+
+	/* Tabs are peers: the incoming panel fades in, the outgoing hides at once (no slide,
+	   no double exposure). The fade is a one-shot in the tab click (live-workspace.tsx),
+	   not `@starting-style`: a stale-tab patch in the preference round trip flips the
+	   visible section's display, which would replay a CSS entry (LW-V2-03). The tab
+	   buttons' own crossfade is the shared `.segmented-control > button` rule. */
 
 	.live-workspace-panel {
 		display: flex;
@@ -208,6 +286,9 @@
 		background: var(--surface-muted);
 		padding: 0.5rem 0.75rem;
 		font-size: var(--text-sm);
+
+		/* A phase change (running → retrying/waiting) eases its warning border in (B-X6). */
+		transition: border-color var(--duration-md) ease;
 	}
 
 	.live-workspace-turn-banner[data-turn-phase="retrying"],
@@ -385,11 +466,14 @@
 		overflow: hidden;
 	}
 
+	/* Full-width fill slid on the compositor; the track's `overflow: hidden` clips it. */
 	.live-workspace-meter-fill {
+		width: 100%;
 		height: 100%;
 		border-radius: inherit;
 		background: var(--status-accent, var(--text));
-		transition: width 200ms var(--ease-out);
+		translate: calc((clamp(0, var(--progress, 0), 100) - 100) * 1%) 0;
+		transition: translate var(--duration-lg) var(--ease-out);
 	}
 
 	.live-workspace-limits-list li {
@@ -459,14 +543,22 @@
 			grid-column: 1 / -1;
 			inset: var(--workspace-inset);
 			left: auto;
-			width: min(26rem, calc(100% - 2 * var(--workspace-inset)));
+			width: min(20rem, calc(100% - 2 * var(--workspace-inset)));
 			max-height: none;
 			border-radius: var(--radius-lg);
 
 			/* No longer a bottom sheet: only the trailing edge can still sit under a notch. */
 			padding-inline: 0 env(safe-area-inset-right);
 			padding-bottom: 0;
-			translate: 100% 0;
+			translate: calc(100% + var(--workspace-inset)) 0;
+		}
+
+		/* Enter along the exit path (from the right edge), overriding the sheet's rise. */
+		@starting-style {
+			/* stylelint-disable-next-line max-nesting-depth -- @starting-style must be scoped to the drawer breakpoint */
+			#app.live-workspace-open #live-workspace {
+				translate: calc(100% + var(--workspace-inset)) 0;
+			}
 		}
 
 		#live-workspace-drag-handle {
@@ -474,60 +566,102 @@
 		}
 	}
 
-	/* Docked mode below folds the pane into the grid; it's no longer an overlay to dismiss. */
-	@container workspace (width >= 64rem) {
-		#app.live-workspace-open:not(.review-open) #live-workspace-backdrop {
-			display: none;
-		}
-
-		#app.live-workspace-open:not(.review-open) #live-workspace {
+	/*
+	 * ≥64rem: the pane docks in the Sessions slot (same width, same edge), so Sessions ⇄ Live
+	 * never moves the chat. The pane's box is the same open or closed; closed, it is only
+	 * translated off the right edge, so it slides in and out along one path
+	 * (docked-open → closed keeps `display` through the exit via allow-discrete).
+	 * The layout reserve (grid track + chat/toolbar in column 2) is a separate rule so
+	 * pane-motion.ts can withhold it while the pane slides in (data-reserve-hold).
+	 * `@media`, not `@container workspace`: #workspace-shell IS the `workspace` container,
+	 * and a container query never matches its own container (the old shell rule never
+	 * applied; the pane sat in the 50% Review track). With Live open, Sessions is closed,
+	 * so the viewport width equals the shell width. Keep 64rem in sync with
+	 * live-workspace-layout.ts (`dockedLiveQuery`), which pane-motion.ts also reads.
+	 */
+	@media (width >= 64rem) {
+		#app:not(.review-open) #live-workspace {
 			position: relative;
 			inset: auto;
 			grid-row: 1 / 3;
-			grid-column: 4 / 6;
-			width: auto;
+			grid-column: 1 / -1;
+			justify-self: end;
+			width: calc(
+				var(--session-sidebar-width) - var(--workspace-gap) +
+					var(--workspace-inset)
+			);
 			max-height: none;
 			border-radius: 0;
 			padding: var(--workspace-inset) var(--workspace-inset) var(--workspace-inset)
-				var(--workspace-gap);
+				0;
 			background: transparent;
 			box-shadow: none;
+			translate: 100% 0;
+		}
+
+		#app.live-workspace-open:not(.review-open) #live-workspace {
 			translate: none;
 		}
 
-		#app.live-workspace-open:not(.review-open) #workspace-shell {
-			grid-template-columns:
-				var(--workspace-inset) minmax(0, 1fr) var(--workspace-gap)
-				minmax(
-					0,
-					calc(
-						(100% - 2 * var(--workspace-inset) - var(--workspace-gap)) *
-							clamp(0.22, var(--live-workspace-ratio, 0.32), 0.5)
-					)
-				)
-				var(--workspace-inset);
-		}
-
-		#app.live-workspace-open:not(.review-open) #live-workspace-separator {
-			display: block;
-			position: absolute;
-			inset-block: 0;
-			inset-inline-start: 0;
-		}
-
-		#app.live-workspace-open:not(.review-open) #live-workspace-drag-handle {
+		#app.live-workspace-open:not(.review-open) #live-workspace-backdrop,
+		#app:not(.review-open) #live-workspace-drag-handle {
 			display: none;
 		}
 
-		#app.live-workspace-open:not(.review-open) #chat-pane {
+		#app.live-workspace-open:not(.review-open, [data-reserve-hold="live"])
+			#workspace-shell,
+		#app[data-reserve-keep="live"] #workspace-shell {
+			grid-template-columns:
+				var(--workspace-inset) minmax(0, 1fr) var(--workspace-gap)
+				calc(var(--session-sidebar-width) - var(--workspace-gap))
+				var(--workspace-inset);
+		}
+
+		#app.live-workspace-open:not(.review-open, [data-reserve-hold="live"]) #chat-pane,
+		#app[data-reserve-keep="live"] #chat-pane {
 			grid-row: 2;
 			grid-column: 2;
 			margin: var(--workspace-inset) 0 var(--workspace-inset);
 		}
 
-		#app.live-workspace-open:not(.review-open) .toolbar {
+		#app.live-workspace-open:not(.review-open, [data-reserve-hold="live"]) .toolbar,
+		#app[data-reserve-keep="live"] .toolbar {
 			grid-column: 2;
 			margin-inline: 0;
+		}
+	}
+
+	@starting-style {
+		@media (width >= 64rem) {
+			/* stylelint-disable-next-line max-nesting-depth -- @starting-style scoped to the docked breakpoint */
+			#app.live-workspace-open:not(.review-open) #live-workspace {
+				translate: 100% 0;
+			}
+		}
+	}
+
+	/* Reduced motion: the pane fades (120ms, base.css) in all three modes; nothing moves. */
+	@media (prefers-reduced-motion: reduce) {
+		#app #live-workspace,
+		#app:not(.review-open) #live-workspace {
+			translate: none;
+			opacity: 0;
+		}
+		#app.live-workspace-open #live-workspace,
+		#app.live-workspace-open:not(.review-open) #live-workspace {
+			translate: none;
+			opacity: 1;
+		}
+	}
+	@starting-style {
+		@media (prefers-reduced-motion: reduce) {
+			/* Gated on readiness: base.css's reduced-motion !important durations out-rank the
+			   load guard above, so an ungated entry would fade a persisted-open pane on load.
+			   The gate also lifts this rule above the (2,2,0) opacity: 1 rule, so it applies. */
+			/* stylelint-disable-next-line max-nesting-depth -- reduced-motion entry fade */
+			:root[data-motion-ready] #app.live-workspace-open #live-workspace {
+				opacity: 0;
+			}
 		}
 	}
 }
@@ -536,5 +670,18 @@
 	/* On/off icon pair inside one icon button; `data-show` hides the inactive one. */
 	.live-workspace-icon-state {
 		display: contents;
+	}
+
+	/* Bell ⇄ BellOff: the incoming icon settles in (mirrors markdown.css's copy-icon swap).
+	   On the svg, because the span is `display: contents` and has no box to fade (B-X6). */
+	.live-workspace-icon-state > svg {
+		transition:
+			opacity var(--duration-md) var(--ease-out),
+			scale var(--duration-md) var(--ease-out);
+
+		@starting-style {
+			opacity: 0;
+			scale: 0.95;
+		}
 	}
 }

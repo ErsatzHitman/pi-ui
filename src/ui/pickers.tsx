@@ -102,10 +102,7 @@ function renderSlashRow(item: AppSlashCommand, index: number): string {
 			data-slash-order={index}
 			data-picker-kind="slash"
 			data-on:click={clickAction}
-			data-show={`
-				$_slashPickerOpen &&
-				window.piUi.pickers.fuzzyMatch($prompt.slice(1), ${JSON.stringify(name)}).matches
-			`}
+			data-show={`window.piUi.pickers.fuzzyMatch($prompt.slice(1), ${JSON.stringify(name)}).matches`}
 		>
 			<div class="picker-row-button">
 				<span class="picker-row-content">
@@ -589,7 +586,8 @@ function renderSessionRow(
 			role="menuitem"
 			tabindex="-1"
 			aria-current={current ? "true" : undefined}
-			data-preserve-attr="class"
+			data-preserve-attr="class data-deleting"
+			data-attr:data-deleting={`$_sessionDeletingPath === ${JSON.stringify(session.path)}`}
 			data-keep-command-open
 			data-indicator:_session-loading
 			data-attr:aria-disabled="$_sessionTransitionStatus === 'loading' ? 'true' : 'false'"
@@ -634,11 +632,13 @@ function renderSessionRow(
 						class="btn session-menu-abort"
 						data-variant="destructive"
 						data-size="icon-xs"
+						data-preserve-attr="data-aborting"
 						aria-label={`Abort ${current ? "current" : "background"} session ${session.title}`}
 						data-on:click__stop={
 							current
-								? `@post('${endpoints.abort}', { payload: {} })`
+								? `el.setAttribute('data-aborting', ''); @post('${endpoints.abort}', { payload: {} })`
 								: `
+						el.setAttribute('data-aborting', '');
 						$backgroundSessionPath = ${JSON.stringify(session.path)};
 						@post('${endpoints.sessionsBackgroundAbort}', {
 						payload: { backgroundSessionPath: $backgroundSessionPath },

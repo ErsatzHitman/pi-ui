@@ -13,6 +13,7 @@ import {
 	type GitStatusEntry,
 } from "@pierre/trees";
 
+import { enter, motionReady, reducedMotion } from "../../static/app/motion.js";
 import { getPierreThemes } from "../pierre-theme.ts";
 import { errorMessage } from "../utils/errors.ts";
 import { workspaceTreeStyle, workspaceTreeUnsafeCss } from "../workspace-review-tree.ts";
@@ -23,6 +24,51 @@ import {
 	type WorkspaceFilePreviewData,
 } from "./workspace-files-api.ts";
 import { revealTreePath, syncWorkspaceTreePaths } from "./workspace-tree.ts";
+
+/** A selection this soon after the previous one (j/k stepping) swaps its content instantly. */
+export const selectionFadeGapMs = 150;
+/**
+ * Upper bound on holding the Files main hidden while the first tree and file load: the
+ * same 200ms reveal-after threshold as base.css. A fast load resolves in one fade; a slow
+ * one fades the main (and its "Loading files…" status) in at 200ms instead of leaving it
+ * blank.
+ */
+const loadHoldMs = 200;
+
+/** Pure (unit-tested): whether a file selection at `now` fades the new content in. */
+export function selectionFades(now: number, lastSelectAt: number): boolean {
+	return now - lastSelectAt > selectionFadeGapMs;
+}
+
+/**
+ * Pure (unit-tested): whether a Files-main reveal fades. A first-load hold that is still
+ * running always ends in a fade. Once a slow first load has outlasted its hold, the hold's
+ * own expiry fade already revealed the main, so the content that follows swaps in place
+ * rather than dipping back to 0 (`afterExpiredHold`, consumed by that one reveal).
+ */
+export function revealFades(
+	held: boolean,
+	requested: boolean,
+	afterExpiredHold: boolean,
+): boolean {
+	return held || (requested && !afterExpiredHold);
+}
+
+/**
+ * Pure (unit-tested): runs `commit` once `ready` settles, and only while the render it
+ * belongs to is still current. Until then the previous view stays painted, and the swap
+ * lands in one task, so no frame shows a stale file or a blank host.
+ */
+export async function commitWhenCurrent(
+	ready: Promise<void>,
+	isCurrent: () => boolean,
+	commit: () => void,
+): Promise<boolean> {
+	await ready;
+	if (!isCurrent()) return false;
+	commit();
+	return true;
+}
 
 type WorkspaceFilesOptions = {
 	endpoint: string;
@@ -84,6 +130,13 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 	let wrap = true;
 	let editor: PierreEditor<"file"> | undefined;
 	let previewFont: FontFace | undefined;
+	// Motion: when the last file selection started (j/k under selectionFadeGapMs stays
+	// instant), and the opacity hold on the Files main while its first tree + file load, so
+	// the empty -> tree -> file sequence reads as one fade.
+	let lastSelectAt = Number.NEGATIVE_INFINITY;
+	let loadHold: Animation | undefined;
+	let loadHoldExpired = false;
+	let mainFade: Animation | undefined;
 	const viewer = new File(viewerOptions());
 	const tree = new FileTree({
 		composition: {
@@ -337,7 +390,72 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 
 	function setVisible(next: boolean): void {
 		visible = next;
-		if (visible) void loadFiles();
+		if (!visible) {
+			loadHold?.cancel();
+			loadHold = undefined;
+			return;
+		}
+		if (loadedWorkspacePath !== workspacePath) holdForLoad();
+		void loadFiles();
+	}
+
+	function holdForLoad(): void {
+		if (loadHold || !motionReady()) return;
+		if (reducedMotion()) {
+			// No hold: the main (and its loading status) shows at once, and the content that
+			// follows swaps in place like after an expired hold, with no opacity dip.
+			loadHoldExpired = true;
+			return;
+		}
+		loadHoldExpired = false;
+		const hold = mainHost.animate([{ opacity: 0 }, { opacity: 0 }], {
+			duration: loadHoldMs,
+		});
+		loadHold = hold;
+		hold.finished.then(
+			() => {
+				if (loadHold !== hold) return;
+				// A slow first load (a big repo over the public URL): end the hold with the
+				// fade rather than snapping to the loading state; the content that arrives later
+				// then swaps in without a second fade (revealFades).
+				loadHold = undefined;
+				loadHoldExpired = true;
+				fadeMain();
+			},
+			() => {
+				if (loadHold === hold) loadHold = undefined;
+			},
+		);
+	}
+
+	/** Ends a load hold and fades the Files main in when it was held or `fade` asks. */
+	function revealMain(fade: boolean): void {
+		const held = loadHold !== undefined;
+		loadHold?.cancel();
+		loadHold = undefined;
+		const fades = revealFades(held, fade, loadHoldExpired);
+		loadHoldExpired = false;
+		if (fades) fadeMain();
+	}
+
+	/**
+	 * One fade on the Files main at a time: a reveal that lands while the previous one is
+	 * still running (a linked file opening right after the Git -> Files switch) swaps its
+	 * content under that fade instead of dipping back to 0.
+	 */
+	function fadeMain(): void {
+		if (mainFade?.playState === "running") return;
+		mainFade = enter(mainHost, { from: "fade" });
+	}
+
+	/**
+	 * Git -> Files: the Files main returns with the same fade as the incoming sidebar panels
+	 * (workspace-review.ts setPanelMode). Skipped while a first-load hold owns the main, or
+	 * before the tree has loaded (that hold's reveal fades it instead).
+	 */
+	function revealForSwitch(): void {
+		if (!visible || loadHold || loadedWorkspacePath !== workspacePath) return;
+		fadeMain();
 	}
 
 	async function openFile(path: string): Promise<void> {
@@ -479,6 +597,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 			// file (including unavailable previews) selected when the tree refreshes.
 			if (selectedFilePath) {
 				if (current) setStatus(formatBytes(current.size));
+				revealMain(false);
 				return;
 			}
 			const initial = data.paths.includes("README.md")
@@ -488,11 +607,13 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 			else {
 				setStatus("");
 				showEmpty("No files in this workspace");
+				revealMain(false);
 			}
 		} catch (error) {
 			if (generation !== loadGeneration) return;
 			setStatus(errorMessage(error));
 			showEmpty("Could not load workspace files");
+			revealMain(false);
 		}
 	}
 
@@ -511,6 +632,9 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 			return;
 		}
 		const generation = ++fileGeneration;
+		const selectedAt = performance.now();
+		const fade = selectionFades(selectedAt, lastSelectAt);
+		lastSelectAt = selectedAt;
 		stopEditing();
 		current = undefined;
 		preview = undefined;
@@ -529,6 +653,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 				mode = "source";
 				showEmpty(file.message);
 				syncToolbar();
+				revealMain(fade);
 				return;
 			}
 			preview = file.preview;
@@ -537,11 +662,16 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 			if ("contents" in file) {
 				current = file;
 				draft = file.contents;
-				if (mode === "source") await renderSource(generation);
-				else renderPreview();
+				if (mode === "source")
+					await renderSource(generation, () => revealMain(fade));
+				else {
+					renderPreview();
+					revealMain(fade);
+				}
 			} else {
 				draft = "";
 				renderPreview();
+				revealMain(fade);
 			}
 			syncToolbar();
 		} catch (error) {
@@ -553,6 +683,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 			setStatus("");
 			showEmpty(errorMessage(error));
 			syncToolbar();
+			revealMain(fade);
 		}
 	}
 
@@ -562,18 +693,27 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		const generation = ++fileGeneration;
 		mode = next;
 		stopEditing();
-		if (mode === "preview") renderPreview();
-		else await renderSource(generation);
+		// Source <-> preview: the incoming host fades in (the source host once its render
+		// commits, and only if this switch is still the current one).
+		if (mode === "preview") {
+			renderPreview();
+			enter(previewHost, { from: "fade" });
+		} else {
+			await renderSource(generation, () => enter(viewHost, { from: "fade" }));
+		}
 		syncToolbar();
 	}
 
-	async function renderSource(generation: number): Promise<void> {
+	/**
+	 * Renders the current file's source. The previous view (source, preview or empty) stays
+	 * painted while the highlighter loads; the host swap and the render then land in one
+	 * task, and `onCommit` (a fade) runs in that same task.
+	 */
+	async function renderSource(
+		generation: number,
+		onCommit?: () => void,
+	): Promise<void> {
 		if (!current) return;
-		clearFontPreview();
-		previewHost.replaceChildren();
-		previewHost.hidden = true;
-		empty.hidden = true;
-		viewHost.hidden = false;
 		const language: SupportedLanguages = current.path.toLowerCase().endsWith(".svg")
 			? "xml"
 			: getFiletypeFromFileName(current.path);
@@ -584,12 +724,23 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 			name: current.path,
 		};
 		const themes = getPierreThemes();
-		await preloadHighlighter({
-			langs: [language],
-			themes: [themes.dark, themes.light],
-		}).catch(() => undefined);
-		if (generation !== fileGeneration) return;
-		viewer.render({ file, containerWrapper: viewHost });
+		const committed = await commitWhenCurrent(
+			preloadHighlighter({
+				langs: [language],
+				themes: [themes.dark, themes.light],
+			}).catch(() => undefined),
+			() => generation === fileGeneration,
+			() => {
+				clearFontPreview();
+				previewHost.replaceChildren();
+				previewHost.hidden = true;
+				empty.hidden = true;
+				viewHost.hidden = false;
+				viewer.render({ file, containerWrapper: viewHost });
+				onCommit?.();
+			},
+		);
+		if (!committed) return;
 		await startEditing(generation);
 	}
 
@@ -895,6 +1046,7 @@ export function createWorkspaceFiles(options: WorkspaceFilesOptions) {
 		refreshAfterDiscard,
 		requestConfirmation,
 		requestNotice,
+		revealForSwitch,
 		revealPath,
 		setGitStatus,
 		setVisible,

@@ -28,6 +28,11 @@
 		padding: 0.5rem 0.75rem;
 		text-align: start;
 	}
+
+	/* Full-width rows: 0.98 moves each edge 3-8px and reads as a jump, so press softer. */
+	.dialog-option:not(:disabled):active {
+		scale: 0.99;
+	}
 	.dialog-option-between {
 		justify-content: space-between;
 	}
@@ -44,6 +49,13 @@
 	.dialog-option-description {
 		color: var(--text-muted);
 		font: var(--text-xs)/1.25 var(--font-mono);
+	}
+
+	/* While the auth panel eases to a shorter phase (auth-dialog.tsx AUTH_PANEL_RESIZE) the
+	   footer rides its bottom edge instead of floating over an empty band; at rest the panel
+	   fits its content, so the auto margin is 0. */
+	#auth-dialog-content > footer {
+		margin-block-start: auto;
 	}
 
 	.dialog-flow {
@@ -99,10 +111,14 @@
 		border-radius: 999px;
 		background: var(--surface-muted);
 	}
+
+	/* Full-width fill slid by `--progress` (0-100): translate composites, width would lay out. */
 	.dialog-progress-value {
+		width: 100%;
 		height: 100%;
 		background: var(--action-primary);
-		transition: width 150ms ease;
+		translate: calc((clamp(0, var(--progress, 0), 100) - 100) * 1%) 0;
+		transition: translate var(--duration-md) linear;
 	}
 	.dialog-model-name {
 		min-width: 0;

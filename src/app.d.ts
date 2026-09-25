@@ -48,10 +48,28 @@ interface PiUiNamespace {
 	messageScroll: {
 		bindResize(): void;
 		captureAnchor(): boolean;
+		/** Arms the send-time prompt-spacer hold (real submit paths only, not /copy). */
+		holdSpacerForSend(): void;
 		hydratePierreDiff(element: HTMLElement): void;
+		/** Gates nested entries while a whole transcript is inserted (ui-renderer.ts). */
+		quietTranscript(options?: { hold?: boolean }): void;
 		restoreAnchor(): void;
+		/** Crossfades the pending "thinking..." row out in place (ui-renderer.ts). */
+		retirePending(replaced?: boolean): void;
 		scrollBottom(behavior?: "auto" | "smooth"): void;
 		trimOldMessages(): void;
+	};
+	/** `static/app/motion.js` for Datastar expressions (addendum C-X4). */
+	motion: {
+		enter(
+			element: Element | null | undefined,
+			options?: { from?: "fade" | "rise" | "pop"; delay?: number },
+		): Animation | undefined;
+	};
+	/** Pane motion engine (`src/client/pane-motion.ts`, WP-B); armed synchronously by
+	 * every pane trigger before it changes the DOM (flow-critique #1). */
+	paneMotion?: {
+		arm(pane: "sessions" | "live" | "review", willOpen: boolean): void;
 	};
 	modelSearch: {
 		filter(input: HTMLInputElement, query: string): void;

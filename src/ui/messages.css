@@ -26,16 +26,52 @@
 			left top,
 			right top;
 		mask-repeat: no-repeat;
-		transition: opacity 120ms var(--ease-out) 80ms;
+		transition: opacity var(--duration-xs) var(--ease-out);
 	}
 	#messages.messages-empty {
 		padding-block: 2rem 8rem;
 	}
 	#messages.messages-loading {
 		opacity: 0.5;
+		transition-duration: var(--duration-sm);
+		transition-delay: 80ms; /* guard: fast switches never dim */
 	}
-	#messages.messages-loading .recent-session:disabled {
+
+	/* A recent-session row is disabled only during a session transition, which the
+	   container already shows: never the base :disabled dim, on either node (PN3-3). */
+	#messages .recent-session:disabled {
 		opacity: 1;
+	}
+
+	/* A session replace (switch, new chat) marks the incoming #messages `data-enter`
+	   (ui-renderer.ts; never a code-theme replace): it rises from the outgoing node's
+	   opacity (`--messages-enter-from` and `--messages-enter-duration`, published on
+	   #chat-pane by message-scroll.js; #chat-pane is never replaced, so it inherits)
+	   instead of cutting in: a slow switch continues from its dim, and a fast one (never
+	   dimmed) fades in briefly from 0.6. The dim belongs to the outgoing node: the incoming
+	   one is never `.messages-loading` while it enters. `transition` is not redeclared, so
+	   `.messages-loading`'s 80ms guard above keeps precedence. */
+	#messages[data-enter]:not(.messages-loading) {
+		transition-duration: var(--messages-enter-duration, var(--duration-md));
+	}
+	@starting-style {
+		:root[data-motion-ready] #messages[data-enter] {
+			opacity: var(--messages-enter-from, 0.5);
+		}
+	}
+
+	/* Send (prompt.js clearPromptForSend): the placeholder returns only after the typed
+	   text's ghost has lifted off. Only the placeholder is held back, so the caret and
+	   fast follow-up typing stay visible (flow-critique #23). */
+	#prompt-input::placeholder {
+		transition: opacity var(--duration-xs) var(--ease-out);
+	}
+
+	/* No transition into the hold: it is set before the value clears, and a fade-out
+	   would show the placeholder over the ghost. Only the release fades. */
+	#prompt-input[data-placeholder-hold]::placeholder {
+		opacity: 0;
+		transition: none;
 	}
 
 	.messages-stack {
@@ -58,6 +94,10 @@
 		translate: -50% 0;
 		color: var(--text-muted);
 		pointer-events: none;
+
+		/* Only a slow history page surfaces the spinner (base.css threshold keyframe). */
+		animation: reveal-after-threshold var(--duration-md) var(--ease-out) 200ms
+			backwards;
 	}
 	.older-messages-spinner {
 		width: 1rem;
@@ -126,6 +166,8 @@
 		height: 11rem;
 		place-items: center;
 		color: var(--text-muted);
+		animation: reveal-after-threshold var(--duration-md) var(--ease-out) 200ms
+			backwards;
 	}
 	.recent-sessions-spinner {
 		width: 1.25rem;
@@ -148,9 +190,45 @@
 		padding: 0.5rem;
 		text-align: start;
 	}
-	.recent-session:is(:hover, :focus-visible) {
+
+	/* The recent-sessions loader resolving into rows: a short rise with a 40ms stagger
+	   (flow-spec §2 rule 7; three rows max). Gated like the nested entries below, so a
+	   replaced transcript (new chat, switch: #messages fades as a whole) and page load
+	   never replay it; only the loader → rows morph and a genuinely new row animate.
+	   Transitions, not keyframes: a keyframe gated on a root attribute would start when
+	   the gate opens and replay on rows already on screen. The per-property delay never
+	   touches the row's instant hover fill. */
+	:root[data-motion-ready]:not([data-transcript-quiet])
+		#messages:not([data-enter])
+		.recent-session {
+		transition:
+			opacity var(--duration-lg) var(--ease-out),
+			translate var(--duration-lg) var(--ease-out);
+
+		@starting-style {
+			opacity: 0;
+			translate: 0 0.5rem;
+		}
+	}
+	:root[data-motion-ready]:not([data-transcript-quiet])
+		#messages:not([data-enter])
+		.recent-session:nth-child(2) {
+		transition-delay: 40ms;
+	}
+	:root[data-motion-ready]:not([data-transcript-quiet])
+		#messages:not([data-enter])
+		.recent-session:nth-child(3) {
+		transition-delay: 80ms;
+	}
+	.recent-session:is(:focus-visible, :active) {
 		background: var(--surface-control);
 		outline: 0;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.recent-session:hover {
+			background: var(--surface-control);
+			outline: 0;
+		}
 	}
 	.recent-session-main {
 		min-width: 0;
@@ -308,8 +386,10 @@
 		text-decoration-color: var(--border);
 		text-underline-offset: 2px;
 	}
-	.message-link:hover {
-		text-decoration-color: currentColor;
+	@media (hover: hover) and (pointer: fine) {
+		.message-link:hover {
+			text-decoration-color: currentColor;
+		}
 	}
 
 	.message-file {
@@ -507,9 +587,11 @@
 		width: 0.875rem;
 		height: 0.875rem;
 		rotate: 180deg;
-		transition: rotate 150ms var(--ease-out);
+		transition: rotate var(--duration-md) var(--ease-out);
 	}
-	.context-details[open] .context-chevron-icon {
+
+	/* Direct summary only, so an open parent doesn't force a nested chevron open. */
+	.context-details[open] > .context-summary .context-chevron-icon {
 		rotate: 90deg;
 	}
 	.context-output {
@@ -572,6 +654,10 @@
 		color: var(--text-muted);
 		font-size: var(--text-xs);
 		font-variant-numeric: tabular-nums;
+		transition: opacity var(--duration-md) var(--ease-out);
+	}
+	.tool-meta[aria-hidden="true"] {
+		opacity: 0;
 	}
 	.tool-title-compact {
 		display: flex;
@@ -703,8 +789,93 @@
 		background: var(--surface-code);
 	}
 
+	/* Entry for live-appended messages only (server marker `data-enter`, flow-spec §6;
+	   also the pending "thinking..." row). The transition lives on the base rule: the
+	   next streaming morph (or message-scroll.js on transitionend) strips the marker and
+	   the running transition must continue, not be cancelled. */
 	#message-list > .message {
 		contain: style;
+		transition:
+			opacity var(--duration-lg) var(--ease-out),
+			translate var(--duration-lg) var(--ease-out);
+	}
+
+	/* The pending "thinking..." row (ui-renderer.ts, flow-decisions §10.1) sits right
+	   after #message-list, so it takes the offset a response article would get there
+	   (`.message + .message`) and enters with the same recipe. message-scroll.js
+	   retirePending() lifts it out of flow when the response lands in its slot. */
+	#message-list + .message-pending {
+		margin-top: var(--message-gap);
+		transition:
+			opacity var(--duration-lg) var(--ease-out),
+			translate var(--duration-lg) var(--ease-out);
+
+		/* Held 150ms so a fast first token never flashes the row in and straight back out. */
+		transition-delay: 150ms;
+	}
+
+	/* A session's first message takes over the empty state's place (prompt.js
+	   holdEmptyStateForSend): its fade waits out the empty state's 80ms handoff exit, so
+	   "What can I help with?" is gone before the bubble is visible over it (200ms + 40ms,
+	   inside the 250ms budget). */
+	#message-list > .message-user[data-enter]:nth-child(1 of .message) {
+		transition-delay: 40ms;
+	}
+	@starting-style {
+		#message-list > .message[data-enter],
+		#message-list + .message-pending[data-enter] {
+			opacity: 0;
+			translate: 0 0.375rem;
+		}
+		#message-list > .message-user[data-enter] {
+			translate: 0 0.5rem;
+		}
+	}
+
+	/* Nested entries inside an already-rendered message. `data-transcript-quiet` (set by
+	   message-scroll.js while a whole transcript or history batch is inserted, and by
+	   ui-renderer.ts before a transcript replace), a replaced #messages' own `data-enter`
+	   (it fades as a whole) and `data-motion-ready` (page load) keep them from replaying. New markdown blocks fade
+	   in through message-scroll.js (WAAPI, pure appends only: flow-critique #6). */
+	:root[data-motion-ready]:not([data-transcript-quiet])
+		#messages:not([data-enter])
+		.message-stopped-note {
+		transition:
+			opacity var(--duration-md) var(--ease-out),
+			translate var(--duration-md) var(--ease-out);
+
+		@starting-style {
+			opacity: 0;
+			translate: 0 -0.25rem;
+		}
+	}
+
+	/* Only the live tool row's output wipes in (flow-critique #17): a `data-show` reveal
+	   of older rows (alt+O / alt+M) must never mass-replay it. Only the entry state is
+	   gated on `:last-child`; the transition is not, so a message appended mid-wipe
+	   doesn't drop clip-path from `transition-property` and cut the wipe short. The
+	   after-change value is `inset(0)`, not `none`: `none` cannot interpolate with the
+	   entry inset, so the wipe would never play. Under reduced motion clip-path is not
+	   allowlisted and snaps; only the opacity fades. */
+	:root[data-motion-ready]:not([data-transcript-quiet])
+		#messages:not([data-enter])
+		#message-list
+		> .message-tool
+		.tool-output-surface {
+		clip-path: inset(0);
+		transition:
+			opacity var(--duration-md) var(--ease-out),
+			clip-path var(--duration-lg) var(--ease-out);
+	}
+	@starting-style {
+		:root[data-motion-ready]:not([data-transcript-quiet])
+			#messages:not([data-enter])
+			#message-list
+			> .message-tool:last-child
+			.tool-output-surface {
+			opacity: 0;
+			clip-path: inset(0 0 100% 0);
+		}
 	}
 
 	#message-list > .message + .message {
@@ -777,7 +948,7 @@
 			> .message-tool:not(:has(~ :is(.message-assistant, .message-user)))
 			.tool-status-pulse {
 			opacity: 1;
-			animation: ping 1s var(--ease-out) infinite;
+			animation: ping 1s var(--ease-pulse) infinite;
 		}
 	}
 

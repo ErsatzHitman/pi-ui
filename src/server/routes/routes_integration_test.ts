@@ -1908,7 +1908,7 @@ test("a browser-shaped recording flows through the real voice service and Groq c
 		const [recorded] = groq.requests;
 		assertEquals(recorded?.authorization, "Bearer test-key");
 		assertEquals(recorded?.fields.model, "whisper-large-v3-turbo");
-		assertEquals(recorded?.fields.response_format, "json");
+		assertEquals(recorded?.fields.response_format, "verbose_json");
 		assertEquals(recorded?.fields.language, null);
 		assertEquals(recorded?.file?.name, "voice.webm");
 		assertEquals(recorded?.file?.size, 2048);

@@ -24,3 +24,15 @@ test("extension widgets render their placement and escape lines", () => {
 	assertStringExcludes(html, "<script>line</script>");
 	assertStringIncludes(html, "&lt;script&gt;line&lt;/script&gt;");
 });
+
+test("extension widgets are keyed by placement and key, so only a new widget enters", () => {
+	const html = renderExtensionWidgets(
+		{
+			extensionWidgets: [
+				{ key: "plan/status", lines: ["one"], placement: "belowEditor" },
+			],
+		},
+		"belowEditor",
+	);
+	assertStringIncludes(html, 'id="extension-widget-belowEditor-plan%2Fstatus"');
+});

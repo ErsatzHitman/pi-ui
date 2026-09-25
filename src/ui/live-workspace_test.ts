@@ -1,6 +1,10 @@
 import { test } from "bun:test";
 
-import { assertFalse, assertStringIncludes } from "#testing/assertions";
+import {
+	assertFalse,
+	assertStringExcludes,
+	assertStringIncludes,
+} from "#testing/assertions";
 
 import {
 	emptyLiveWorkspaceSnapshot,
@@ -112,6 +116,31 @@ test("closing the pane (Escape, close button, backdrop) persists the open prefer
 		throw new Error(
 			`expected the close action on Escape, the close button and the backdrop, got ${occurrences}`,
 		);
+	}
+});
+
+test("a tab click fades the incoming section once, from the click, not @starting-style (LW-V2-03)", () => {
+	const html = renderLiveWorkspace(snapshot(), {}, emptyUsage);
+	const tabs = html
+		.split('class="segmented-control live-workspace-tabs"')[1]
+		?.split('class="live-workspace-header-actions"')[0];
+	if (!tabs) throw new Error("tab strip not found");
+	for (const tab of ["now", "agents", "usage", "activity", "extensions"]) {
+		assertStringIncludes(
+			tabs,
+			`if (switched) window.piUi.motion?.enter(document.getElementById('live-workspace-${tab}'), { from: 'fade' });`,
+		);
+		assertStringIncludes(
+			tabs,
+			`const switched = ($liveWorkspacePreferences.tab || 'now') !== '${tab}';`,
+		);
+	}
+	// The switch is read before the preference changes, so re-clicking the active tab never fades.
+	const click = tabs.split("data-on:click=")[1] ?? "";
+	const switchedIndex = click.indexOf("const switched");
+	const assignIndex = click.indexOf("$liveWorkspacePreferences.tab = ");
+	if (switchedIndex === -1 || assignIndex === -1 || switchedIndex > assignIndex) {
+		throw new Error("expected the switch check before the tab preference is written");
 	}
 });
 
@@ -360,6 +389,9 @@ test("the usage tab renders a context meter and per-window quota limits", () => 
 	assertStringIncludes(html, "$1.230");
 	assertStringIncludes(html, 'role="meter"');
 	assertStringIncludes(html, 'aria-valuenow="42"');
+	// Motion: the meter fill scales from a --progress custom property, not an inline width.
+	assertStringIncludes(html, 'style="--progress: ');
+	assertFalse(html.includes('style="width:'));
 	assertStringIncludes(html, "Weekly limit");
 	assertStringIncludes(html, "5h window");
 	assertStringIncludes(html, "60% used · resets in 2h");
@@ -501,4 +533,46 @@ test("clicking the bell while it is already on (from another device) asks THIS b
 	if (check === -1 || toggle === -1 || check > toggle) {
 		throw new Error("expected the permission check to come before the toggle");
 	}
+});
+
+test("every pane trigger animates: no pointer/keyboard gate, and each arms the engine first", () => {
+	const html =
+		renderLiveWorkspace(snapshot(), {}, emptyUsage) +
+		renderLiveWorkspaceToggle(appRenderSnapshot({}));
+	assertStringExcludes(html, "data-live-workspace-animate");
+	assertStringExcludes(html, ":focus-visible");
+	assertStringIncludes(html, "window.piUi.paneMotion?.arm('live', false)");
+	assertStringIncludes(
+		html,
+		"window.piUi.paneMotion?.arm('live', !$_liveWorkspaceOpen)",
+	);
+	// The (hidden) docked resize separator keeps its a11y wiring.
+	assertStringIncludes(html, 'id="live-workspace-separator"');
+	assertStringIncludes(html, 'role="separator"');
+});
+
+test("Live Workspace rows are id-keyed so a morph inserts only the new row (B8)", () => {
+	const html = renderLiveWorkspaceData(
+		snapshot({
+			activeTools: [{ toolCallId: "call 1", toolName: "bash", startedAt: 1 }],
+			agents: [
+				{
+					id: "agent:one",
+					kind: "channel-entry",
+					source: "test",
+					label: "scout",
+					status: "running",
+					depth: 0,
+				},
+			],
+			activity: [
+				{ id: "a-1", at: 1, kind: "tool", text: "ran bash", background: false },
+			],
+		}),
+		{},
+		emptyUsage,
+	);
+	assertStringIncludes(html, 'id="lw-tool-call%201"');
+	assertStringIncludes(html, 'id="lw-agent-agent%3Aone"');
+	assertStringIncludes(html, 'id="lw-activity-a-1"');
 });

@@ -191,9 +191,13 @@
 	.terminal-surface-body.has-caret {
 		position: relative;
 	}
+
+	/* Blink only while the surface has focus (as xterm/VS Code do); unfocused,
+	   the caret holds at 0.55. `step-end` turns the keyframe stops into an
+	   on/off blink. `terminal-keys.js` restarts the cycle on every keystroke. */
 	@media (prefers-reduced-motion: no-preference) {
-		.terminal-surface-body.has-caret::after {
-			animation: terminal-surface-caret-blink 1.1s steps(1, jump-none) infinite;
+		.terminal-surface-grid:focus-within .terminal-surface-body.has-caret::after {
+			animation: terminal-surface-caret-blink 1.1s step-end infinite;
 		}
 	}
 	.terminal-surface-body.has-caret::after {
@@ -225,7 +229,7 @@
 		background: var(--text-muted);
 		opacity: 0;
 		pointer-events: none;
-		transition: opacity 150ms var(--ease-out);
+		transition: opacity var(--duration-md) var(--ease-out);
 	}
 	.terminal-surface-pending.is-pending {
 		opacity: 0.7;

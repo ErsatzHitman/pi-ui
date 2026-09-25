@@ -1,3 +1,4 @@
+import { enter } from "../../static/app/motion.js";
 import { isPierreThemes, setActiveCodeTheme } from "../pierre-theme.ts";
 import { isNumber, isRecord, isString } from "../utils/type-guards.ts";
 import {
@@ -191,6 +192,19 @@ function setPanelMode(next: "files" | "git"): void {
 	writePreferences();
 	if (!visibility.isOpen()) return;
 	workspaceFiles.setVisible(next === "files");
+	// Files ⇄ Git (segment click and the focus-workspace-files/-changes keybinds): the
+	// incoming sidebar panels, and the Git main, fade in; the outgoing hide at once. Not the
+	// <aside>: its duplicated mode header holds the control the user just pressed. The Files
+	// main (#workspace-file-main) is workspace-files.ts's, one owner per property, so it
+	// fades through revealForSwitch (which yields to a first-load hold).
+	const aside = document.getElementById(
+		next === "files" ? "workspace-files-sidebar" : "review-git-sidebar",
+	);
+	const panels = aside?.querySelectorAll<HTMLElement>(".review-sidebar-panel") ?? [];
+	for (const panel of panels) enter(panel, { from: "fade" });
+	if (next === "git")
+		enter(document.getElementById("review-git-main"), { from: "fade" });
+	else workspaceFiles.revealForSwitch();
 }
 
 export async function openLinkedWorkspaceFile(
@@ -299,7 +313,11 @@ function bindWorkspaceKeyboardNavigation(): void {
 		if (!path.includes(fileViewRoot)) return;
 		event.preventDefault();
 		fileViewRoot.scrollBy({
-			behavior: "smooth",
+			// An explicit `smooth` ignores the CSS reduced-motion kill switch, so check it here.
+			behavior:
+				window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
+					? "instant"
+					: "smooth",
 			top: event.code === "KeyJ" ? 100 : -100,
 		});
 	});
@@ -329,6 +347,10 @@ function createVisibility(
 		button.inert = !available;
 	};
 	const requestOpen = (next: boolean) => {
+		// Arm the pane engine before the class flips (flow-critique #1): a style pass can run
+		// between the trigger and pane-motion.ts's MutationObserver, so the docked slide's
+		// reserve hold and pre-change rects must be taken here, synchronously.
+		window.piUi.paneMotion?.arm("review", available && next);
 		app.dispatchEvent(
 			new CustomEvent("pi-ui-workspace-review-open", {
 				detail: { open: available && next },

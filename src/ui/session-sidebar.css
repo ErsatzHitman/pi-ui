@@ -32,10 +32,10 @@
 		flex-shrink: 0;
 		place-items: center end;
 		transition:
-			width 120ms ease-out,
-			margin-inline-end 120ms ease-out,
-			opacity 120ms ease-out,
-			scale 120ms ease-out;
+			width var(--duration-sm) var(--ease-out),
+			margin-inline-end var(--duration-sm) var(--ease-out),
+			opacity var(--duration-sm) var(--ease-out),
+			scale var(--duration-sm) var(--ease-out);
 	}
 	.session-status-empty {
 		width: 0;
@@ -47,7 +47,12 @@
 		grid-area: 1 / 1;
 	}
 	.status-dot-layer {
-		transition: opacity 500ms ease-out;
+		transition: opacity var(--duration-md) ease;
+	}
+
+	/* Fading the pulse ball out mid-ping flashes its --text colour over the result dot. */
+	.status-dot-layer.tool-status-pulse {
+		transition: none;
 	}
 	.status-dot-running {
 		color: var(--text-muted);
@@ -58,8 +63,23 @@
 	.status-hidden {
 		opacity: 0;
 	}
-	.status-pulse {
-		animation: ping 1s var(--ease-out) infinite;
+	@media (prefers-reduced-motion: no-preference) {
+		.status-pulse {
+			animation: ping 1s var(--ease-pulse) infinite;
+		}
+
+		/* Several sessions can run at once in the always-visible sidebar: pulse calmer. */
+		.session-sidebar-status .status-pulse {
+			animation-duration: 2s;
+		}
+	}
+
+	/* Without the loop the pulse layer would sit at full opacity in currentColor and
+	   hide the running colour; the static active dot carries the state instead. */
+	@media (prefers-reduced-motion: reduce) {
+		.status-pulse {
+			opacity: 0;
+		}
 	}
 
 	.session-subtitle-content {
@@ -112,11 +132,22 @@
 	.session-rename-input {
 		width: 100%;
 		min-width: 0;
-		height: 1.5rem;
+
+		/* 1.25rem, the title line's own height: the row no longer grows 6px when rename
+		   starts (flow-spec §10.3, owner-approved). */
+		height: 1.25rem;
 		border-radius: var(--radius-sm);
 		padding: 0 0.25rem;
 		font-size: var(--text-sm);
 		pointer-events: auto;
+
+		/* The input fades in over the title (SP-06); only the input, because a title fade
+		   would replay on every row move. */
+		transition: opacity var(--duration-sm) var(--ease-out);
+
+		@starting-style {
+			opacity: 0;
+		}
 	}
 
 	.session-row-actions {
@@ -128,22 +159,29 @@
 	.session-row-actions > * {
 		grid-area: 1 / 1;
 	}
-	.session-row-shortcut {
-		transition: opacity 150ms ease;
-	}
+
+	/* No opacity transition (not even `.btn`’s): j/k and arrow steps move :focus-within,
+	   so the trash icon and the kbd hint swap on the same frame. */
 	.session-row-delete {
 		opacity: 0;
 		pointer-events: none;
-		transition: opacity 150ms ease;
+		transition-property: background-color, border-color, color, scale;
 	}
-	:where(.session-sidebar-row, [role="menuitem"]):is(:hover, :focus-within)
-		.session-row-shortcut {
+	:where(.session-sidebar-row, [role="menuitem"]):focus-within .session-row-shortcut {
 		opacity: 0;
 	}
-	:where(.session-sidebar-row, [role="menuitem"]):is(:hover, :focus-within)
-		.session-row-delete {
+	:where(.session-sidebar-row, [role="menuitem"]):focus-within .session-row-delete {
 		opacity: 1;
 		pointer-events: auto;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		:where(.session-sidebar-row, [role="menuitem"]):hover .session-row-shortcut {
+			opacity: 0;
+		}
+		:where(.session-sidebar-row, [role="menuitem"]):hover .session-row-delete {
+			opacity: 1;
+			pointer-events: auto;
+		}
 	}
 
 	/* There is no hover on touch, and the row button covers the full row, so
@@ -168,12 +206,15 @@
 	.session-delete-button {
 		flex-shrink: 0;
 
-		&:is(:hover, :focus) {
+		&:focus {
 			background: oklch(from var(--status-danger) l c h / 20%);
 			color: var(--status-danger);
 		}
-		&:hover {
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.session-delete-button:hover {
 			background: oklch(from var(--status-danger) l c h / 30%);
+			color: var(--status-danger);
 		}
 	}
 
@@ -258,6 +299,10 @@
 		justify-content: center;
 		padding: 1rem 0.5rem;
 		color: var(--text-muted);
+
+		/* A fast catalog load never flashes a spinner (B-X2). */
+		animation: reveal-after-threshold var(--duration-md) var(--ease-out) 200ms
+			backwards;
 	}
 	.session-sidebar-empty {
 		margin: 0;
@@ -273,10 +318,25 @@
 		color: var(--text-muted);
 	}
 
+	/* The paging spinner (data-show on `$_sessionPageLoading`) only surfaces on a slow page;
+	   the keyframe restarts on each display flip, which is exactly one per load. */
+	.session-page-trigger > span {
+		animation: reveal-after-threshold var(--duration-md) var(--ease-out) 200ms
+			backwards;
+	}
+
 	.session-sidebar-row {
 		position: relative;
 		list-style: none;
 		border-radius: var(--radius-md);
+		transition: opacity var(--duration-md) var(--ease-out);
+	}
+
+	/* Delete confirmed, awaiting the server: the row dims and leaves interaction; the list
+	   motion's ghost then carries it out from this opacity (ghostExit fromOpacity, B-X3). */
+	.session-sidebar-row[data-deleting] {
+		opacity: 0.45;
+		pointer-events: none;
 	}
 	.session-sidebar-row-button {
 		position: absolute;
@@ -285,11 +345,20 @@
 		height: 100%;
 		border-radius: var(--radius-md);
 	}
-	.session-sidebar-row-button:is(:hover, :focus-visible),
+
+	/* :active stands in for the gated hover as tap feedback on touch. */
+	.session-sidebar-row-button:is(:focus-visible, :active),
 	.session-sidebar-row-button:is([data-active="true"], [aria-current="true"]) {
 		background: var(--surface-control);
 		color: var(--text);
 		outline: 0;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.session-sidebar-row-button:hover {
+			background: var(--surface-control);
+			color: var(--text);
+			outline: 0;
+		}
 	}
 	.session-sidebar-row-content {
 		position: relative;
@@ -377,27 +446,66 @@
 		}
 	}
 
-	@media (width <= 48rem) and (prefers-reduced-motion: no-preference) {
-		.session-sidebar[data-animate-open][open] {
-			translate: 0 0;
-			transition:
-				translate 160ms cubic-bezier(0.23, 1, 0.32, 1),
-				display 160ms allow-discrete,
-				overlay 160ms allow-discrete;
-		}
-		.session-sidebar[data-animate-open][open]::backdrop {
-			transition:
-				background-color 120ms cubic-bezier(0.23, 1, 0.32, 1),
-				display 120ms allow-discrete,
-				overlay 120ms allow-discrete;
-		}
+	/* Motion round 2: every user toggle (pointer, keybind, palette, Escape, row tap, swipe)
+	   slides the sidebar along one path, in from the right edge and back out the same
+	   way. `data-animate-open` is set by every user command and removed by
+	   restoreSessionSidebar() (load, breakpoint change), which therefore stays instant.
+	   At rest the open dialog has `translate: none`, so the fixed resize handle keeps the
+	   viewport as its containing block. */
+	.session-sidebar[data-animate-open] {
+		translate: calc(100% + var(--workspace-inset)) 0;
+		transition:
+			translate var(--duration-pane-out) var(--ease-drawer),
+			display var(--duration-pane-out) allow-discrete,
+			overlay var(--duration-pane-out) allow-discrete;
+	}
+	.session-sidebar[data-animate-open][open] {
+		translate: none;
+		transition-duration: var(--duration-pane-in);
+	}
+
+	/* Still displayed through its 160ms exit: a tap there must not resume a session. */
+	.session-sidebar[data-animate-open]:not([open]) {
+		pointer-events: none;
+	}
+	.session-sidebar[data-animate-open]::backdrop {
+		opacity: 0;
+		transition:
+			opacity var(--duration-pane-out) var(--ease-out),
+			display var(--duration-pane-out) allow-discrete,
+			overlay var(--duration-pane-out) allow-discrete;
+	}
+	.session-sidebar[data-animate-open][open]::backdrop {
+		/* --drawer-drag (0..1) tracks a swipe-to-close; see session-sidebar.tsx. */
+		opacity: calc(1 - var(--drawer-drag, 0));
+		transition-duration: var(--duration-pane-in);
+	}
+	.session-sidebar[data-dragging]::backdrop {
+		transition: none;
 	}
 	@starting-style {
 		.session-sidebar[data-animate-open][open] {
 			translate: calc(100% + var(--workspace-inset)) 0;
 		}
 		.session-sidebar[data-animate-open][open]::backdrop {
-			background: transparent;
+			opacity: 0;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.session-sidebar[data-animate-open],
+		.session-sidebar[data-animate-open][open] {
+			translate: none;
+		}
+		.session-sidebar[data-animate-open]:not([open]) {
+			opacity: 0;
+		}
+	}
+	@starting-style {
+		@media (prefers-reduced-motion: reduce) {
+			/* stylelint-disable-next-line max-nesting-depth -- reduced-motion entry fade for the sidebar */
+			.session-sidebar[data-animate-open][open] {
+				opacity: 0;
+			}
 		}
 	}
 }

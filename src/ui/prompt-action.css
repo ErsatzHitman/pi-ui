@@ -1,6 +1,10 @@
 @layer components {
+	/* Send ⇄ Stop crossfade on the two persistent svgs (the fat morph only swaps their
+	   classes). Background/colour share the same 160ms so the square never sits on the old
+	   fill. blur(2px) masks the overlap (animate/RECIPES "Masking a crossfade"). */
 	.prompt-action {
 		line-height: 1;
+		transition-duration: var(--duration-md);
 	}
 	.prompt-action-icons {
 		position: absolute;
@@ -13,21 +17,24 @@
 		width: 0.875rem;
 		height: 0.875rem;
 		grid-area: 1 / 1;
-	}
-	.prompt-surface:not([data-prompt-initial]) .prompt-action-icons > svg {
 		transition:
-			display 150ms allow-discrete,
-			translate 150ms var(--ease-out);
-	}
-	.prompt-action-icon-exit {
-		display: none;
-		translate: 0 -2rem;
+			opacity var(--duration-md) var(--ease-out),
+			scale var(--duration-md) var(--ease-out),
+			filter var(--duration-md) var(--ease-out);
 	}
 
-	@starting-style {
-		.prompt-surface:not([data-prompt-initial]) .prompt-action-icon-enter {
-			translate: 0 2rem;
-		}
+	.prompt-action-icon-exit {
+		opacity: 0;
+		scale: 0.95;
+		filter: blur(2px);
+	}
+
+	/* Abort pressed: acknowledge at t0 and hold it until the turn ends. Intermediate morphs
+	   of the still-destructive button keep the attribute (`data-preserve-attr`); the flip to
+	   Send drops it, and the rule is scoped to the Stop state so it can never dim Send. */
+	#prompt-action[data-variant="destructive"][data-aborting] .prompt-abort-icon {
+		opacity: 0.5;
+		scale: 0.95;
 	}
 	.prompt-abort-icon rect {
 		fill: currentColor;

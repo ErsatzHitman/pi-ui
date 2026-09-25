@@ -234,6 +234,7 @@ all options with their defaults:
 		"model": "whisper-large-v3-turbo",
 		"language": "",
 		"prompt": "",
+		"removeFillerWords": true,
 		"maxSeconds": 300,
 		"baseUrl": "https://api.groq.com/openai/v1"
 	}

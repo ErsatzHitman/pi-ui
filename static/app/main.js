@@ -17,13 +17,18 @@ import {
 	bindMessageResize,
 	bindMessageScroll,
 	captureAnchor,
+	holdSpacerForSend,
 	hydratePierreDiff,
+	quietTranscript,
 	restoreAnchor,
+	retirePending,
 	scrollBottom,
 	trimOldMessages,
 } from "./message-scroll.js";
 import * as modelPicker from "./model-picker.js";
 import { filterModelSearch } from "./model-search.js";
+// Importing motion.js also self-arms `data-motion-ready` two frames after boot.
+import { enter } from "./motion.js";
 import { bindNotifications } from "./notifications.js";
 import {
 	bindPickers,
@@ -35,7 +40,7 @@ import {
 	syncPickerSelection,
 } from "./pickers.js";
 import { createPromptHistory } from "./prompt-history.js";
-import { focusPromptEnd, setPromptValue } from "./prompt.js";
+import { clearPromptForSend, focusPromptEnd } from "./prompt.js";
 import { bindPushOptIn } from "./push.js";
 import { registerServiceWorker } from "./service-worker.js";
 import {
@@ -65,8 +70,11 @@ window.piUi = {
 	messageScroll: {
 		bindResize: bindMessageResize,
 		captureAnchor,
+		holdSpacerForSend,
 		hydratePierreDiff,
+		quietTranscript,
 		restoreAnchor,
+		retirePending,
 		scrollBottom,
 		trimOldMessages,
 	},
@@ -76,6 +84,8 @@ window.piUi = {
 		reset: modelPicker.reset,
 	},
 	modelSearch: { filter: filterModelSearch },
+	// Datastar expressions (auth dialog phases, font panels) call `enter` directly.
+	motion: { enter },
 	notifications: bindNotifications(),
 	pickers: {
 		close: closePickers,
@@ -87,7 +97,9 @@ window.piUi = {
 		sync: syncPickerSelection,
 	},
 	prompt: {
-		clear: () => setPromptValue(""),
+		// Every caller is a send (Enter, Send, /copy): the text lifts off as it clears.
+		// The spacer hold is armed by the real submit paths themselves, not /copy.
+		clear: clearPromptForSend,
 	},
 	promptHistory,
 	sessionPerformance: {

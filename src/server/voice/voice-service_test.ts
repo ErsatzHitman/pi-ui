@@ -218,3 +218,37 @@ test("the in-flight count is released even when the transcriber throws (a caller
 		assertEquals((result as { code?: string }).code !== "busy", true);
 	}
 });
+
+test("transcribe strips filler words, using Whisper's detected language as evidence", async () => {
+	const service = createVoiceService({
+		config: defaultVoiceConfig,
+		resolveKey: () => "a-key",
+		transcriber: {
+			transcribe: async () => ({
+				ok: true,
+				text: "Hmm, um, let's ship it, uhh.",
+				language: "english",
+			}),
+		},
+	});
+	const result = await service.transcribe({
+		audio: fakeAudio(),
+		signal: new AbortController().signal,
+	});
+	assertEquals(result, { ok: true, text: "Let's ship it." });
+});
+
+test("transcribe leaves the text alone when removeFillerWords is off", async () => {
+	const service = createVoiceService({
+		config: { ...defaultVoiceConfig, removeFillerWords: false },
+		resolveKey: () => "a-key",
+		transcriber: {
+			transcribe: async () => ({ ok: true, text: "Hmm, let's ship it." }),
+		},
+	});
+	const result = await service.transcribe({
+		audio: fakeAudio(),
+		signal: new AbortController().signal,
+	});
+	assertEquals(result, { ok: true, text: "Hmm, let's ship it." });
+});

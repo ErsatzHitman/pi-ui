@@ -1,8 +1,17 @@
+import { themeTransition } from "../../static/app/motion.js";
+
 const storageKey = "pi-ui-theme-lab-v5";
 const canvas = document.createElement("canvas");
 canvas.width = 1;
 canvas.height = 1;
 const context = canvas.getContext("2d", { willReadFrequently: true });
+
+/**
+ * Coalescing slot: the scheme a queued setMode() crossfade will apply when its update runs
+ * (a frame later). Never read by currentMode(): the palette overrides must change together
+ * with the class, inside the update, or the transition's old snapshot mixes the two.
+ */
+let pendingMode;
 
 function currentMode() {
 	return document.documentElement.classList.contains("dark") ? "dark" : "light";
@@ -27,8 +36,23 @@ function setMode(preference) {
 	const dark =
 		preference === "dark" ||
 		(preference === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-	document.documentElement.classList.toggle("dark", dark);
-	window.dispatchEvent(new Event("pi-ui-theme-mode-changed"));
+	const mode = dark ? "dark" : "light";
+	const inFlight = pendingMode !== undefined;
+	pendingMode = mode;
+	// A crossfade already queued applies the latest choice when its update runs.
+	if (inFlight) return;
+	const update = () => {
+		const next = pendingMode;
+		pendingMode = undefined;
+		document.documentElement.classList.toggle("dark", next === "dark");
+		// Theme lab's listener re-reads currentMode() here, so its data-effect re-applies
+		// the new scheme's palette synchronously inside the transition's update callback.
+		window.dispatchEvent(new Event("pi-ui-theme-mode-changed"));
+	};
+	// The in-app switch crossfades like OS and cross-tab flips do (static/theme.js); a
+	// preference change that keeps the same scheme has nothing to blend.
+	if (document.documentElement.classList.contains("dark") === dark) update();
+	else themeTransition(update);
 }
 
 function resolveColor(color) {

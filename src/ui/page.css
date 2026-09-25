@@ -18,8 +18,8 @@
 		backdrop-filter: blur(4px);
 		pointer-events: none;
 		transition:
-			opacity 100ms ease-out,
-			display 100ms allow-discrete;
+			opacity var(--duration-sm) var(--ease-out),
+			display var(--duration-sm) allow-discrete;
 	}
 
 	.file-drop-overlay.file-drop-active {
@@ -38,11 +38,22 @@
 		font-size: var(--text-base);
 		box-shadow: var(--shadow-lg);
 		scale: 0.95;
-		transition: scale 100ms ease-out;
+		transition: scale var(--duration-sm) var(--ease-out);
 	}
 
 	.file-drop-card.file-drop-card-active {
 		scale: 1;
+	}
+
+	/* The overlay flips display and gains its active class in one tick, so without a
+	   starting style the entry fade and scale-in never play (only the exit did). */
+	@starting-style {
+		.file-drop-overlay.file-drop-active {
+			opacity: 0;
+		}
+		.file-drop-card.file-drop-card-active {
+			scale: 0.95;
+		}
 	}
 	.file-drop-icon {
 		width: 2rem;
@@ -53,7 +64,10 @@
 	.app-shell {
 		position: fixed;
 		inset: 0;
-		overflow: hidden;
+
+		/* clip, not hidden: a hidden box is still a programmatic scroll container, and focus
+		   moving into an off-screen pane scrolled the whole app sideways (LW-P0 lurch). */
+		overflow: clip;
 	}
 
 	.workspace-shell {
@@ -66,8 +80,55 @@
 		container: workspace / inline-size;
 	}
 
-	#session-sidebar[open]:not(:modal) ~ .workspace-shell {
+	/* Sessions' layout reserve. pane-motion.ts withholds it while the sidebar slides in
+	   (data-reserve-hold) and re-applies it for one synchronous measurement on close
+	   (data-reserve-keep). */
+	#app:not([data-reserve-hold="sessions"])
+		> #session-sidebar[open]:not(:modal)
+		~ .workspace-shell,
+	#app[data-reserve-keep="sessions"] > .workspace-shell {
 		margin-inline-end: var(--session-sidebar-width);
+	}
+
+	/* The pane FLIP width lock (`#chat-pane[data-pane-lock]`: the centred column takes its
+	   post-open width at the keypress) lives in pane-motion.ts's own constructed sheet. As
+	   an inherited custom property here it relaid out the whole transcript per change. */
+
+	/* Sessions ⇄ Live Workspace share one slot: swapping crossfades in place (the incoming
+	   pane fades in over 200ms, the outgoing out over 120ms, the chat does not move). */
+	#app[data-pane-swap] #session-sidebar,
+	#app[data-pane-swap] #live-workspace {
+		translate: none;
+		transition:
+			opacity var(--duration-pane-in) var(--ease-out),
+			display var(--duration-pane-in) allow-discrete,
+			overlay var(--duration-pane-in) allow-discrete;
+	}
+	#app[data-pane-swap] #session-sidebar:not([open]),
+	#app[data-pane-swap]:not(.live-workspace-open) #live-workspace {
+		opacity: 0;
+		transition-duration: var(--duration-sm);
+	}
+	@starting-style {
+		#app[data-pane-swap] #session-sidebar[open],
+		#app[data-pane-swap].live-workspace-open #live-workspace {
+			opacity: 0;
+		}
+	}
+
+	/* Live → Sessions: the Sessions reserve (margin-inline-end above) lands at t0, and the
+	   outgoing docked Live pane is justify-self: end in the shell, so through its 120ms fade
+	   it jumped one sidebar width left, over the chat. Hold it on the viewport edge.
+	   V-check: film Live → Sessions (Ctrl+B and the toolbar) at 1280 and 1440: #live-workspace
+	   x stays 990 / 1150 in every fade frame, the chat's x and width do not move, and the
+	   right slot never shows bare canvas. */
+	@media (width >= 64rem) {
+		#app[data-pane-swap]:not(.live-workspace-open)
+			> #session-sidebar[open]:not(:modal)
+			~ .workspace-shell
+			#live-workspace {
+			margin-inline-end: calc(-1 * var(--session-sidebar-width));
+		}
 	}
 
 	.chat-pane {
@@ -76,9 +137,6 @@
 		min-height: 0;
 		grid-template-rows: minmax(0, 1fr);
 		overflow: hidden;
-		transition:
-			width 150ms var(--ease-out),
-			margin-inline-start 150ms var(--ease-out);
 	}
 
 	.command-medium {
@@ -153,7 +211,6 @@
 		grid-column: 1 / -1;
 		grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
 		align-items: center;
-		interpolate-size: allow-keywords;
 		margin-inline: var(--workspace-inset);
 		margin-block-start: max(var(--workspace-inset), env(safe-area-inset-top));
 		padding-inline: calc(var(--workspace-inset) + env(safe-area-inset-left))
@@ -162,30 +219,30 @@
 		opacity: 1;
 		translate: 0;
 	}
-	body[data-toolbar-animated] .toolbar {
-		transition:
-			display 150ms,
-			block-size 150ms var(--ease-out),
-			margin-block-start 150ms var(--ease-out),
-			opacity 150ms var(--ease-out),
-			translate 150ms var(--ease-out);
-		transition-behavior: allow-discrete;
-	}
-	@starting-style {
-		body[data-toolbar-animated] .toolbar {
-			block-size: 0;
-			margin-block-start: 0;
-			opacity: 0;
-			translate: 0 -1.75rem;
-		}
+
+	/* While a pane FLIP moves the toolbar's clusters, the toolbar is not a size container:
+	   as one, it laid itself out again on every slide frame (8-12ms). A FLIP shows the
+	   toolbar at its pane-closed width (an open holds the reserve, a close drops it at t0),
+	   where its `prompt` 30rem queries never match; pane-motion.ts pins the centred
+	   cluster's container-resolved translate meanwhile, so nothing moves. */
+	#app[data-pane-flipping] .toolbar {
+		container-type: normal;
 	}
 	.toolbar .btn[data-variant="ghost"] {
 		color: var(--text-muted);
 	}
-	.toolbar
-		.btn:is([data-variant="secondary"], [data-variant="ghost"]:not(:disabled):hover) {
+
+	/* Split from the gated ghost hover below, which drops this part's specificity from
+	   (0,5,0) to (0,3,0); no rule in between competes with it. */
+	.toolbar .btn:is([data-variant="secondary"]) {
 		background: var(--selection);
 		color: var(--text);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.toolbar .btn:is([data-variant="ghost"]:not(:disabled):hover) {
+			background: var(--selection);
+			color: var(--text);
+		}
 	}
 	@media (hover: hover) and (pointer: fine) {
 		body[data-toolbar-hidden] .toolbar {
@@ -199,17 +256,14 @@
 	}
 
 	/*
-	 * Suppressed whenever either sibling pane is open, matching how #workspace-review's own
-	 * docking breakpoint is handled: this doesn't check whether the pane is actually docked
-	 * at the current width (only one of the two ever is, see live-workspace.css), just whether
-	 * it's open, which is the same simplification #workspace-review already relies on.
+	 * Suppressed while Review is open. Docked Live Workspace now occupies the Sessions slot,
+	 * so it keeps the same centring as Sessions (the swap never moves the content).
 	 */
 	@container (width >= calc(50vw + 28rem)) {
-		#app:not(.review-open, .live-workspace-open)
-			:is(#prompt-box, #session-transition > *) {
+		#app:not(.review-open) :is(#prompt-box, #session-transition > *) {
 			translate: calc(50vw - var(--workspace-inset) - 50cqw) 0;
 		}
-		#app:not(.review-open, .live-workspace-open) .toolbar-actions {
+		#app:not(.review-open) .toolbar-actions {
 			translate: calc(
 					50vw - var(--workspace-inset) - var(--workspace-inset) - 50cqw
 				)
@@ -218,7 +272,7 @@
 	}
 
 	@container (width >= calc(50vw + 26rem)) {
-		#app:not(.review-open, .live-workspace-open) #messages > .messages-stack {
+		#app:not(.review-open) #messages > .messages-stack {
 			translate: calc(50vw - var(--workspace-inset) - 50cqw) 0;
 		}
 	}
@@ -254,7 +308,8 @@
 		background: var(--focus-ring);
 	}
 
-	.is-resizing :is(#workspace-shell, #chat-pane, #workspace-review, #live-workspace) {
+	.is-resizing
+		:is(#workspace-shell, #workspace-review, #live-workspace, #session-sidebar) {
 		transition: none;
 	}
 

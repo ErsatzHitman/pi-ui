@@ -3,7 +3,12 @@ import { test } from "bun:test";
 import { assertEquals } from "#testing/assertions";
 
 import { bindDismissibleHistory } from "../../static/app/history-stack.js";
-import { bindLiveWorkspace } from "./live-workspace-open.ts";
+import {
+	bindLiveWorkspace,
+	rubberBand,
+	scrimOpacity,
+	sheetRelease,
+} from "./live-workspace-open.ts";
 
 /** Patches a global via `Object.defineProperty` (see live-workspace-layout_test.ts). */
 function patchGlobal(name: string, value: unknown): () => void {
@@ -19,13 +24,16 @@ function patchGlobal(name: string, value: unknown): () => void {
 	};
 }
 
-type Layout = { shellWidthPx: number; panePosition: "relative" | "fixed" | "absolute" };
+type Layout = {
+	viewportWidthPx: number;
+	panePosition: "relative" | "fixed" | "absolute";
+};
 
 /**
  * Fakes just the DOM `bindLiveWorkspace()` and `bindDismissibleHistory()` touch: `#app` (its
  * `live-workspace-open` class and the SSR'd initial-open signal attribute), the pane (its
- * computed `position`, which is how the CSS says docked vs overlay), `#workspace-shell`'s
- * width (what `isDockedLayout()` measures), and a history guard that records push/pop.
+ * computed `position`, which is how the CSS says docked vs overlay), the viewport width (what
+ * `isDockedLayout()` asks `matchMedia` about), and a history guard that records push/pop.
  */
 function installFakeLiveWorkspace(
 	options: Layout & { initiallyOpen: boolean; classAppliedAtBind?: boolean },
@@ -47,14 +55,35 @@ function installFakeLiveWorkspace(
 				? String(options.initiallyOpen)
 				: null,
 		dispatchEvent: record(appEvents),
+		setAttribute() {},
+		toggleAttribute() {},
 	};
-	const pane = { querySelector: () => ({ focus() {} }), contains: () => false };
-	const shell = { getBoundingClientRect: () => ({ width: layout.shellWidthPx }) };
-	const documentElement = {};
+	const focusCalls: unknown[] = [];
+	const focus = { inPane: false, toggleFocusedWhileInert: undefined as unknown };
+	// SSR renders the closed pane inert.
+	const pane = {
+		inert: true,
+		querySelector: () => ({ focus: (options?: unknown) => focusCalls.push(options) }),
+		contains: () => focus.inPane,
+		addEventListener() {},
+	};
+	const toggle = {
+		focus: () => {
+			focus.toggleFocusedWhileInert = pane.inert;
+			focus.inPane = false;
+		},
+	};
+	const shell = { getBoundingClientRect: () => ({ width: layout.viewportWidthPx }) };
+	// Not motion-ready: the pane choreography's arm (pane-motion.ts) stays a no-op here.
+	const documentElement = { hasAttribute: () => false };
 	const body = { dispatchEvent: record(bodyEvents) };
-	const elements = new Map<string, typeof app | typeof pane | typeof shell>([
+	const elements = new Map<
+		string,
+		typeof app | typeof pane | typeof shell | typeof toggle
+	>([
 		["app", app],
 		["live-workspace", pane],
+		["live-workspace-toggle", toggle],
 		["workspace-shell", shell],
 	]);
 	const fakeDocument = {
@@ -77,6 +106,9 @@ function installFakeLiveWorkspace(
 				? { fontSize: "16px" }
 				: { position: element === pane ? layout.panePosition : "static" },
 		),
+		patchGlobal("matchMedia", (query: string) => ({
+			matches: query === "(width >= 64rem)" && layout.viewportWidthPx >= 1024,
+		})),
 		patchGlobal("requestAnimationFrame", (callback: (time: number) => void) => {
 			callback(0);
 			return 0;
@@ -112,6 +144,9 @@ function installFakeLiveWorkspace(
 	const binding = bindLiveWorkspace();
 	return {
 		binding,
+		pane,
+		focus,
+		focusCalls,
 		history,
 		appEvents,
 		bodyEvents,
@@ -131,7 +166,7 @@ function installFakeLiveWorkspace(
 test("a pane restored open in the docked layout stays open and is not a Back target", () => {
 	const dom = installFakeLiveWorkspace({
 		initiallyOpen: true,
-		shellWidthPx: 1600,
+		viewportWidthPx: 1600,
 		panePosition: "relative",
 	});
 	try {
@@ -149,7 +184,7 @@ test("a pane restored open in the docked layout stays open and is not a Back tar
 test("a pane restored open at an overlay width closes without persisting (O10)", () => {
 	const dom = installFakeLiveWorkspace({
 		initiallyOpen: true,
-		shellWidthPx: 700,
+		viewportWidthPx: 700,
 		panePosition: "fixed",
 	});
 	try {
@@ -166,7 +201,7 @@ test("a restored open state adopted after Datastar applies the class late", () =
 	const dom = installFakeLiveWorkspace({
 		initiallyOpen: true,
 		classAppliedAtBind: false,
-		shellWidthPx: 1600,
+		viewportWidthPx: 1600,
 		panePosition: "relative",
 	});
 	try {
@@ -189,7 +224,7 @@ test("a late-applied restored open state at an overlay width is closed (O10)", (
 	const dom = installFakeLiveWorkspace({
 		initiallyOpen: true,
 		classAppliedAtBind: false,
-		shellWidthPx: 700,
+		viewportWidthPx: 700,
 		panePosition: "fixed",
 	});
 	try {
@@ -206,13 +241,15 @@ test("a late-applied restored open state at an overlay width is closed (O10)", (
 test("Back closes a pane opened as an overlay, without a second history pop", () => {
 	const dom = installFakeLiveWorkspace({
 		initiallyOpen: false,
-		shellWidthPx: 700,
+		viewportWidthPx: 700,
 		panePosition: "fixed",
 	});
 	try {
 		dom.setOpenClass(true);
 		dom.binding.applyOpen(true);
 		assertEquals(dom.history.pushes, 1);
+		// Focus moves into the sliding pane without scrolling the app (LW-P0 lurch, B6).
+		assertEquals(dom.focusCalls, [{ preventScroll: true }]);
 
 		dom.pressBack();
 		assertEquals(dom.appEvents, [{ type: "pi-ui-live-workspace-open", open: false }]);
@@ -231,7 +268,7 @@ test("Back closes a pane opened as an overlay, without a second history pop", ()
 test("closing an overlay pane normally pops its history entry once", () => {
 	const dom = installFakeLiveWorkspace({
 		initiallyOpen: false,
-		shellWidthPx: 700,
+		viewportWidthPx: 700,
 		panePosition: "absolute",
 	});
 	try {
@@ -243,4 +280,48 @@ test("closing an overlay pane normally pops its history entry once", () => {
 	} finally {
 		dom.restore();
 	}
+});
+
+test("a closing pane leaves the Tab order after focus has left it; reopening clears inert (C6)", () => {
+	const dom = installFakeLiveWorkspace({
+		initiallyOpen: false,
+		viewportWidthPx: 1600,
+		panePosition: "relative",
+	});
+	try {
+		dom.setOpenClass(true);
+		dom.binding.applyOpen(true);
+		assertEquals(dom.pane.inert, false);
+		// Focus was inside the pane (a tab button) when it closed.
+		dom.focus.inPane = true;
+		dom.setOpenClass(false);
+		dom.binding.applyOpen(false);
+		assertEquals(dom.focus.toggleFocusedWhileInert, false);
+		assertEquals(dom.pane.inert, true);
+		dom.setOpenClass(true);
+		dom.binding.applyOpen(true);
+		assertEquals(dom.pane.inert, false);
+	} finally {
+		dom.restore();
+	}
+});
+
+test("the scrim fades with the sheet's downward travel only (LW-V2-09)", () => {
+	assertEquals(scrimOpacity(0, 400), 1);
+	assertEquals(scrimOpacity(100, 400), 0.75);
+	assertEquals(scrimOpacity(600, 400), 0);
+	// An upward over-drag keeps the scrim at full strength.
+	assertEquals(scrimOpacity(-50, 400), 1);
+});
+
+test("a released sheet drag dismisses on a flick or past 30% of its height (B-X1)", () => {
+	assertEquals(sheetRelease(40, 400, 0.2), "dismiss");
+	assertEquals(sheetRelease(130, 400, 0), "dismiss");
+	assertEquals(sheetRelease(100, 400, 0.05), "restore");
+});
+
+test("dragging the sheet up rubber-bands; dragging it down tracks 1:1 (B-X1)", () => {
+	const up = rubberBand(-400, 400);
+	if (up > -140 || up < -160) throw new Error(`expected about -150, got ${up}`);
+	assertEquals(rubberBand(50, 400), 50);
 });

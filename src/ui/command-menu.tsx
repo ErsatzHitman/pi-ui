@@ -23,6 +23,7 @@ export function renderCommandMenu(state: AppStateSnapshot): string {
 			class="command-dialog"
 			aria-label="Command menu"
 			data-on:toggle={resetCommandDialogOnOpen}
+			data-preserve-attr="open"
 			closedby="any"
 		>
 			<div class="command">

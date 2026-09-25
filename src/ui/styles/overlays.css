@@ -21,17 +21,83 @@
 		&::backdrop {
 			background: oklch(0% 0 none / 10%);
 			backdrop-filter: blur(4px);
+
+			/* Fade opacity (composited), never the blur radius (re-blurs the viewport every frame).
+			   display/overlay keep the scrim in the top layer while it fades out. */
 			transition:
-				background-color 120ms ease,
-				backdrop-filter 120ms ease;
+				opacity var(--duration-sm) var(--ease-out),
+				display var(--duration-sm) allow-discrete,
+				overlay var(--duration-sm) allow-discrete;
 		}
 	}
 
+	/* Round 2: the palette/switchers get a quick centred entry too (user override); blocking
+	   terminal surfaces stay instant (keyboard-driven, translate-anchored). */
 	@starting-style {
-		:where(.dialog, .alert-dialog, .command-dialog)[open]::backdrop {
-			background: transparent;
-			backdrop-filter: blur(0);
+		:where(.dialog, .alert-dialog, .command-dialog):not(
+				.terminal-surface-dialog
+			)[open]::backdrop {
+			opacity: 0;
 		}
+	}
+	:where(.dialog, .alert-dialog, .command-dialog):not(
+			.terminal-surface-dialog,
+			[open]
+		)::backdrop {
+		opacity: 0;
+	}
+
+	/* Modal panel entry. Targets the <dialog> itself, never `.dialog > *`, which content
+	   patches replace (a server-driven close fades whatever content is left: accepted).
+	   `.terminal-surface-dialog` is keyboard-driven and uses `translate` for anchoring.
+	   Accepted cost: a PIUI sheet that was open across a session rebind is reopened with
+	   `showModal()` and plays this entry again (a real reopen, not a morph replay). */
+	:where(.dialog, .alert-dialog):not(.terminal-surface-dialog):modal {
+		transition:
+			opacity var(--duration-md) var(--ease-out),
+			scale var(--duration-md) var(--ease-out);
+	}
+	@starting-style {
+		:where(.dialog, .alert-dialog):not(.terminal-surface-dialog):modal {
+			opacity: 0;
+			scale: 0.97;
+		}
+	}
+	:where(.command-dialog):modal {
+		transition:
+			opacity var(--duration-sm) var(--ease-out),
+			scale var(--duration-sm) var(--ease-out);
+	}
+	@starting-style {
+		:where(.command-dialog):modal {
+			opacity: 0;
+			scale: 0.98;
+		}
+	}
+
+	/* Exits: symmetric, faster than the entry (palette 80ms, dialogs 120ms). display/overlay
+	   keep the closing dialog in the top layer for the fade; it stops taking pointer input at
+	   once, so a quick click after Esc reaches what is underneath. Reduced motion: exits stay
+	   instant (base.css gives dialogs opacity only, no allow-discrete). */
+	:where(.dialog, .alert-dialog):not(.terminal-surface-dialog, [open]) {
+		opacity: 0;
+		scale: 0.97;
+		pointer-events: none;
+		transition:
+			opacity var(--duration-sm) var(--ease-out),
+			scale var(--duration-sm) var(--ease-out),
+			display var(--duration-sm) allow-discrete,
+			overlay var(--duration-sm) allow-discrete;
+	}
+	:where(.command-dialog):not([open]) {
+		opacity: 0;
+		scale: 0.98;
+		pointer-events: none;
+		transition:
+			opacity var(--duration-xs) var(--ease-out),
+			scale var(--duration-xs) var(--ease-out),
+			display var(--duration-xs) allow-discrete,
+			overlay var(--duration-xs) allow-discrete;
 	}
 
 	:where(.dialog, .alert-dialog) > * {
@@ -99,8 +165,12 @@
 			);
 			background: var(--surface-raised);
 		}
+	}
 
-		&
+	@media (hover: hover) and (pointer: fine) {
+		:where(.dialog, .alert-dialog)
+			> *
+			> :where(footer, form[method="dialog"])
 			> .btn:where([data-variant="outline"], [data-variant="secondary"]):where(
 				:not(:disabled):hover
 			) {
@@ -203,11 +273,20 @@
 		border-radius: var(--radius-lg);
 	}
 
+	/* `:active` gives touch its tap feedback now that hover is pointer-only. */
 	.command :where([role="menuitem"]).active,
-	.dropdown-menu :where([role^="menuitem"]):is(:hover, :focus-visible) {
+	.dropdown-menu :where([role^="menuitem"]):is(:focus-visible, :active) {
 		background: var(--surface-control);
 		color: var(--text);
 		outline: 0;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.dropdown-menu :where([role^="menuitem"]):hover {
+			background: var(--surface-control);
+			color: var(--text);
+			outline: 0;
+		}
 	}
 
 	.command :where([data-indicator]) {
@@ -248,26 +327,55 @@
 		box-shadow:
 			0 0 0 1px var(--border),
 			var(--shadow-md);
+
+		/* Anchored popovers grow out of their trigger corner (origin per side/align below):
+		   160ms in, 120ms out. display/overlay keep the popover in the top layer for the exit
+		   fade. Under `position-try` flip the origin stays on the declared side (accepted). */
+		opacity: 0;
+		scale: 0.97;
+		transition:
+			opacity var(--duration-sm) var(--ease-out),
+			scale var(--duration-sm) var(--ease-out),
+			display var(--duration-sm) allow-discrete,
+			overlay var(--duration-sm) allow-discrete;
 	}
 
 	[data-popover]:popover-open {
 		display: flex;
+		opacity: 1;
+		scale: 1;
+		transition-duration: var(--duration-md);
+	}
+	@starting-style {
+		[data-popover]:popover-open {
+			opacity: 0;
+			scale: 0.97;
+		}
+	}
+
+	/* A fading popover must not take the click meant for what is underneath. */
+	[data-popover]:not(:popover-open) {
+		pointer-events: none;
 	}
 	[data-popover][data-side="top"][data-align="start"] {
 		position-area: block-start span-inline-end;
 		margin-block-end: 0.25rem;
+		transform-origin: 0 100%;
 	}
 	[data-popover][data-side="top"][data-align="end"] {
 		position-area: block-start span-inline-start;
 		margin-block-end: 0.25rem;
+		transform-origin: 100% 100%;
 	}
 	[data-popover][data-side="bottom"][data-align="start"] {
 		position-area: block-end span-inline-end;
 		margin-block-start: 0.5rem;
+		transform-origin: 0 0;
 	}
 	[data-popover][data-side="bottom"][data-align="end"] {
 		position-area: block-end span-inline-start;
 		margin-block-start: 0.5rem;
+		transform-origin: 100% 0;
 	}
 
 	:is(.dropdown-menu, .popover) {
@@ -345,15 +453,18 @@
 		color: var(--surface-base);
 		font-size: var(--text-xs);
 		font-weight: 500;
+
+		/* No slide: `flip-block` can place the tooltip below its trigger, so only opacity and
+		   scale move. Enter is --duration-sm (see :popover-open), exit is --duration-xs. */
 		opacity: 0;
-		scale: 0.95;
-		translate: var(--tooltip-shift) 0.5rem;
+		scale: 0.97;
+		translate: var(--tooltip-shift) 0;
+		transform-origin: 50% 100%;
 		transition:
-			opacity 130ms ease,
-			scale 130ms ease,
-			translate 130ms ease,
-			display 130ms allow-discrete,
-			overlay 130ms allow-discrete;
+			opacity var(--duration-xs) var(--ease-out),
+			scale var(--duration-xs) var(--ease-out),
+			display var(--duration-xs) allow-discrete,
+			overlay var(--duration-xs) allow-discrete;
 		pointer-events: none;
 	}
 
@@ -361,12 +472,14 @@
 		--tooltip-shift: 0;
 
 		inset-inline-start: anchor(start);
+		transform-origin: 0 100%;
 	}
 	[data-tooltip][data-align="end"] > [data-slot="tooltip-content"] {
 		--tooltip-shift: 0;
 
 		inset-inline-start: auto;
 		inset-inline-end: anchor(end);
+		transform-origin: 100% 100%;
 	}
 
 	[data-slot="tooltip-content"]:popover-open {
@@ -374,18 +487,28 @@
 		opacity: 1;
 		scale: 1;
 		translate: var(--tooltip-shift) 0;
+		transition-duration: var(--duration-sm);
 	}
 
 	@starting-style {
 		[data-slot="tooltip-content"]:popover-open {
 			opacity: 0;
-			scale: 0.95;
-			translate: var(--tooltip-shift) 0.5rem;
+			scale: 0.97;
+			translate: var(--tooltip-shift) 0;
 		}
 	}
 
+	/* 600ms is a threshold delay, not motion; keep in sync with `tooltipDelayMs` in tooltips.js. */
 	[data-tooltip][data-tooltip-delay] > [data-slot="tooltip-content"]:popover-open {
 		transition-delay: 600ms;
+	}
+
+	/* Warm row: `tooltips.js` sets `data-instant` when another tooltip closed moments ago,
+	   so sweeping along a toolbar skips both the delay and the animation. Equal (0,4,0)
+	   specificity and later source order beat the delay rule above. */
+	[data-tooltip] > [data-slot="tooltip-content"][data-instant]:popover-open {
+		transition-delay: 0ms;
+		transition-duration: 0ms;
 	}
 
 	:is(.dropdown-menu, .popover):has(> [data-popover]:popover-open)
@@ -404,6 +527,7 @@
 
 			inset-inline-start: auto;
 			inset-inline-end: anchor(end);
+			transform-origin: 100% 100%;
 		}
 	}
 

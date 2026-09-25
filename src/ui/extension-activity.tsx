@@ -81,7 +81,7 @@ function renderActivityDetails(activity: ExtensionActivityView): string {
 	return syncHtml(
 		<details
 			class="context-details ext-activity-details"
-			data-preserve-attr="open"
+			data-preserve-attr="open style"
 			open={openByDefault}
 		>
 			<summary class="context-summary ext-activity-summary">
@@ -217,11 +217,13 @@ export function renderExtensionActivityChips(
 		<span class="ext-activity-chip-row" id="ext-activity-chips">
 			{chips.map((chip) => (
 				<button
+					id={`ext-activity-chip-${encodeURIComponent(chip.id)}`}
 					type="button"
 					class="badge ext-activity-chip"
 					data-variant="activity"
 					data-activity-chip-id={chip.id}
 					data-activity-chip-state={chip.state}
+					data-activity-chip-actionable={chip.anchorMessageId ? "" : undefined}
 					aria-label={`${chip.extensionLabel} working${
 						chip.progress ? `: ${chip.progress}` : ""
 					}`}
@@ -229,7 +231,7 @@ export function renderExtensionActivityChips(
 						chip.anchorMessageId
 							? `document.querySelector(${JSON.stringify(
 									`[data-message-id="${chip.anchorMessageId}"]`,
-								)})?.scrollIntoView({behavior:"smooth",block:"center"})`
+								)})?.scrollIntoView({behavior:window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true ? "instant" : "smooth",block:"center"})`
 							: undefined
 					}
 				>

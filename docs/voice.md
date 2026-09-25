@@ -130,20 +130,22 @@ on Windows) and are optional — defaults shown:
 		"model": "whisper-large-v3-turbo",
 		"language": "",
 		"prompt": "",
+		"removeFillerWords": true,
 		"maxSeconds": 300,
 		"baseUrl": "https://api.groq.com/openai/v1"
 	}
 }
 ```
 
-| Field        | Default                          | Notes                                                                                                                                                                                               |
-| ------------ | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`    | `true`                           | `false` hides the mic button entirely (`data-voice-status="disabled"`); `POST /voice/transcribe` answers `404`.                                                                                     |
-| `model`      | `"whisper-large-v3-turbo"`       | Any Groq speech-to-text model id. `turbo` is the cheapest and fastest; the accuracy difference versus larger Whisper models is immaterial for everyday dictation.                                   |
-| `language`   | `""` (auto-detect)               | An ISO-639-1 code (e.g. `"en"`) pins the language and is slightly faster/more accurate for consistently single-language dictation. Leave empty to auto-detect, which handles mixed-language speech. |
-| `prompt`     | `""`                             | A short vocabulary/spelling hint (product names, jargon) sent with every transcription, up to 896 characters.                                                                                       |
-| `maxSeconds` | `300`                            | 10–1800. Recording finishes automatically at this length.                                                                                                                                           |
-| `baseUrl`    | `https://api.groq.com/openai/v1` | An OpenAI-compatible transcription endpoint. Overriding this only makes sense for testing against a local fixture server — Groq is the only provider pi-ui's error handling is tuned for.           |
+| Field               | Default                          | Notes                                                                                                                                                                                                                                                                                              |
+| ------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`           | `true`                           | `false` hides the mic button entirely (`data-voice-status="disabled"`); `POST /voice/transcribe` answers `404`.                                                                                                                                                                                    |
+| `model`             | `"whisper-large-v3-turbo"`       | Any Groq speech-to-text model id. `turbo` is the cheapest and fastest; the accuracy difference versus larger Whisper models is immaterial for everyday dictation.                                                                                                                                  |
+| `language`          | `""` (auto-detect)               | An ISO-639-1 code (e.g. `"en"`) pins the language and is slightly faster/more accurate for consistently single-language dictation. Leave empty to auto-detect, which handles mixed-language speech.                                                                                                |
+| `prompt`            | `""`                             | A short vocabulary/spelling hint (product names, jargon) sent with every transcription, up to 896 characters.                                                                                                                                                                                      |
+| `removeFillerWords` | `true`                           | Strip filler sounds ("hmm", "hmmm", "uh", "uhm", "mmm"; also "um", "ah", "eh", "erm" when the audio is English) and 3+ word stutters from each transcript, as Handy does. English-only fillers need `language: "en"` or Whisper detecting English, because "um" is a real word in other languages. |
+| `maxSeconds`        | `300`                            | 10–1800. Recording finishes automatically at this length.                                                                                                                                                                                                                                          |
+| `baseUrl`           | `https://api.groq.com/openai/v1` | An OpenAI-compatible transcription endpoint. Overriding this only makes sense for testing against a local fixture server — Groq is the only provider pi-ui's error handling is tuned for.                                                                                                          |
 
 pi-ui reads `voice.*` once, when the server starts, so restart the server after changing
 it (then reload the page). A Groq key added to pi's `auth.json` is the exception: it is

@@ -20,6 +20,7 @@ test("parseVoiceConfig accepts a fully specified config", () => {
 			model: "whisper-large-v3",
 			language: "en",
 			prompt: "pi-ui, Datastar, Bun",
+			removeFillerWords: false,
 			maxSeconds: 120,
 			baseUrl: "https://example.test/openai/v1",
 		}),
@@ -28,6 +29,7 @@ test("parseVoiceConfig accepts a fully specified config", () => {
 			model: "whisper-large-v3",
 			language: "en",
 			prompt: "pi-ui, Datastar, Bun",
+			removeFillerWords: false,
 			maxSeconds: 120,
 			baseUrl: "https://example.test/openai/v1",
 		},
@@ -42,6 +44,7 @@ test("parseVoiceConfig falls each invalid field back to its default independentl
 			language: "english", // fails the ISO-639-1-ish pattern
 			prompt: "x".repeat(897), // over the length cap
 			maxSeconds: "300", // wrong type
+			removeFillerWords: "no", // wrong type
 			baseUrl: "not a url",
 		}),
 		defaultVoiceConfig,

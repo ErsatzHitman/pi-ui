@@ -17,14 +17,20 @@ Object.defineProperty(globalThis, "ResizeObserver", {
 });
 
 const {
+	attachmentExitKeyframes,
+	collapseTray,
 	composePrompt,
 	convertAvifToJpeg,
+	currentChipState,
+	exitAttachment,
 	extractTransferredFilePaths,
 	fileWithDetectedMimeType,
 	formatFileReferences,
 	isAvifImageFile,
 	isHeicImageFile,
 	jpegFileName,
+	reconcileKeyed,
+	trayResizeKeyframes,
 } = await import("./file-transfer.js");
 
 test("file references use one line per path and end with a newline", () => {
@@ -201,4 +207,170 @@ test("transferred files use a webview-provided path without reading bytes", () =
 		}),
 		["/tmp/large-model.bin"],
 	);
+});
+
+test("adding an attachment keeps the existing chip node; removing one leaves the other intact", () => {
+	const first = { path: "/tmp/one.txt" };
+	const second = { path: "/tmp/two.txt" };
+	const create = (attachment: { path: string }) => ({ chip: attachment.path });
+
+	const one = reconcileKeyed(new Map(), [first], create);
+	const firstNode = one.nodes.get(first);
+	assertEquals(one.added.length, 1);
+
+	const two = reconcileKeyed(one.nodes, [first, second], create);
+	assertEquals(two.nodes.get(first) === firstNode, true);
+	assertEquals(two.added, [{ chip: "/tmp/two.txt" }]);
+	assertEquals(two.removed, []);
+
+	const secondNode = two.nodes.get(second);
+	const back = reconcileKeyed(two.nodes, [second], create);
+	assertEquals(back.nodes.get(second) === secondNode, true);
+	assertEquals(back.added, []);
+	assertEquals(back.removed.length, 1);
+	assertEquals(
+		back.removed[0]?.[0] === first && back.removed[0]?.[1] === firstNode,
+		true,
+	);
+});
+
+test("a removed chip exits from the scale it had at the click, not from 1", () => {
+	// Mid press-release the chip's computed scale is still ~0.97 (D-X1).
+	const pressed = currentChipState({ opacity: "1", scale: "0.97" });
+	assertEquals(pressed, { opacity: 1, scale: "0.97" });
+	assertEquals(attachmentExitKeyframes(false, pressed), [
+		{ opacity: 1, scale: "0.97" },
+		{ opacity: 0, scale: 0.96 },
+	]);
+	// Unscaled chip: computed `scale: none` starts at 1; a chip still fading in keeps its opacity.
+	assertEquals(currentChipState({ opacity: "0.4", scale: "none" }), {
+		opacity: 0.4,
+		scale: "1",
+	});
+	// Reduced motion: opacity only.
+	assertEquals(attachmentExitKeyframes(true, pressed), [
+		{ opacity: 1 },
+		{ opacity: 0 },
+	]);
+});
+
+test("a removed chip leaves inert and hidden, hands focus on, and its survivors glide over", async () => {
+	const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+	const originalStyle = Object.getOwnPropertyDescriptor(globalThis, "getComputedStyle");
+	const attributes = new Map<string, string>();
+	let removed = false;
+	let focused: unknown;
+	const glides: unknown[][] = [];
+	const node = {
+		style: {} as Record<string, string>,
+		inert: false,
+		setAttribute: (name: string, value: string) => attributes.set(name, value),
+		contains: (other: unknown) => other === node,
+		remove: () => {
+			removed = true;
+		},
+		animate: () => ({ finished: Promise.resolve() }),
+	};
+	const survivor = {
+		focus: (options: unknown) => {
+			focused = options;
+		},
+		// Before the removal it sits after the leaving chip; then it takes the freed slot.
+		getBoundingClientRect: () => ({ left: removed ? 76 : 203, top: 10 }),
+		animate: (...args: unknown[]) => {
+			glides.push(args);
+			return { cancel: () => undefined };
+		},
+	};
+	const tray = {
+		hidden: false,
+		querySelector: (selector: string) =>
+			selector === ".prompt-attachment:not([data-exiting])" ? survivor : null,
+		querySelectorAll: () => [survivor],
+	};
+	Object.defineProperty(globalThis, "document", {
+		configurable: true,
+		value: { activeElement: node, getElementById: () => null },
+	});
+	Object.defineProperty(globalThis, "getComputedStyle", {
+		configurable: true,
+		value: () => ({ opacity: "1", scale: "0.97" }),
+	});
+	try {
+		exitAttachment(tray, node, { path: "/tmp/one.txt" });
+		// At the click: out of the tab order and the accessibility tree, press scale held.
+		assertEquals(node.inert, true);
+		assertEquals(attributes.get("aria-hidden"), "true");
+		assertEquals(attributes.has("data-exiting"), true);
+		assertEquals(node.style.scale, "0.97");
+		assertEquals(node.style.pointerEvents, "none");
+		assertEquals(focused, { preventScroll: true });
+		assertEquals(glides, []);
+		await Promise.resolve();
+		await Promise.resolve();
+		assertEquals(removed, true);
+		assertEquals(glides, [
+			[
+				[{ translate: "127px 0px" }, { translate: "0 0" }],
+				{ duration: 160, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
+			],
+		]);
+	} finally {
+		restoreGlobal("document", originalDocument);
+		restoreGlobal("getComputedStyle", originalStyle);
+	}
+});
+
+test("the tray eases between heights with its margin, clipped for the whole tween", () => {
+	// First chip: from nothing (hidden) to the row plus its 8px margin.
+	assertEquals(trayResizeKeyframes(0, 64, "8px"), [
+		{ height: "0px", marginBottom: "0px", overflow: "clip" },
+		{ height: "64px", marginBottom: "8px", overflow: "clip" },
+	]);
+	// Last chip removed: the row folds away with its margin.
+	assertEquals(trayResizeKeyframes(64, 0, "8px"), [
+		{ height: "64px", marginBottom: "8px", overflow: "clip" },
+		{ height: "0px", marginBottom: "0px", overflow: "clip" },
+	]);
+});
+
+test("an emptied tray folds with its last chip and hides only once the fold ends", async () => {
+	const originalStyle = Object.getOwnPropertyDescriptor(globalThis, "getComputedStyle");
+	const animations: unknown[][] = [];
+	let finish = () => undefined as void;
+	const tray = {
+		hidden: false,
+		offsetHeight: 64,
+		querySelector: () => null,
+		animate: (...args: unknown[]) => {
+			animations.push(args);
+			return {
+				cancel: () => undefined,
+				finished: new Promise<void>((resolve) => {
+					finish = resolve;
+				}),
+			};
+		},
+	};
+	Object.defineProperty(globalThis, "getComputedStyle", {
+		configurable: true,
+		value: () => ({ marginBottom: "8px" }),
+	});
+	try {
+		collapseTray(tray);
+		assertEquals(animations, [
+			[
+				trayResizeKeyframes(64, 0, "8px"),
+				{ duration: 160, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
+			],
+		]);
+		// Still shown while it folds, even with no chips left.
+		assertEquals(tray.hidden, false);
+		finish();
+		await Promise.resolve();
+		await Promise.resolve();
+		assertEquals(tray.hidden, true);
+	} finally {
+		restoreGlobal("getComputedStyle", originalStyle);
+	}
 });

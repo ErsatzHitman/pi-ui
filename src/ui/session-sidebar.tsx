@@ -37,13 +37,55 @@ const sidebarResizeFinish = `document.documentElement.classList.remove('is-resiz
 function restoreSessionSidebar(desktopOpen: boolean): string {
 	return `
 	el.removeAttribute('data-animate-open');
+	el.style.removeProperty('--drawer-drag');
+	el.removeAttribute('data-dragging');
 	el.close();
 	const mobile = matchMedia('(width <= 48rem)').matches;
 	el.closedBy = mobile ? 'any' : 'none';
+	el.inert = mobile || !${desktopOpen};
 	if (!mobile && ${desktopOpen}) el.show();
 	el.querySelector('.session-sidebar-scroller').scrollLeft = 0;
 `;
 }
+/*
+ * Swipe-to-close (phone drawer, SP-05): the scrim fades with the finger. `--drawer-drag`
+ * (0..1) is written at most once per frame (flow-critique #20) on the dialog, a client-owned
+ * node the server never patches; `data-dragging` lifts the scrim's transition so it tracks
+ * with no lag. Past half-way, lifting the finger closes the drawer at once, so it leaves on
+ * the drawer's own 160ms exit instead of crawling out on the scroll-snap settle. That settle
+ * (and a frame already queued) keeps firing `scroll` after close(): a closed dialog never
+ * drags, or `data-dragging` would come back and cut the scrim's exit fade. Every open also
+ * clears both, so a drawer hidden mid-drag never reopens on a stale scrim.
+ */
+const sidebarSwipeScroll = `const dialog = el.closest('dialog');
+	if (!dialog.piUiDragFrame) {
+		dialog.piUiDragFrame = requestAnimationFrame(() => {
+			dialog.piUiDragFrame = 0;
+			if (!dialog.open) {
+				dialog.removeAttribute('data-dragging');
+				return;
+			}
+			const range = el.scrollWidth - el.clientWidth;
+			const p = range > 0 ? Math.min(1, Math.max(0, -el.scrollLeft / range)) : 0;
+			dialog.style.setProperty('--drawer-drag', p.toFixed(3));
+			dialog.toggleAttribute('data-dragging', p > 0.001 && p < 0.999);
+		});
+	}`;
+const sidebarSwipeRelease = `const dialog = el.closest('dialog');
+	if (dialog.open && Number(dialog.style.getPropertyValue('--drawer-drag')) >= 0.5) {
+		dialog.removeAttribute('data-dragging');
+		dialog.close();
+		dialog.inert = true;
+	}`;
+/*
+ * Light dismiss (closedby="any") closes the phone drawer on pointerup, but the click that a
+ * tap produces is hit-tested after touchend, when the closed dialog's backdrop no longer
+ * catches it: the tap landed on the page underneath (a Recent sessions button resumed that session). A
+ * touch that began on the backdrop keeps the dialog as its target, so cancelling its
+ * touchend drops the tap's compatibility mouse events and click. A mouse click is already
+ * safe: it targets the dialog, where its mousedown and mouseup both landed.
+ */
+const sidebarBackdropTouchEnd = `if (evt.target === el && !el.open && evt.cancelable) evt.preventDefault();`;
 const focusSessionSidebarShortcut = `el.dispatchEvent(new CommandEvent('command', { command: '--show' }));
 	const target = el.querySelector(
 		'li > button[aria-current="true"], li > button[data-active="true"], li > button',
@@ -74,12 +116,18 @@ export function renderSessionSidebar(
 				closedby="any"
 				aria-keyshortcuts={keybindAria("toggle-sessions")}
 				data-signals:_session-sidebar-open__ifmissing="el.open"
-				data-on:toggle={`$_sessionSidebarOpen = el.open`}
+				data-on:toggle={`$_sessionSidebarOpen = el.open; el.inert = !el.open`}
 				data-on:command={`
-					if (evt.command === '--toggle' && el.open) el.close();
+					if (evt.command === '--toggle' || evt.command === '--show') {
+						window.piUi.paneMotion?.arm('sessions', !(evt.command === '--toggle' && el.open));
+						el.setAttribute('data-animate-open', '');
+					}
+					if (evt.command === '--toggle' && el.open) { el.close(); el.inert = true; }
 					else if (evt.command === '--toggle' || evt.command === '--show') {
-					el.toggleAttribute('data-animate-open', evt.source !== null && !evt.source.matches(':focus-visible'));
+					el.inert = false;
 					if (!el.open) el.closedBy === 'any' ? el.showModal() : el.show();
+					el.style.removeProperty('--drawer-drag');
+					el.removeAttribute('data-dragging');
 					el.querySelector('.session-sidebar-scroller').scrollLeft = 0;
 					if ($_liveWorkspaceOpen) { ${closeLiveWorkspaceAction()} }
 				};
@@ -91,9 +139,10 @@ export function renderSessionSidebar(
 				data-on:click={`
 					if (!el.matches(':modal')) return;
 					const row = evt.target.closest('.session-sidebar-row-button');
-					if (row && row.getAttribute('aria-disabled') !== 'true') el.close();
-					if (!('closedBy' in HTMLDialogElement.prototype) && evt.target === el) el.close();
+					if (row && row.getAttribute('aria-disabled') !== 'true') { el.close(); el.inert = true; }
+					if (!('closedBy' in HTMLDialogElement.prototype) && evt.target === el) { el.close(); el.inert = true; }
 				`}
+				data-on:touchend={sidebarBackdropTouchEnd}
 				data-signals:_session-sidebar-width__ifmissing={String(width)}
 				data-effect={`document.documentElement.style.setProperty(
 					'--session-sidebar-preferred-width',
@@ -134,8 +183,12 @@ export function renderSessionSidebar(
 				<div
 					class="session-sidebar-scroller"
 					data-on:scrollend={`if (el.scrollLeft < -1 && el.scrollWidth + el.scrollLeft <= el.clientWidth + 1) {
+						el.closest('dialog').removeAttribute('data-dragging');
 						el.closest('dialog').close();
+						el.closest('dialog').inert = true;
 					}`}
+					data-on:scroll__passive={sidebarSwipeScroll}
+					data-on:touchend__passive={sidebarSwipeRelease}
 				>
 					<nav
 						class="raised-surface session-sidebar-nav"
@@ -312,7 +365,12 @@ function renderSessionSidebarRow(
 	const shortcut = index < 9 ? `ctrl ${index + 1}` : undefined;
 	const deletable = status !== "running";
 	return syncHtml(
-		<li id={sessionSidebarRowId(session.path)} class="session-sidebar-row">
+		<li
+			id={sessionSidebarRowId(session.path)}
+			class="session-sidebar-row"
+			data-preserve-attr="data-deleting"
+			data-attr:data-deleting={`$_sessionDeletingPath === ${JSON.stringify(session.path)}`}
+		>
 			<button
 				type="button"
 				class="session-sidebar-row-button"

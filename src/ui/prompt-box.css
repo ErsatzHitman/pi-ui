@@ -39,6 +39,34 @@
 		color: var(--text);
 		box-shadow: var(--shadow-md);
 		pointer-events: auto;
+
+		/* The slash/@/argument pickers rise out of the editor's top edge (160ms) and fall back
+		   (120ms). `hidden` + allow-discrete keeps the wrapper rendered for the exit;
+		   transition declarations out-rank base.css's `[hidden]` !important. Only the id-stable
+		   wrapper animates: filtering and arrowing inside an open picker stay instant. */
+		transform-origin: 50% 100%;
+		transition:
+			opacity var(--duration-md) var(--ease-out),
+			scale var(--duration-md) var(--ease-out),
+			display var(--duration-md) allow-discrete;
+
+		@starting-style {
+			opacity: 0;
+			scale: 0.97;
+		}
+	}
+
+	/* An exiting picker leaves the flex column at t0 and fades where it stood (bottom-anchored,
+	   same width and margin), so a picker opening in the same task (`/model ` ⇄ `/model`)
+	   overlaps it instead of stacking above it and dropping when the exit ends. */
+	.prompt-picker-popover[hidden] {
+		position: absolute;
+		inset-inline: 0;
+		bottom: 0;
+		opacity: 0;
+		scale: 0.97;
+		pointer-events: none;
+		transition-duration: var(--duration-sm);
 	}
 
 	/*
@@ -60,7 +88,7 @@
 		flex-wrap: wrap;
 		gap: 0.5rem;
 		margin: 0 0.75rem 0.5rem;
-		transition: filter 150ms ease;
+		transition: filter var(--duration-md) ease;
 	}
 
 	:is(.prompt-surface, .prompt-footer, .prompt-queue-item) {
@@ -76,7 +104,7 @@
 		border-radius: var(--radius-xl);
 		padding: var(--prompt-surface-padding);
 		font-size: var(--text-base);
-		transition: box-shadow 150ms var(--ease-out);
+		transition: box-shadow var(--duration-sm) ease;
 	}
 
 	.prompt-shortcut-hint {
@@ -117,8 +145,13 @@
 	.prompt-file-button {
 		color: var(--text-muted);
 	}
-	.prompt-file-button:is(:hover, :focus-visible) {
+	.prompt-file-button:focus-visible {
 		color: var(--text);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.prompt-file-button:hover {
+			color: var(--text);
+		}
 	}
 
 	.prompt-footer {
@@ -187,14 +220,18 @@
 		border-radius: var(--radius-lg);
 		padding: 0.375rem 0.75rem;
 		font-size: var(--text-xs);
-		transition:
-			opacity 100ms ease-out,
-			translate 100ms ease-out;
 
-		@starting-style {
-			opacity: 0;
-			translate: 0 0.25rem;
-		}
+		/* Entry (fade + 0.25rem rise) and exit ghosts are WAAPI in prompt-motion.js, keyed by
+		   id, so a morph that re-inserts a surviving item never replays its entry. */
+	}
+
+	/* ✕ pressed: the POST is already on its way; ignore a second tap until the server
+	   removes the item. The dim is the press's immediate feedback; the exit ghost starts from
+	   it and drops downward (prompt-motion.js `pressedOpacity`, keep in sync). */
+	.prompt-queue-item[data-exit] {
+		opacity: 0.5;
+		pointer-events: none;
+		transition: opacity var(--duration-sm) var(--ease-out);
 	}
 
 	.prompt-queue-dot {
@@ -241,9 +278,18 @@
 		color: var(--text-muted);
 		font-size: var(--text-xs);
 		transition:
-			background-color 130ms ease,
-			color 130ms ease,
-			opacity 130ms ease;
+			background-color var(--duration-sm) ease,
+			color var(--duration-sm) ease,
+			opacity var(--duration-sm) ease,
+			scale var(--duration-sm) var(--ease-out);
+	}
+
+	/* Touch has no hover fill: the press itself fills and scales (0.96 for 24–28px targets). */
+	.prompt-queue-restore:not(:disabled):active,
+	.prompt-queue-remove:not(:disabled):active {
+		background: var(--surface-muted);
+		color: var(--text);
+		scale: 0.96;
 	}
 
 	.prompt-queue-restore {
@@ -257,10 +303,12 @@
 		height: 1.5rem;
 		margin: -0.25rem -0.25rem -0.25rem 0;
 	}
-	.prompt-queue-restore:hover,
-	.prompt-queue-remove:hover {
-		background: var(--surface-muted);
-		color: var(--text);
+	@media (hover: hover) and (pointer: fine) {
+		.prompt-queue-restore:hover,
+		.prompt-queue-remove:hover {
+			background: var(--surface-muted);
+			color: var(--text);
+		}
 	}
 
 	.messages-latest {
@@ -271,9 +319,30 @@
 		background: oklch(from var(--surface-base) l c h / 60%);
 		backdrop-filter: blur(2px);
 		pointer-events: auto;
+
+		/* Fades in and out (exit 80ms, faster than the 120ms entry): `display` is transitioned
+		   allow-discrete so `[hidden]` keeps it rendered for the fade; `.btn`'s list is
+		   restated. */
+		transition:
+			background-color var(--duration-sm) ease,
+			border-color var(--duration-sm) ease,
+			color var(--duration-sm) ease,
+			opacity var(--duration-sm) var(--ease-out),
+			scale var(--duration-sm) var(--ease-out),
+			display var(--duration-sm) allow-discrete;
+
+		@starting-style {
+			opacity: 0;
+		}
 	}
-	.messages-latest:not(:disabled):hover {
-		background: oklch(from var(--surface-base) l c h / 80%);
+	.messages-latest[hidden] {
+		opacity: 0;
+		transition-duration: var(--duration-xs);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.messages-latest:not(:disabled):hover {
+			background: oklch(from var(--surface-base) l c h / 80%);
+		}
 	}
 
 	.file-transfer-error {
@@ -281,6 +350,23 @@
 		padding-inline: 0.25rem;
 		color: var(--status-danger);
 		font-size: var(--text-xs);
+
+		/* Transfer and voice errors fade in on insertion or un-hide, and out on `hidden`. */
+		transition:
+			opacity var(--duration-md) var(--ease-out),
+			display var(--duration-md) allow-discrete;
+
+		@starting-style {
+			opacity: 0;
+		}
+
+		/* The hide paths keep the text (and voice's Retry) until the next message, so the
+		   fading line still reads; it cannot be clicked while it goes. */
+		&[hidden] {
+			opacity: 0;
+			pointer-events: none;
+			transition-duration: var(--duration-sm);
+		}
 	}
 	.prompt-attachment {
 		position: relative;
@@ -288,6 +374,29 @@
 		overflow: visible;
 		border: 1px solid var(--border);
 		box-shadow: var(--shadow-sm);
+
+		/* Keyed chips (file-transfer.js) settle in from the tray's bottom-left once; the exit
+		   is WAAPI from the chip's computed scale at the click, with these transitions off
+		   (`[data-exiting]`) so the press release cannot ease it back to 1 underneath. The
+		   press is the only acknowledgement on touch, where the whole chip is the remove
+		   button. */
+		transform-origin: 0 100%;
+		transition:
+			opacity var(--duration-md) var(--ease-out),
+			scale var(--duration-md) var(--ease-out);
+
+		@starting-style {
+			opacity: 0;
+			scale: 0.96;
+		}
+
+		&:not(:disabled):active {
+			scale: 0.97;
+		}
+
+		&[data-exiting] {
+			transition: none;
+		}
 	}
 	.prompt-attachment-image {
 		width: 4rem;
@@ -376,10 +485,15 @@
 		font-size: var(--text-xs);
 		opacity: 0;
 		box-shadow: var(--shadow-sm);
-		transition: opacity 130ms ease;
+		transition: opacity var(--duration-sm) ease;
 	}
-	.prompt-attachment:is(:hover, :focus-within) .prompt-attachment-remove {
+	.prompt-attachment:focus-within .prompt-attachment-remove {
 		opacity: 1;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.prompt-attachment:hover .prompt-attachment-remove {
+			opacity: 1;
+		}
 	}
 
 	@media (hover: none), (pointer: coarse) {
@@ -449,6 +563,8 @@
 		.prompt-queue {
 			width: calc(100% - 4rem);
 		}
+	}
+	@media (width >= 40rem) and (hover: hover) and (pointer: fine) {
 		.prompt-queue-remove {
 			opacity: 0;
 		}

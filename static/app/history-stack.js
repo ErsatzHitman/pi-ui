@@ -11,26 +11,97 @@
  */
 export function createDismissibleHistoryGuard(options = {}) {
 	const pushState = options.pushState ?? ((state) => history.pushState(state, ""));
-	const back = options.back ?? (() => history.back());
-	// History entries this guard pushed that are still on the stack. A close only ever pops
-	// one of these, never an entry that belongs to the page before pi-ui.
+	const replaceState =
+		options.replaceState ?? ((state) => history.replaceState(state, ""));
+	const back = options.back ?? ((steps = 1) => history.go(-steps));
+	const entryState = { piUiDismissible: true };
+	// History entries this guard pushed that are still on the stack, net of a scheduled back.
+	// A close only ever pops these, never an entry that belongs to the page before pi-ui.
 	let depth = 0;
+	// Surfaces reported open and not yet closed. `depth - open` entries are surplus: left by a
+	// surface that closed underneath a newer one (the palette handing off to a server-opened
+	// dialog), and dropped together with the next top-most close.
+	let open = 0;
 	// `popstate` events caused by this guard's own `back()` calls. They must not be mistaken
 	// for a back-button press, which would close a second surface (and pop a second entry).
 	let ownPops = 0;
+	// Entries a close has scheduled for popping. Deferred one task so a surface that opens in
+	// the same handoff (palette -> fonts/code theme/workspace) reuses the entry through
+	// replaceState: a late `back()` would otherwise land after that open's pushState, consume
+	// its entry, and make its own close navigate one entry past pi-ui.
+	let pendingSteps = 0;
+	let pendingTimer;
+	// Entries opened while this guard's own traversal is still in flight. `history.go()` is
+	// asynchronous: a pushState before its popstate lands would be the entry it consumes, so
+	// these are pushed once that popstate arrives (or after a timeout, should it never come).
+	let deferredPushes = 0;
+	let deferredTimer;
+
+	function flushDeferredPushes() {
+		clearTimeout(deferredTimer);
+		deferredTimer = undefined;
+		for (; deferredPushes > 0; deferredPushes -= 1) pushState(entryState);
+	}
+
+	function flushBack() {
+		pendingTimer = undefined;
+		const steps = pendingSteps;
+		pendingSteps = 0;
+		if (steps === 0) return;
+		ownPops += 1;
+		back(steps);
+	}
+
+	function dropSurplusEntries() {
+		let steps = depth - open;
+		if (steps <= 0) return;
+		depth = open;
+		// Entries not pushed yet need no traversal: just never push them.
+		const unpushed = Math.min(steps, deferredPushes);
+		deferredPushes -= unpushed;
+		if (deferredPushes === 0) {
+			clearTimeout(deferredTimer);
+			deferredTimer = undefined;
+		}
+		steps -= unpushed;
+		if (steps === 0) return;
+		pendingSteps += steps;
+		pendingTimer ??= setTimeout(flushBack, 0);
+	}
 
 	/** Call when a dismissible surface has just opened. */
 	function notifyOpen() {
+		open += 1;
 		depth += 1;
-		pushState({ piUiDismissible: true });
+		if (pendingSteps > 0) {
+			// Coalesce with the close just before it: keep that entry instead of back + push.
+			pendingSteps -= 1;
+			if (pendingSteps === 0) {
+				clearTimeout(pendingTimer);
+				pendingTimer = undefined;
+			}
+			replaceState(entryState);
+			return;
+		}
+		if (ownPops > 0) {
+			deferredPushes += 1;
+			deferredTimer ??= setTimeout(() => {
+				ownPops = 0;
+				flushDeferredPushes();
+			}, 500);
+			return;
+		}
+		pushState(entryState);
 	}
 
-	/** Call when a dismissible surface closed for any reason other than a back press. */
-	function notifyClose() {
-		if (depth === 0) return;
-		depth -= 1;
-		ownPops += 1;
-		back();
+	/**
+	 * Call when a dismissible surface closed for any reason other than a back press. `topmost`
+	 * is false when a newer surface is still open above it: popping now would consume that
+	 * surface's entry, so its own entry stays as surplus until the top-most one closes.
+	 */
+	function notifyClose({ topmost = true } = {}) {
+		if (open > 0) open -= 1;
+		if (topmost) dropSurplusEntries();
 	}
 
 	/**
@@ -41,10 +112,15 @@ export function createDismissibleHistoryGuard(options = {}) {
 	function handlePopstate(hasOpenSurface, closeTopmost) {
 		if (ownPops > 0) {
 			ownPops -= 1;
+			if (ownPops === 0) flushDeferredPushes();
 			return;
 		}
 		if (depth > 0) depth -= 1;
-		if (hasOpenSurface()) closeTopmost();
+		if (hasOpenSurface()) {
+			closeTopmost();
+			if (open > 0) open -= 1;
+		}
+		dropSurplusEntries();
 	}
 
 	return { notifyOpen, notifyClose, handlePopstate };
@@ -100,6 +176,16 @@ function topmostTrackedDialog() {
 	return topmost;
 }
 
+/** Whether a tracked dialog opened after `dialog` is still open above it. */
+function hasNewerOpenDialog(dialog) {
+	let newer = false;
+	for (const tracked of trackedDialogs) {
+		if (newer && tracked.open) return true;
+		if (tracked === dialog) newer = true;
+	}
+	return false;
+}
+
 function closeTopmostDismissible() {
 	const dialog = topmostTrackedDialog();
 	if (dialog) {
@@ -136,8 +222,10 @@ export function bindDismissibleHistory(
 				if (trackedDialogs.has(dialog) || !dialog.matches(":modal")) return;
 				trackedDialogs.add(dialog);
 				guard.notifyOpen();
-			} else if (event.newState === "closed" && trackedDialogs.delete(dialog)) {
-				guard.notifyClose();
+			} else if (event.newState === "closed" && trackedDialogs.has(dialog)) {
+				const topmost = !hasNewerOpenDialog(dialog);
+				trackedDialogs.delete(dialog);
+				guard.notifyClose({ topmost });
 			}
 		},
 		true,
@@ -154,8 +242,9 @@ export function bindDismissibleHistory(
 		new MutationObserver(() => {
 			for (const dialog of trackedDialogs) {
 				if (dialog.isConnected) continue;
+				const topmost = !hasNewerOpenDialog(dialog);
 				trackedDialogs.delete(dialog);
-				guard.notifyClose();
+				guard.notifyClose({ topmost });
 			}
 		}).observe(body, { childList: true, subtree: true });
 	}

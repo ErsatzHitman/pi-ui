@@ -2,6 +2,67 @@ import { endpoints } from "../server/routes/endpoints.ts";
 import type { AppAuthDialog, AppAuthProvider } from "../state/app-store.ts";
 import { syncHtml } from "./sync-html.ts";
 
+/**
+ * Phase change inside an open dialog: the header and the block after it settle in while the
+ * panel surface stays put (animating `#auth-dialog-content` itself blanked the whole panel
+ * for a frame). The header id changes per phase, so idiomorph inserts a fresh header and
+ * `data-init` runs for it; in-phase status and progress patches morph the same header
+ * without re-running it. Skipped while the dialog is closed or still running its own
+ * entry/exit transition (the first phase of an open: overlays.css already animates the
+ * dialog, so a content entry on top would be a double entry). Datastar evaluates `data-init`
+ * twice for a morph-inserted node (once for the node, once for its copied attribute), so a
+ * header that is already animating is not entered again: one WebAnimation per target.
+ */
+function authPhaseEnter(from: "rise" | "fade"): string {
+	return `const d = el.closest('dialog'); if (d?.open && !d.getAnimations().length && !el.getAnimations().length) { const m = window.piUi?.motion; m?.enter(el, { from: '${from}' }); m?.enter(el.nextElementSibling, { from: '${from}' }); }`;
+}
+const AUTH_PHASE_ENTER = authPhaseEnter("rise");
+const AUTH_RESULT_ENTER = authPhaseEnter("fade");
+/** An error line appearing inside a phase: one fade, however often `data-init` evaluates. */
+const AUTH_ERROR_ENTER =
+	"el.getAnimations().length || window.piUi?.motion?.enter(el, { from: 'fade' })";
+/**
+ * The panel eases between phase heights (flow-critique S3) instead of snapping (684→156→188
+ * px from the provider list to the api-key step, across two patches). Installed once on the
+ * panel (`#auth-dialog-content`, the dialog's surface): a MutationObserver sees each patch
+ * before it paints and tweens `height` from the last settled height, or from the in-flight
+ * height when a second patch lands mid-tween, to the new natural height (160ms,
+ * `overflow: clip` so no scrollbar flashes). A ResizeObserver keeps the settled height
+ * current (dialog open, provider search), ignoring the frames of its own tween. Skipped while
+ * the dialog is closed or running its own entry/exit, and under reduced motion. Datastar
+ * evaluates `data-init` twice for a morph-inserted node, so the observers install once.
+ */
+const AUTH_PANEL_RESIZE = `(() => {
+	if (el.piUiPanelResize) return;
+	el.piUiPanelResize = true;
+	let settled = el.offsetHeight;
+	let tween;
+	const tweening = () => tween?.playState === 'running';
+	new ResizeObserver(() => { if (!tweening()) settled = el.offsetHeight; }).observe(el);
+	new MutationObserver(() => {
+		const from = tweening() ? el.offsetHeight : settled;
+		tween?.cancel();
+		tween = undefined;
+		const to = el.offsetHeight;
+		settled = to;
+		const d = el.closest('dialog');
+		if (!d?.open || d.getAnimations().length || Math.abs(to - from) < 1) return;
+		if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+		tween = el.animate(
+			[{ height: from + 'px', overflow: 'clip' }, { height: to + 'px', overflow: 'clip' }],
+			{ duration: 160, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' },
+		);
+	}).observe(el, { childList: true, subtree: true, characterData: true });
+})()`;
+/**
+ * A closed dialog keeps its last content while it fades out: the `/auth/close` patch renders
+ * an ignore-morph placeholder, and Datastar skips a morph only when both the live node and
+ * the patch carry `data-ignore-morph`, so the live node is marked once the dialog closes.
+ * The next open's patch has no marker and replaces the stale content before `showModal()`.
+ */
+const AUTH_DIALOG_TOGGLE =
+	"document.getElementById('auth-dialog-content')?.toggleAttribute('data-ignore-morph', evt.newState === 'closed')";
+
 export function renderAuthDialog(dialog: AppAuthDialog | undefined): string {
 	return syncHtml(
 		<dialog
@@ -9,6 +70,7 @@ export function renderAuthDialog(dialog: AppAuthDialog | undefined): string {
 			class="dialog"
 			aria-labelledby="auth-dialog-title"
 			closedby="any"
+			data-on:toggle={AUTH_DIALOG_TOGGLE}
 			data-on:close={`@post('${endpoints.authClose}', { payload: {} })`}
 			data-signals__ifmissing={JSON.stringify({
 				_authSearch: "",
@@ -24,7 +86,12 @@ export function renderAuthDialog(dialog: AppAuthDialog | undefined): string {
 
 export function renderAuthDialogContent(dialog: AppAuthDialog | undefined): string {
 	return syncHtml(
-		<div id="auth-dialog-content" class="dialog-wide">
+		<div
+			id="auth-dialog-content"
+			class="dialog-wide"
+			data-ignore-morph={dialog ? undefined : true}
+			data-init={AUTH_PANEL_RESIZE}
+		>
 			{dialog ? renderDialogContent(dialog) : <div />}
 		</div>,
 	);
@@ -45,7 +112,7 @@ function renderProviderPicker(dialog: AppAuthDialog): string {
 	const providerHaystacks = dialog.providers.map(providerSearchHaystack);
 	return syncHtml(
 		<>
-			<header>
+			<header id={`auth-phase-${dialog.phase}`} data-init={AUTH_PHASE_ENTER}>
 				<h2 id="auth-dialog-title">{title}</h2>
 				<p>
 					{dialog.mode === "login"
@@ -154,7 +221,7 @@ function renderAuthenticationFlow(dialog: AppAuthDialog): string {
 	const hasTextPrompt = Boolean(dialog.prompt && !dialog.prompt.options);
 	return syncHtml(
 		<>
-			<header>
+			<header id={`auth-phase-${dialog.phase}`} data-init={AUTH_PHASE_ENTER}>
 				<h2 id="auth-dialog-title" safe>
 					Log in to {dialog.providerName}
 				</h2>
@@ -196,7 +263,11 @@ function renderAuthenticationFlow(dialog: AppAuthDialog): string {
 					</div>
 				)}
 				{dialog.error && (
-					<p class="error-foreground dialog-message" safe>
+					<p
+						class="error-foreground dialog-message"
+						data-init={AUTH_ERROR_ENTER}
+						safe
+					>
 						{dialog.error}
 					</p>
 				)}
@@ -215,6 +286,9 @@ function renderAuthenticationFlow(dialog: AppAuthDialog): string {
 					<button
 						type="button"
 						class="btn"
+						data-indicator:_auth-submitting
+						data-attr:disabled="$_authSubmitting"
+						data-attr:aria-busy="$_authSubmitting ? 'true' : 'false'"
 						data-on:click={postAuthInput("$authInput")}
 					>
 						Continue
@@ -291,7 +365,7 @@ function postAuthInput(value: string): string {
 function renderResult(dialog: AppAuthDialog): string {
 	return syncHtml(
 		<>
-			<header>
+			<header id={`auth-phase-${dialog.phase}`} data-init={AUTH_RESULT_ENTER}>
 				<h2 id="auth-dialog-title">
 					{dialog.error ? "Authentication failed" : "Authentication updated"}
 				</h2>

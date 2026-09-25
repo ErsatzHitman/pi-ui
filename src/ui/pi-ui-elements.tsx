@@ -172,10 +172,12 @@ function renderRosterSummary(element: PiUiElement): string {
 /**
  * Opens the Live Workspace pane to the Extensions tab, where the full element renders. Sessions
  * and Live Workspace are mutually exclusive (PLAN-ux.md "sidebar-exclusive"), so this closes
- * Sessions too if it happens to be open.
+ * Sessions too if it happens to be open. Like every pane trigger it arms the pane
+ * choreography first (src/client/pane-motion.ts, flow-critique #1).
  */
 function openLiveWorkspaceExtensionsAction(): string {
-	return `$_liveWorkspaceOpen = true;
+	return `window.piUi.paneMotion?.arm('live', true);
+		$_liveWorkspaceOpen = true;
 		${closeSessionSidebarAction()}
 		$liveWorkspacePreferences.tab = 'extensions';
 		document.body.dispatchEvent(new CustomEvent(
@@ -346,7 +348,7 @@ function renderWidgetLines(value: JsonValue | undefined): string {
 	);
 	if (lines.length <= widgetCollapseLineThreshold) return syncHtml(list);
 	return syncHtml(
-		<details class="piui-widget-lines-collapsible">
+		<details class="piui-widget-lines-collapsible" data-preserve-attr="open style">
 			<summary class="fine-print">{lines.length} lines</summary>
 			{list}
 		</details>,
@@ -368,7 +370,7 @@ function renderProgress(element: PiUiElement): string {
 		<div class="piui-progress">
 			{ratio !== undefined ? (
 				<span class="piui-progress-track">
-					<span class="piui-progress-value" style={`width: ${ratio}%`} />
+					<span class="piui-progress-value" style={`--progress: ${ratio}`} />
 				</span>
 			) : (
 				<span class="piui-progress-indeterminate" />

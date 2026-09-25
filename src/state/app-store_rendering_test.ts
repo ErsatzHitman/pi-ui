@@ -268,8 +268,11 @@ test("session transitions patch signals and replace only the transcript", async 
 		state.replaceMessages([{ role: "user", text: "restored transcript", timestamp }]);
 		state.flush();
 		const restored = await readUntil(reader, (text) =>
-			text.includes("restored transcript"),
+			// Signals go out before the replace (motion round 2), and they already carry the
+			// prompt history, so wait for the transcript patch itself.
+			text.includes("data: mode replace"),
 		);
+		assertIncludes(restored, "restored transcript");
 		assertIncludes(restored, 'id="messages"');
 		assertIncludes(restored, "data: selector #messages");
 		assertIncludes(restored, "data: mode replace");

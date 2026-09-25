@@ -44,27 +44,29 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 		>
 			<div class="prompt-popovers">
 				{renderLatestButton()}
+				{/* `hidden` (not data-show) so the wrapper's allow-discrete exit can play: the
+				    picker rises from the editor edge and falls back (prompt-box.css). */}
 				<div
 					id="prompt-slash-popover"
 					class="prompt-picker-popover"
-					style="display: none;"
-					data-show={`$_slashPickerOpen && (${slashPickerOpenExpression(state)})`}
+					hidden
+					data-attr:hidden={`!($_slashPickerOpen && (${slashPickerOpenExpression(state)}))`}
 				>
 					{renderSlashPicker(state)}
 				</div>
 				<div
 					id="prompt-file-popover"
 					class="prompt-picker-popover"
-					style="display: none;"
-					data-show="$_filePickerOpen"
+					hidden
+					data-attr:hidden="!($_filePickerOpen)"
 				>
 					<div id="file-picker-results" aria-live="polite" />
 				</div>
 				<div
 					id="prompt-argument-popover"
 					class="prompt-picker-popover"
-					style="display: none;"
-					data-show="$_argumentPickerOpen"
+					hidden
+					data-attr:hidden="!($_argumentPickerOpen)"
 				>
 					<div id="argument-picker-results" aria-live="polite" />
 				</div>
@@ -228,6 +230,9 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 						}
 						if (evt.altKey && evt.code === 'ArrowUp') {
 							evt.preventDefault();
+							if (document.querySelector('#prompt-queue .prompt-queue-item')) {
+								el.dispatchEvent(new CustomEvent('pi-ui-queue-restore', { bubbles: true }));
+							}
 							@post('${endpoints.promptDequeue}', { payload: {} });
 						}
 						if (
@@ -252,6 +257,7 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 							window.piUi.messageScroll.scrollBottom();
 							const submittedPrompt = $prompt;
 							$_promptSubmitting = true;
+							window.piUi.messageScroll.holdSpacerForSend?.();
 							window.piUi.prompt.clear();
 							window.piUi.fileTransfer.submit(
 								evt.altKey ? '${endpoints.promptFollowUp}' : '${endpoints.prompt}',
@@ -370,7 +376,12 @@ export function renderPromptBox(state: AppStateSnapshot): string {
 
 export function renderPromptQueue(state: AppStateSnapshot): string {
 	return syncHtml(
-		<div id="prompt-queue" class="prompt-queue" aria-live="polite">
+		<div
+			id="prompt-queue"
+			class="prompt-queue"
+			aria-live="polite"
+			data-preserve-attr="style"
+		>
 			{renderQueuedMessages(state)}
 		</div>,
 	);
@@ -396,6 +407,18 @@ function renderLatestButton() {
 	);
 }
 
+/**
+ * Stable id for a queued message, so a morph keeps surviving items instead of re-using a
+ * node for a different message (prompt-motion.js keys its entry and exit on it).
+ * `occurrence` counts earlier items with the same behavior and text.
+ */
+export function queueItemId(behavior: string, text: string, occurrence: number): string {
+	let hash = 5381;
+	for (let index = 0; index < text.length; index++)
+		hash = ((hash << 5) + hash + text.charCodeAt(index)) | 0;
+	return `prompt-queue-${behavior}-${(hash >>> 0).toString(36)}-${occurrence}`;
+}
+
 function renderQueuedMessages(state: AppStateSnapshot): string {
 	const items = [
 		...state.queuedSteeringMessages.map((text, index) => ({
@@ -412,10 +435,21 @@ function renderQueuedMessages(state: AppStateSnapshot): string {
 		})),
 	];
 	if (items.length === 0) return "";
+	const seen = new Map<string, number>();
+	const ids = items.map(({ behavior, text }) => {
+		const key = `${behavior}:${text}`;
+		const occurrence = seen.get(key) ?? 0;
+		seen.set(key, occurrence + 1);
+		return queueItemId(behavior, text, occurrence);
+	});
 	return syncHtml(
-		<section class="prompt-queue-list">
+		<section id="prompt-queue-list" class="prompt-queue-list">
 			{items.map(({ behavior, index, label, text }, itemIndex) => (
-				<div class="prompt-queue-item raised-surface">
+				<div
+					id={ids[itemIndex]}
+					class="prompt-queue-item raised-surface"
+					data-preserve-attr="data-exit"
+				>
 					<span
 						class={[
 							"prompt-queue-dot",
@@ -442,7 +476,10 @@ function renderQueuedMessages(state: AppStateSnapshot): string {
 						<button
 							type="button"
 							class="prompt-queue-restore"
-							data-on:click={`@post('${endpoints.promptDequeue}', { payload: {} })`}
+							data-on:click={`
+								el.dispatchEvent(new CustomEvent('pi-ui-queue-restore', { bubbles: true }));
+								@post('${endpoints.promptDequeue}', { payload: {} });
+							`}
 							aria-label="Restore all queued messages to the prompt"
 						>
 							<span>Restore all</span>
@@ -454,7 +491,18 @@ function renderQueuedMessages(state: AppStateSnapshot): string {
 					<button
 						type="button"
 						class="prompt-queue-remove"
-						data-on:click={`@post('${endpoints.promptQueueRemove}', { payload: { queueBehavior: '${behavior}', queueIndex: ${index} } })`}
+						data-on:click={`
+							const item = el.closest('.prompt-queue-item');
+							const removing = (window.piUi.queueRemoving ??= new Set());
+							if (removing.has(item.id)) return;
+							removing.add(item.id);
+							setTimeout(() => {
+								removing.delete(item.id);
+								item.removeAttribute('data-exit');
+							}, 4000);
+							item.setAttribute('data-exit', 'down');
+							@post('${endpoints.promptQueueRemove}', { payload: { queueBehavior: '${behavior}', queueIndex: ${index} } });
+						`}
 						aria-label="Remove queued message"
 					>
 						<Icon icon={X} />

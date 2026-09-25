@@ -12,6 +12,7 @@ import {
 	renderMarkdownStreaming,
 } from "./markdown.tsx";
 import {
+	markEntering,
 	renderMessage,
 	renderMessages,
 	renderOlderMessagesPatch,
@@ -117,7 +118,8 @@ export class MessageRenderService {
 	projectMessages(messages: readonly TranscriptMessage[]): AppMessage[] {
 		return messages.map((message) => this.project(message));
 	}
-	renderMessagesElement(): string {
+	/** `enteringId` marks that one live-appended message `data-enter` (flow-spec C1). */
+	renderMessagesElement({ enteringId }: { enteringId?: string } = {}): string {
 		return renderMessages(
 			this.projectMessages(this.store.messages),
 			this.store.emptyChatHint,
@@ -125,12 +127,19 @@ export class MessageRenderService {
 			this.store.sessions,
 			this.store.models.some((model) => model.configured),
 			this.store.sessionCatalogLoading,
+			{ enteringId },
 		);
 	}
-	renderMessageElement(id: string): string | undefined {
+	/** `entering` marks the live-append render `data-enter`; every other render (streaming
+	 * morphs, enhancement broadcasts, history) stays unmarked. */
+	renderMessageElement(
+		id: string,
+		{ entering = false }: { entering?: boolean } = {},
+	): string | undefined {
 		const message = this.store.transcript.getMessage(id);
 		if (!message) return undefined;
-		return renderMessage(this.project(message));
+		const html = renderMessage(this.project(message));
+		return entering ? markEntering(html) : html;
 	}
 	renderOlderMessagesPatch(messages: readonly TranscriptMessage[]): string {
 		return renderOlderMessagesPatch(this.projectMessages(messages));

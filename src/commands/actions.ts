@@ -30,7 +30,11 @@ export function cycleThinkingAction(direction: CycleDirection): string {
 export function authDialogAction(mode: "login" | "logout"): string {
 	const endpoint =
 		mode === "login" ? endpoints.authOpenLogin : endpoints.authOpenLogout;
-	return `document.getElementById('command-dialog')?.close(); @post('${endpoint}', { payload: {} })`;
+	// The palette stays open until the server-opened auth dialog does, so its 80ms exit
+	// overlaps the dialog's entry (as on the code-theme path) instead of leaving a
+	// request-long gap where the backdrop un-dims. `data-keep-command-open` stops controls.js
+	// closing the palette on this row's click; the timeout covers a dialog that never opens.
+	return `const palette = document.getElementById('command-dialog'); if (palette?.contains(el)) el.setAttribute('data-keep-command-open', ''); document.getElementById('auth-dialog')?.addEventListener('toggle', (e) => { if (e.newState === 'open') palette?.close(); }, { once: true }); setTimeout(() => palette?.close(), 600); @post('${endpoint}', { payload: {} })`;
 }
 
 function openTreeAction(): string {
@@ -44,8 +48,9 @@ function openWorkspaceDialogAction(
 	return `${closeCommandDialog ? "document.getElementById('command-dialog')?.close(); " : ""}$_workspaceAction = '${action}'; document.getElementById('workspace-dialog').showModal()`;
 }
 
+/** Arms the pane choreography first (flow-critique #1: src/client/pane-motion.ts). */
 export function toggleWorkspaceReviewAction(): string {
-	return "$_workspaceReviewOpen = !$_workspaceReviewOpen";
+	return "window.piUi.paneMotion?.arm('review', !$_workspaceReviewOpen); $_workspaceReviewOpen = !$_workspaceReviewOpen";
 }
 
 /**
@@ -62,15 +67,18 @@ export function closeSessionSidebarAction(): string {
 }
 
 /**
- * Sets `$_liveWorkspaceOpen` and persists the new value as the saved preference (A#15):
+ * Sets `$_liveWorkspaceOpen` and persists it as the saved preference (A#15):
  * `$_liveWorkspaceOpen` is the live, instantly-applied signal the pane's CSS reads, while
  * `$liveWorkspacePreferences.open` is what's posted to the backend and seeds the signal on the
- * next load — the same split `pi-ui-live-workspace-preferences` event already uses for `tab`
- * and `ratio`. Opening the pane (the guard only ever fires when `$_liveWorkspaceOpen` ends up
- * `true`, never on a close) also closes Sessions, keeping the two mutually exclusive.
+ * next load. Opening also closes Sessions (the two share the right-hand slot). The class flip
+ * and the Sessions close land in one task, so pane-motion.ts sees a single mutation batch and
+ * crossfades the swap in place. Its synchronous `arm` runs first, before anything changes
+ * (flow-critique #1). Every trigger animates (motion round 2); there is no pointer/keyboard
+ * gate any more.
  */
 function setLiveWorkspaceOpenAction(valueExpression: string): string {
 	return `
+		window.piUi.paneMotion?.arm('live', ${valueExpression});
 		$_liveWorkspaceOpen = ${valueExpression};
 		if ($_liveWorkspaceOpen) { ${closeSessionSidebarAction()} }
 		document.body.dispatchEvent(new CustomEvent(
@@ -101,7 +109,7 @@ export function toggleToolOutputAction(): string {
 }
 
 function toggleToolbarAction(): string {
-	return `document.body.setAttribute('data-toolbar-animated', ''); document.body.toggleAttribute('data-toolbar-hidden'); @post('${endpoints.toolbar}', { payload: { toolbarHidden: document.body.hasAttribute('data-toolbar-hidden') } })`;
+	return `document.body.toggleAttribute('data-toolbar-hidden'); @post('${endpoints.toolbar}', { payload: { toolbarHidden: document.body.hasAttribute('data-toolbar-hidden') } })`;
 }
 
 export const commandActions = {

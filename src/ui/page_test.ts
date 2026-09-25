@@ -43,9 +43,11 @@ test("sidebar restores responsive preferences before datastar", () => {
 		[false, true, "closed"],
 	] as const) {
 		let shownAs = "closed";
+		const reset: string[] = [];
 		const dialog = {
 			closedBy: "any",
-			removeAttribute() {},
+			style: { removeProperty: (name: string) => reset.push(name) },
+			removeAttribute: (name: string) => reset.push(name),
 			close() {
 				shownAs = "closed";
 			},
@@ -68,6 +70,8 @@ test("sidebar restores responsive preferences before datastar", () => {
 		);
 		assertEquals(shownAs, expected);
 		assertEquals(dialog.closedBy, mobile ? "any" : "none");
+		// Load and breakpoint restores stay instant and drop any half-finished swipe.
+		assertEquals(reset, ["data-animate-open", "--drawer-drag", "data-dragging"]);
 	}
 });
 
@@ -92,6 +96,41 @@ test("workspace files expose native preview and source controls", () => {
 	assertStringIncludes(html, 'id="workspace-file-source-mode"');
 	assertStringIncludes(html, 'id="workspace-file-preview"');
 	assertStringIncludes(html, 'aria-label="File preview"');
+});
+
+test("the command menu and hotkeys dialogs keep their open state across morphs", () => {
+	for (const id of ["command-dialog", "hotkeys-dialog"]) {
+		const openTag = new RegExp(`<dialog id="${id}"[^>]*>`).exec(html)?.[0] ?? "";
+		assertStringIncludes(openTag, 'data-preserve-attr="open"');
+	}
+});
+
+test("the llama progress bar and update copy button carry their motion hooks", () => {
+	const page = renderPage({
+		...appRenderSnapshot({
+			llamaDialog: {
+				models: [],
+				progress: { label: "Loading model", ratio: 0.25 },
+			},
+			updateAvailable: {
+				currentVersion: "1.0.0",
+				latestVersion: "1.1.0",
+				releaseUrl: "https://example.com/release",
+				upgradeCommand: "bun add -g pi-ui",
+			},
+		}),
+		messages: [],
+	});
+	// Progress fills scale from a --progress custom property, not an inline width.
+	assertStringIncludes(
+		page,
+		'<div class="dialog-progress-value" style="--progress: 25">',
+	);
+	assertFalse(page.includes('style="width:'));
+
+	const updateCopy =
+		/<button[^>]*aria-label="Copy upgrade command"[^>]*>/.exec(page)?.[0] ?? "";
+	assertStringIncludes(updateCopy, 'data-preserve-attr="data-copy-state"');
 });
 
 test("configured sidebar width is applied before styles", () => {
@@ -161,5 +200,17 @@ test("in remote mode a tab reports its page visibility on load and on every chan
 		assertStringIncludes(page, "visible: document.visibilityState === 'visible'");
 	} finally {
 		setRemoteMode(false);
+	}
+});
+
+test("confirming a delete marks the row pending before the POST (B-X3)", () => {
+	const signals = html.split("data-signals__ifmissing=")[1]?.slice(0, 600) ?? "";
+	assertStringIncludes(signals, "_sessionDeletingPath");
+	const confirm =
+		html.split("Delete session</button>")[0]?.split("<button").at(-1) ?? "";
+	const pending = confirm.indexOf("$_sessionDeletingPath = deleting");
+	const post = confirm.indexOf("@post(");
+	if (pending === -1 || post === -1 || pending > post) {
+		throw new Error("expected the pending mark before the delete POST");
 	}
 });

@@ -298,7 +298,7 @@ export function renderWorkspaceReview(
 								class="btn review-close"
 								data-variant="ghost"
 								data-size="icon-xs"
-								data-on:click="$_workspaceReviewOpen = false"
+								data-on:click="window.piUi.paneMotion?.arm('review', false); $_workspaceReviewOpen = false"
 								aria-label="Hide workspace"
 							>
 								<Icon icon={X} />
@@ -366,7 +366,7 @@ export function renderWorkspaceReview(
 								class="btn review-close"
 								data-variant="ghost"
 								data-size="icon-xs"
-								data-on:click="$_workspaceReviewOpen = false"
+								data-on:click="window.piUi.paneMotion?.arm('review', false); $_workspaceReviewOpen = false"
 								aria-label="Hide workspace"
 							>
 								<Icon icon={X} />

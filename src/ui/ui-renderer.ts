@@ -34,7 +34,7 @@ import {
 	MessageRenderService,
 	type MessageRenderServiceOptions,
 } from "./message-render-service.ts";
-import { renderMessages } from "./messages.tsx";
+import { renderMessages, renderPendingResponse } from "./messages.tsx";
 import { renderPiUiSheets, renderPiUiWidgets } from "./pi-ui-elements.tsx";
 import {
 	renderSessionPickerContent,
@@ -64,6 +64,21 @@ type RenderedView = {
 	signals: string;
 	scripts: readonly string[];
 };
+
+/**
+ * Why `#messages` is replaced on the next commit. Only a session replace (switch, new
+ * chat) fades the incoming transcript in (`data-enter`); a code-theme replace re-renders
+ * identical content and must not blink (flow-critique #3).
+ */
+type TranscriptReplaceReason = "session" | "code-theme";
+
+/** Client scripts that retire the pending "thinking..." row (message-scroll.js): in
+ * place under a response article that just took its slot, or where it is (turn over). */
+const replacePendingScript = "window.piUi.messageScroll.retirePending(true)";
+const retirePendingScript = "window.piUi.messageScroll.retirePending()";
+/** Gates nested entries until the replaced #messages binds (message-scroll.js). */
+const quietTranscriptHoldScript =
+	"window.piUi.messageScroll.quietTranscript({ hold: true })";
 
 type DirtyRegions = {
 	pickers: boolean;
@@ -98,7 +113,20 @@ export class UiRenderer implements AppStorePresentation {
 	private liveWorkspaceUsageDirty = false;
 	private liveWorkspaceActivityDirty = false;
 	private liveWorkspaceExtensionsDirty = false;
-	private replaceTranscriptOnCommit = false;
+	private replaceTranscriptOnCommit: TranscriptReplaceReason | undefined;
+	/**
+	 * The live send → first-token bridge (flow-decisions §10.1): armed by a live user
+	 * append, shown once the turn is running, retired by the next appended article or by
+	 * the turn ending (abort, error, settle). Never part of a history render.
+	 */
+	private pendingResponse: { shown: boolean; sawRunning: boolean } | undefined;
+	/**
+	 * A session replace's incoming #messages is still entering (`data-enter`, never
+	 * `.messages-loading`): follow-up transcript morphs keep the marker until the
+	 * session has loaded or its first message is appended, so an empty-transcript morph
+	 * never strips it (nor re-binds the loading dim) before the rise has run.
+	 */
+	private transcriptEnterPending = false;
 
 	constructor(
 		private readonly store: AppStore,
@@ -247,20 +275,52 @@ export class UiRenderer implements AppStorePresentation {
 		this.liveWorkspaceExtensionsDirty = false;
 		if (this.hub.clientCount > 0) {
 			const state = this.store.snapshot();
-			if (this.replaceTranscriptOnCommit) {
+			const signals = this.renderSignals(
+				state,
+				this.effectSignalOverrides(effects),
+			);
+			const replace = this.replaceTranscriptOnCommit;
+			if (replace === "session") this.transcriptEnterPending = true;
+			else if (state.sessionTransition.status !== "loading")
+				this.transcriptEnterPending = false;
+			if (replace) {
+				// Signals first: the incoming #messages is never born `.messages-loading`
+				// (SP-03). Its nested entries (stopped note, tool output, recent-session rows)
+				// must not replay: a session replace is gated by its own `data-enter`
+				// (messages.css `#messages:not([data-enter])`), from its first style; a
+				// code-theme replace has no marker, so the transcript is quieted before the
+				// new subtree lands, released by the new #messages' data-init (bindResize).
+				this.hub.patchView(
+					"",
+					signals,
+					replace === "code-theme" ? [quietTranscriptHoldScript] : [],
+				);
 				this.hub.replaceElement(
-					this.renderTranscript(this.projectState(state)),
+					this.renderTranscript(this.projectState(state), {
+						enter: replace === "session",
+					}),
 					"#messages",
 				);
+				// A still-showing pending row was rendered into the replace in place
+				// (`pending`), so it neither blinks nor re-enters; a session replace
+				// already dropped the wait (transcriptReplacing).
+				this.hub.patchView("", "{}", this.mainEffectScripts(effects));
+			} else {
+				this.hub.patchView(
+					this.renderAppElements(state),
+					signals,
+					this.mainEffectScripts(effects),
+				);
 			}
-			this.hub.patchView(
-				this.replaceTranscriptOnCommit ? "" : this.renderAppElements(state),
-				this.renderSignals(state, this.effectSignalOverrides(effects)),
-				this.mainEffectScripts(effects),
+			this.syncPendingResponse(Boolean(state.activityText));
+			this.patchDirtyRegions(
+				state,
+				effects,
+				dirtyRegions,
+				this.transcriptEnterPending,
 			);
-			this.patchDirtyRegions(state, effects, dirtyRegions);
 		}
-		this.replaceTranscriptOnCommit = false;
+		this.replaceTranscriptOnCommit = undefined;
 		if (this.hub.clientCount > 0)
 			for (const id of enhancementIds) this.messages.enqueueEnhancement(id);
 	}
@@ -268,6 +328,9 @@ export class UiRenderer implements AppStorePresentation {
 		snapshot: AppStateSnapshot,
 		effects: readonly UiCommitEffect[],
 		dirty: DirtyRegions,
+		/** A session replace's transcript is still entering: an empty-transcript morph
+		 * below must keep its `data-enter`, or its rise never starts (or is cut short). */
+		enterTranscript = false,
 	): void {
 		if (dirty.extensionElements) {
 			// Must run before the `pickers` branch below: a freshly appeared `sheet`/
@@ -303,7 +366,9 @@ export class UiRenderer implements AppStorePresentation {
 				renderSessionPickerContent(snapshot) +
 					renderSessionSidebarContent(snapshot) +
 					(snapshot.messages.length === 0
-						? this.renderTranscript(this.projectState(snapshot))
+						? this.renderTranscript(this.projectState(snapshot), {
+								enter: enterTranscript,
+							})
 						: ""),
 				"{}",
 				[],
@@ -373,7 +438,11 @@ export class UiRenderer implements AppStorePresentation {
 		}
 	}
 	messageAppended(id: string): void {
-		if (this.hub.clientCount === 0) return;
+		if (this.hub.clientCount === 0) {
+			// Any append ends the wait, seen or not: a reconnect must not restore the row.
+			this.pendingResponse = undefined;
+			return;
+		}
 		this.messages.messageAppended(id);
 		this.appendMessage(id);
 	}
@@ -386,12 +455,35 @@ export class UiRenderer implements AppStorePresentation {
 		);
 	}
 	private appendMessage(id: string): void {
+		this.patchAppendedMessage(id);
+		const isUser = this.store.transcript.getMessage(id)?.role === "user";
+		if (isUser) {
+			this.pendingResponse = { shown: false, sawRunning: false };
+			this.syncPendingResponse(Boolean(this.store.activityText));
+		}
+	}
+	/** Patches a live-appended message (`data-enter`, flow-spec C1). A response article
+	 * retires the pending row in the same patch, so the two crossfade in place. */
+	private patchAppendedMessage(id: string): void {
+		const retire = this.pendingResponse?.shown === true;
+		// Any live append ends the wait: a response article replaces the row, and a new
+		// user message re-arms it below itself (appendMessage).
+		this.pendingResponse = undefined;
+		// The first message ends a session replace's entry: it re-renders #messages.
+		this.transcriptEnterPending = false;
 		if (this.store.messages.length === 1) {
-			this.hub.patchElement(this.messages.renderMessagesElement(), "#messages");
+			this.hub.patchElement(
+				this.messages.renderMessagesElement({ enteringId: id }),
+				"#messages",
+				{ scripts: retire ? [replacePendingScript] : [] },
+			);
 			return;
 		}
-		const html = this.messages.renderMessageElement(id);
-		if (!html) return;
+		const html = this.messages.renderMessageElement(id, { entering: true });
+		if (!html) {
+			if (retire) this.hub.patchView("", "{}", [retirePendingScript]);
+			return;
+		}
 		const scripts = ["window.piUi.messageScroll.trimOldMessages()"];
 		// `TranscriptState.appendMessage` doesn't always add to the tail of its own
 		// array: a live `role: "user"` message is inserted *before* a run of
@@ -406,13 +498,39 @@ export class UiRenderer implements AppStorePresentation {
 		const index = this.store.messages.findIndex((message) => message.id === id);
 		const nextMessage = index >= 0 ? this.store.messages[index + 1] : undefined;
 		if (nextMessage) {
+			// Not the slot under the row: it just fades where it is.
+			if (retire) scripts.push(retirePendingScript);
 			this.hub.patchElement(html, `[data-message-id="${nextMessage.id}"]`, {
 				mode: "before",
 				scripts,
 			});
 			return;
 		}
+		if (retire) scripts.push(replacePendingScript);
 		this.hub.patchElement(html, "#message-list", { mode: "append", scripts });
+	}
+	/**
+	 * Shows the pending row once the armed turn is running, and retires it when the turn
+	 * ends without a response article (abort before the first token, a settle, an error
+	 * that appended nothing) — it must never outlive the wait.
+	 */
+	private syncPendingResponse(running: boolean): void {
+		const pending = this.pendingResponse;
+		if (!pending || this.hub.clientCount === 0) return;
+		if (running) pending.sawRunning = true;
+		else if (pending.sawRunning) {
+			this.pendingResponse = undefined;
+			if (pending.shown) this.hub.patchView("", "{}", [retirePendingScript]);
+			return;
+		}
+		if (!running || pending.shown) return;
+		pending.shown = true;
+		// Right after #message-list, never inside it: trimming counts the list's children
+		// from the end, and a response article appended to the list lands exactly where
+		// the row sits.
+		this.hub.patchElement(renderPendingResponse(), "#message-list", {
+			mode: "after",
+		});
 	}
 	messageUpdated(id: string): void {
 		if (this.hub.clientCount === 0) return;
@@ -454,14 +572,18 @@ export class UiRenderer implements AppStorePresentation {
 	codeThemeChanged(): void {
 		if (this.hub.clientCount > 0) this.messages.codeThemeChanged();
 		else this.messages.transcriptReplacing();
-		this.replaceTranscriptOnCommit = true;
+		// A session replace already queued for this commit keeps its fade.
+		this.replaceTranscriptOnCommit ??= "code-theme";
 		this.requestCommit();
 	}
 	fontsChanged(): void {
 		this.requestCommit();
 	}
 	streamingMessageStarted(id: string): void {
-		if (this.hub.clientCount === 0) return;
+		if (this.hub.clientCount === 0) {
+			this.pendingResponse = undefined;
+			return;
+		}
 		this.messages.streamingMessageStarted(id);
 		this.appendMessage(id);
 	}
@@ -470,6 +592,8 @@ export class UiRenderer implements AppStorePresentation {
 		this.messages.streamingMessageChanged();
 	}
 	sessionTransitionChanged(scrollToBottom: boolean): void {
+		if (this.store.sessionTransition.status !== "loading")
+			this.transcriptEnterPending = false;
 		if (this.hub.clientCount === 0) return;
 		this.hub.patchView(
 			"",
@@ -482,7 +606,8 @@ export class UiRenderer implements AppStorePresentation {
 		this.messages.assistantFinished(ids);
 	}
 	transcriptReplacing(): void {
-		this.replaceTranscriptOnCommit = true;
+		this.replaceTranscriptOnCommit = "session";
+		this.pendingResponse = undefined;
 		this.messages.transcriptReplacing();
 	}
 	transcriptReplaced(
@@ -524,7 +649,10 @@ export class UiRenderer implements AppStorePresentation {
 	renderElements(snapshot: AppRenderSnapshot): string {
 		return this.renderTranscript(snapshot) + this.renderAppElements(snapshot);
 	}
-	private renderTranscript(snapshot: AppRenderSnapshot): string {
+	private renderTranscript(
+		snapshot: AppRenderSnapshot,
+		{ enter = false }: { enter?: boolean } = {},
+	): string {
 		return renderMessages(
 			snapshot.messages,
 			snapshot.emptyChatHint,
@@ -532,6 +660,15 @@ export class UiRenderer implements AppStorePresentation {
 			snapshot.sessions,
 			snapshot.models.some((model) => model.configured),
 			snapshot.sessionCatalogLoading,
+			// A showing pending row is part of every full render (reconnect, code-theme
+			// replace), never a history one: it is only ever shown during a live wait, and
+			// a turn that ended while no client was connected no longer waits.
+			{
+				enter,
+				pending:
+					this.pendingResponse?.shown === true &&
+					Boolean(snapshot.activityText),
+			},
 		);
 	}
 	private renderAppElements(snapshot: AppStateSnapshot): string {

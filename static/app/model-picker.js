@@ -1,4 +1,5 @@
 import { activateCommandItem } from "./controls.js";
+import { duration, easing, reducedMotion } from "./motion.js";
 
 /**
  * Drives the model picker's dual-pane behaviour (`src/ui/prompt-pickers.tsx`
@@ -78,6 +79,31 @@ function markCurrentProviderRow(command) {
 	}
 }
 
+/**
+ * Phone width only (prompt-pickers.css shows one pane at a time below 30rem): a drill is a
+ * pane change, so the incoming pane slides a short 8% in from its side; arrowing within a
+ * pane stays instant. Not while searching (a single-pane result list). WAAPI on a user
+ * action, not `@starting-style`, which would also fire on every popover open and every
+ * time search clears.
+ */
+export function drillIn(command, selector, fromX) {
+	if (command.dataset.multiPane !== "true" || command.dataset.searching === "true")
+		return;
+	if (globalThis.matchMedia?.("(width <= 30rem)").matches !== true) return;
+	const pane = command.querySelector(selector);
+	if (!(pane instanceof HTMLElement)) return;
+	const reduce = reducedMotion();
+	pane.animate(
+		reduce
+			? [{ opacity: 0 }, { opacity: 1 }]
+			: [
+					{ opacity: 0, translate: `${fromX} 0` },
+					{ opacity: 1, translate: "0 0" },
+				],
+		{ duration: reduce ? duration.sm : duration.md, easing: easing.out },
+	);
+}
+
 /** `data-on:click` on a providers-pane row: narrows the models pane to that provider
  * and drills into it (both the mouse path and, via `controls.js`'s ArrowRight -> click
  * on the active row, the keyboard path). */
@@ -88,6 +114,7 @@ export function selectProvider(el, provider) {
 	command.dataset.activePane = "models";
 	markCurrentProviderRow(command);
 	applyActiveProvider(command);
+	drillIn(command, ".model-model-pane", "8%");
 	activateCommandItem(command, preferred(visible(modelRowsFor(command, provider))));
 }
 
@@ -98,6 +125,7 @@ export function back(el) {
 	const command = commandOf(el);
 	if (!command) return;
 	command.dataset.activePane = "providers";
+	drillIn(command, ".model-provider-pane", "-8%");
 	activateCommandItem(command, preferred(visible(providerRows(command))));
 }
 
