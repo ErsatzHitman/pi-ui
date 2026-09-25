@@ -409,6 +409,16 @@ export class TerminalSurfaceController {
 	dispose(id: string): void {
 		const mount = this.#mounts.get(id);
 		if (!mount || mount.disposed) return;
+		// A `requestRender(force: false)` inside the last `schedule()` window
+		// (up to one frame at `surfaceFrameHz`, ~33 ms at 30 fps) leaves a
+		// snapshot coalesced but not yet committed. Flush it — synchronously,
+		// and before `mount.disposed` is set, since `#commitFrame` bails out
+		// once it is — so a same-key remount (`mountPersistent` calls this
+		// first) or an explicit `setWidget(key, undefined)` settles the prior
+		// owner's *true last state* as its final frame, not whatever frame
+		// happened to have already committed. A no-op when nothing is
+		// pending (`flush()` with no snapshot only commits if `dirty`).
+		mount.scheduler.flush();
 		mount.disposed = true;
 		mount.scheduler.clear();
 		mount.tui.stop();

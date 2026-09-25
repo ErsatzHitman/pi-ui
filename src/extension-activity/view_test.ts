@@ -7,8 +7,10 @@ import {
 	activityMessageState,
 	activityMessageText,
 	formatActivityDuration,
+	formatExtensionActivityLogLine,
 	mergeActivitySteps,
 	toExtensionActivityView,
+	triggerMeta,
 } from "./view.ts";
 
 function activity(overrides: Partial<ExtensionActivity> = {}): ExtensionActivity {
@@ -106,5 +108,62 @@ test("formatActivityDuration hides a 0.0s duration, exactly like tool cards do",
 	assertEquals(
 		formatActivityDuration(activity({ startedAt: 0, finishedAt: 20 })),
 		undefined,
+	);
+});
+
+test("triggerMeta reads the one distinguishing field of each trigger kind", () => {
+	assertEquals(
+		triggerMeta({ kind: "hook", event: "before_agent_start" }),
+		"before_agent_start",
+	);
+	assertEquals(
+		triggerMeta({ kind: "tool", toolName: "jev_decompose" }),
+		"jev_decompose",
+	);
+	assertEquals(triggerMeta({ kind: "command", name: "advisor" }), "advisor");
+	assertEquals(triggerMeta({ kind: "shortcut", key: "ctrl+j" }), "ctrl+j");
+	assertEquals(
+		triggerMeta({ kind: "ui", signal: "status", key: "fake-vision" }),
+		"fake-vision",
+	);
+});
+
+test("formatExtensionActivityLogLine: a start line has no duration or summary", () => {
+	assertEquals(
+		formatExtensionActivityLogLine("start", activity({ state: "working" })),
+		"JEV started Consult · before_agent_start",
+	);
+});
+
+test("formatExtensionActivityLogLine: a finish line adds duration and summary when present", () => {
+	const finished = activity({
+		state: "done",
+		startedAt: 0,
+		finishedAt: 2100,
+		summary: "Consulted jev",
+	});
+	assertEquals(
+		formatExtensionActivityLogLine("finish", finished),
+		"JEV finished Consult · before_agent_start (2.1s) — Consulted jev",
+	);
+});
+
+test("formatExtensionActivityLogLine: a finish line with no duration or summary yet omits the trailing parenthetical", () => {
+	assertEquals(
+		formatExtensionActivityLogLine("finish", activity({ state: "working" })),
+		"JEV finished Consult · before_agent_start",
+	);
+});
+
+test("formatExtensionActivityLogLine: a finish line with a summary but a hidden (0.0s) duration only shows the summary", () => {
+	const finished = activity({
+		state: "done",
+		startedAt: 0,
+		finishedAt: 20,
+		summary: "Consulted jev",
+	});
+	assertEquals(
+		formatExtensionActivityLogLine("finish", finished),
+		"JEV finished Consult · before_agent_start — Consulted jev",
 	);
 });

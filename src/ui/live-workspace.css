@@ -283,6 +283,18 @@
 		color: var(--status-active);
 	}
 
+	/* §4.1.3: the Activity-tab "started" log line for an extension activity —
+	   the finish line is a plain row once it lands, same as every other entry. */
+	.live-workspace-activity-row[data-activity-kind="extension-start"] {
+		border-color: var(--status-active);
+		background: var(--status-active-surface);
+	}
+
+	.live-workspace-activity-row[data-activity-kind="extension-start"]
+		.live-workspace-activity-text {
+		color: var(--status-active);
+	}
+
 	.live-workspace-tool-preview {
 		flex-basis: 100%;
 		margin: 0;

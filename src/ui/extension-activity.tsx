@@ -7,9 +7,9 @@ import type {
 	ExtensionActivityChip,
 	ExtensionActivityOutput,
 	ExtensionActivityState,
-	ExtensionActivityTrigger,
 	ExtensionActivityView,
 } from "../extension-activity-types.ts";
+import { triggerMeta } from "../extension-activity/view.ts";
 import { Icon } from "./icon.tsx";
 import { ChevronRight } from "./icons.ts";
 import type { AppMessage } from "./render-state.ts";
@@ -36,22 +36,6 @@ function activityStateLabel(state: ExtensionActivityState): string {
 			return "Failed";
 		case "cancelled":
 			return "Stopped";
-	}
-}
-
-/** The `<summary>`'s trigger meta text, e.g. "before_agent_start", "fake_jev_consult". */
-function triggerMeta(trigger: ExtensionActivityTrigger): string {
-	switch (trigger.kind) {
-		case "hook":
-			return trigger.event;
-		case "tool":
-			return trigger.toolName;
-		case "command":
-			return trigger.name;
-		case "shortcut":
-			return trigger.key;
-		case "ui":
-			return trigger.key;
 	}
 }
 

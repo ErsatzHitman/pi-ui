@@ -1,6 +1,7 @@
 import { formatDuration } from "../agent/tool-presentation.ts";
 import type {
 	ExtensionActivity,
+	ExtensionActivityTrigger,
 	ExtensionActivityView,
 } from "../extension-activity-types.ts";
 
@@ -54,6 +55,54 @@ export function mergeActivitySteps(
 	if (index === -1) steps.push(step);
 	else steps[index] = step;
 	return steps;
+}
+
+/** The trigger's one-line meta text, e.g. "before_agent_start", "fake_jev_consult"
+ * — shared by the card's `<summary>` (`ui/extension-activity.tsx`) and the Live
+ * Workspace Activity-tab log lines (`live-workspace-controller.ts`), which need
+ * the identical text with no JSX dependency. */
+export function triggerMeta(trigger: ExtensionActivityTrigger): string {
+	switch (trigger.kind) {
+		case "hook":
+			return trigger.event;
+		case "tool":
+			return trigger.toolName;
+		case "command":
+			return trigger.name;
+		case "shortcut":
+			return trigger.key;
+		case "ui":
+			return trigger.key;
+	}
+}
+
+/**
+ * One Live Workspace Activity-tab log line (`LiveWorkspaceController
+ * .recordExtensionActivity`, DESIGN-ext-activity.md §4.1.3): extension
+ * label, trigger and title on both edges, plus duration and a result
+ * summary once the activity has one to show:
+ *   "JEV started Consult · before_agent_start"
+ *   "JEV finished Consult · before_agent_start (2.1s) — Consulted jev"
+ * A `finish` line with no duration/summary yet (still `working` when the
+ * caller wants a line right now, e.g. `cancelAll`'s synthetic finish) just
+ * omits the trailing parenthetical rather than printing an empty one.
+ */
+export function formatExtensionActivityLogLine(
+	phase: "start" | "finish",
+	activity: ExtensionActivity,
+): string {
+	const verb = phase === "start" ? "started" : "finished";
+	const head = `${activity.extension.label} ${verb} ${activity.title} · ${triggerMeta(activity.trigger)}`;
+	if (phase === "start") return head;
+	const duration = formatActivityDuration(activity);
+	const summary = activity.summary;
+	const tail = [
+		duration ? `(${duration})` : undefined,
+		summary ? `— ${summary}` : undefined,
+	]
+		.filter((part): part is string => part !== undefined)
+		.join(" ");
+	return tail ? `${head} ${tail}` : head;
 }
 
 /** Maps the activity's own five-state machine down to `TranscriptMessage`'s

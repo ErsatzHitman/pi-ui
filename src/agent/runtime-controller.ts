@@ -49,6 +49,7 @@ import {
 import {
 	activityMessageState,
 	activityMessageText,
+	formatExtensionActivityLogLine,
 	mergeActivitySteps,
 	toExtensionActivityView,
 } from "../extension-activity/view.ts";
@@ -212,6 +213,8 @@ function instrumentRuntimeExtensions(runtime: AgentSessionRuntime): void {
 		runtime.services.resourceLoader.getExtensions().extensions,
 		tracker,
 		resolveExtensionRef,
+		Date.now,
+		runtime.session.sessionManager,
 	);
 }
 
@@ -656,10 +659,17 @@ export class RuntimeController {
 			);
 			const loadedExtensions = services.resourceLoader.getExtensions().extensions;
 			if (activityTracker) {
+				// `sessionManager` (this call's own, already in scope for
+				// `createAgentSessionFromServices` below) is the identity a shared
+				// tool/command/shortcut definition's multiplexed wrapper matches
+				// back against the live `ctx.sessionManager` at call time — see
+				// `instrumentExtensions`'s `sessionKey` doc comment.
 				instrumentExtensions(
 					loadedExtensions,
 					activityTracker,
 					resolveExtensionRef,
+					Date.now,
+					sessionManager,
 				);
 			}
 			const readIsOverridden = loadedExtensions.some((extension) =>
@@ -2209,10 +2219,12 @@ export class RuntimeController {
 		const { activity } = change;
 		this.upsertExtensionActivityMessage(target.sink, activity);
 		if (change.kind !== "updated") {
-			this.persistExtensionActivityEntry(
-				target.runtime,
-				change.kind === "created" ? "start" : "finish",
-				activity,
+			const phase = change.kind === "created" ? "start" : "finish";
+			this.persistExtensionActivityEntry(target.runtime, phase, activity);
+			this.liveWorkspace.recordExtensionActivity(
+				phase,
+				formatExtensionActivityLogLine(phase, activity),
+				!target.foreground,
 			);
 		}
 		if (!target.foreground) return;
@@ -3078,10 +3090,19 @@ export class RuntimeController {
 	}
 
 	private loadCurrentSessionMessages(): void {
+		// A still-open activity has no persisted "finish" entry yet, so
+		// without `openActivityIds` the projector would fall back to
+		// `interruptedActivity` and flash "Stopped" until the tracker's next
+		// live patch corrects it (§2.4 / persistence.ts's doc comment).
+		const tracker = extensionActivityTrackers.get(this.runtime.session);
+		const openActivityIds = tracker
+			? new Set(tracker.listOpen().map((activity) => activity.id))
+			: undefined;
 		this.transcript.load(
 			this.runtime,
 			this.state,
 			this.customTranscriptRenderers(this.runtime),
+			openActivityIds,
 		);
 		this.usage.sync();
 	}

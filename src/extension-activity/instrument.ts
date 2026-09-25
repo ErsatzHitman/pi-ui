@@ -85,12 +85,24 @@ const instrumentedExtensions = new WeakSet<Extension>();
  * elsewhere): call again after every reload/rebuild with the SDK's current
  * `LoadExtensionsResult.extensions` and already-instrumented ones are
  * skipped.
+ *
+ * `sessionKey` identifies which runtime this call is instrumenting for — its
+ * `AgentSession`'s own `sessionManager` at every call site pi-ui has
+ * (`runtime-controller.ts`), matched back against the live `ctx.sessionManager`
+ * at call time. It exists for `wrapToolExecute`/`instrumentCommands`/
+ * `instrumentShortcuts`' per-runtime dispatch (see `registerAttribution`'s doc
+ * comment) — a tool/command/shortcut *definition* object, unlike an
+ * `Extension`, can be the exact same JS object across more than one runtime
+ * (the SDK's factory cache). `undefined` (a hand-built test fixture ctx, or a
+ * caller that never passes one) degrades to "whichever runtime instrumented
+ * this definition most recently", i.e. today's behavior — never worse.
  */
 export function instrumentExtensions(
 	extensions: readonly Extension[],
 	reporter: InstrumentationReporter,
 	resolveRef: (source: IdentitySource) => ExtensionRef,
 	clock: Clock = Date.now,
+	sessionKey?: ExtensionSessionKey,
 ): void {
 	for (const extension of extensions) {
 		if (extension.hidden) continue;
@@ -102,10 +114,79 @@ export function instrumentExtensions(
 		});
 		const carrierScopes = new Map<string, InstrumentedScope>();
 		instrumentHandlers(extension, ref, reporter, clock, carrierScopes);
-		instrumentTools(extension, ref, reporter, clock);
-		instrumentCommands(extension, ref, reporter, clock);
-		instrumentShortcuts(extension, ref, reporter, clock);
+		instrumentTools(extension, ref, reporter, clock, sessionKey);
+		instrumentCommands(extension, ref, reporter, clock, sessionKey);
+		instrumentShortcuts(extension, ref, reporter, clock, sessionKey);
 	}
+}
+
+/** `sessionKey`'s real domain type: an `ExtensionContext`'s own `sessionManager`
+ * (derived by indexed access — the SDK doesn't re-export the interface itself,
+ * `ReadonlySessionManager`, from its package root), the one call-time value that
+ * identifies which runtime is actually invoking a shared definition's wrapper. */
+type ExtensionSessionKey = ExtensionContext["sessionManager"];
+
+/** One runtime's `(ref, reporter, clock)` for a shared tool/command/shortcut
+ * definition — see `instrumentExtensions`'s `sessionKey` doc comment. */
+type RuntimeAttribution = Readonly<{
+	ref: ExtensionRef;
+	reporter: InstrumentationReporter;
+	clock: Clock;
+}>;
+
+/** Per shared definition object: every runtime's attribution, keyed by its
+ * `sessionKey`, plus whichever was registered most recently (the fallback
+ * for a call-time `ctx` this module can't match back to a `sessionKey`). */
+type AttributionRegistry = {
+	bySessionKey: Map<ExtensionSessionKey | undefined, RuntimeAttribution>;
+	mostRecent: RuntimeAttribution;
+};
+
+/**
+ * Registers `attribution` for `sessionKey` against `holder` (a tool
+ * `definition`, a command, or a shortcut — whatever object this module might
+ * find already instrumented by an *earlier* call for a different runtime,
+ * because the SDK's factory cache handed both runtimes the same object) in
+ * `registry`, creating its entry on first use. Returns that entry so the
+ * caller can decide whether a wrapper still needs installing (first use) or
+ * only the registration needed updating (every later use, including a
+ * same-runtime reload re-registering under the same `sessionKey`).
+ */
+function registerAttribution<Holder extends object>(
+	registry: WeakMap<Holder, AttributionRegistry>,
+	holder: Holder,
+	sessionKey: ExtensionSessionKey | undefined,
+	attribution: RuntimeAttribution,
+): AttributionRegistry {
+	let entry = registry.get(holder);
+	if (!entry) {
+		entry = { bySessionKey: new Map(), mostRecent: attribution };
+		registry.set(holder, entry);
+	}
+	entry.bySessionKey.set(sessionKey, attribution);
+	entry.mostRecent = attribution;
+	return entry;
+}
+
+/** The attribution to use for one call: the registered entry whose
+ * `sessionKey` matches this call's live `ctx.sessionManager`, else whichever
+ * attribution was registered most recently (see `instrumentExtensions`'s
+ * `sessionKey` doc comment). Never throws — a `ctx` whose `sessionManager`
+ * getter itself throws (an inactive runner) just falls back, exactly like a
+ * `ctx` with no `sessionManager` at all. */
+function resolveAttribution<Ctx>(
+	entry: AttributionRegistry,
+	ctx: Ctx,
+): RuntimeAttribution {
+	if (isExtensionContext(ctx)) {
+		try {
+			const match = entry.bySessionKey.get(ctx.sessionManager);
+			if (match) return match;
+		} catch {
+			// Falls through to `mostRecent`.
+		}
+	}
+	return entry.mostRecent;
 }
 
 function carrierScopeFor(
@@ -323,13 +404,30 @@ function instrumentTools(
 	ref: ExtensionRef,
 	reporter: InstrumentationReporter,
 	clock: Clock,
+	sessionKey: ExtensionSessionKey | undefined,
 ): void {
 	instrumentMapEntries(extension.tools, (toolName, registered) => {
-		wrapToolExecute(registered.definition, toolName, ref, reporter, clock);
+		wrapToolExecute(
+			registered.definition,
+			toolName,
+			ref,
+			reporter,
+			clock,
+			sessionKey,
+		);
 	});
 }
 
 type ToolExecute = RegisteredTool["definition"]["execute"];
+
+/** Every tool `definition` this module has already installed a multiplexing
+ * wrapper on — see `registerAttribution`'s doc comment. Distinct from
+ * `originalByWrapper` (which maps a wrapper back to what it replaced): this
+ * only answers "does `execute` already dispatch per runtime", so a *second*
+ * `wrapToolExecute` call for the same shared `definition` (a different
+ * runtime, or this runtime's own reload) registers its attribution without
+ * wrapping `execute` a second time. */
+const toolAttributions = new WeakMap<RegisteredTool["definition"], AttributionRegistry>();
 
 function wrapToolExecute(
 	definition: RegisteredTool["definition"],
@@ -337,7 +435,15 @@ function wrapToolExecute(
 	ref: ExtensionRef,
 	reporter: InstrumentationReporter,
 	clock: Clock,
+	sessionKey: ExtensionSessionKey | undefined,
 ): void {
+	const alreadyWrapped = toolAttributions.has(definition);
+	const entry = registerAttribution(toolAttributions, definition, sessionKey, {
+		ref,
+		reporter,
+		clock,
+	});
+	if (alreadyWrapped) return;
 	const original: ToolExecute = unwrapped(definition.execute);
 	// A `function` (not an arrow) so `this` stays whatever the caller bound —
 	// the SDK calls `definition.execute(…)`, so a method-style `execute` that
@@ -348,17 +454,19 @@ function wrapToolExecute(
 		...args: Parameters<ToolExecute>
 	): ReturnType<ToolExecute> {
 		const [toolCallId, , , , ctx] = args;
+		const attribution = resolveAttribution(entry, ctx);
 		const scope: InstrumentedScope = {
 			scopeId: `tool:${crypto.randomUUID()}`,
 			timed: true,
-			extension: ref,
+			extension: attribution.ref,
 			trigger: { kind: "tool", toolName, toolCallId },
 			title: toolName,
 			toolCallId,
 		};
-		report(() => reporter.scopeStart(scope, clock()));
+		report(() => attribution.reporter.scopeStart(scope, attribution.clock()));
 		const forwarded = [...args];
-		if (isExtensionContext(ctx)) forwarded[4] = proxyCtx(ctx, scope, reporter, clock);
+		if (isExtensionContext(ctx))
+			forwarded[4] = proxyCtx(ctx, scope, attribution.reporter, attribution.clock);
 		try {
 			// SAFETY: `forwarded` is `args` with at most `ctx` swapped for a
 			// Proxy of the same object, so it still matches `ToolExecute`'s own
@@ -367,10 +475,20 @@ function wrapToolExecute(
 				this,
 				forwarded as Parameters<ToolExecute>,
 			);
-			report(() => reporter.scopeEnd(scope, clock(), { ok: true, result }));
+			report(() =>
+				attribution.reporter.scopeEnd(scope, attribution.clock(), {
+					ok: true,
+					result,
+				}),
+			);
 			return result;
 		} catch (error) {
-			report(() => reporter.scopeEnd(scope, clock(), { ok: false, error }));
+			report(() =>
+				attribution.reporter.scopeEnd(scope, attribution.clock(), {
+					ok: false,
+					error,
+				}),
+			);
 			throw error;
 		}
 	};
@@ -378,13 +496,24 @@ function wrapToolExecute(
 	definition.execute = wrapped;
 }
 
+/** Same purpose as `toolAttributions`, for a shared `RegisteredCommand`. */
+const commandAttributions = new WeakMap<RegisteredCommand, AttributionRegistry>();
+
 function instrumentCommands(
 	extension: Extension,
 	ref: ExtensionRef,
 	reporter: InstrumentationReporter,
 	clock: Clock,
+	sessionKey: ExtensionSessionKey | undefined,
 ): void {
 	instrumentMapEntries(extension.commands, (name, command) => {
+		const alreadyWrapped = commandAttributions.has(command);
+		const entry = registerAttribution(commandAttributions, command, sessionKey, {
+			ref,
+			reporter,
+			clock,
+		});
+		if (alreadyWrapped) return;
 		type CommandHandler = RegisteredCommand["handler"];
 		const original: CommandHandler = unwrapped(command.handler);
 		const wrapped = async function (
@@ -392,17 +521,23 @@ function instrumentCommands(
 			...args: Parameters<CommandHandler>
 		): ReturnType<CommandHandler> {
 			const [, ctx] = args;
+			const attribution = resolveAttribution(entry, ctx);
 			const scope: InstrumentedScope = {
 				scopeId: `command:${crypto.randomUUID()}`,
 				timed: true,
-				extension: ref,
+				extension: attribution.ref,
 				trigger: { kind: "command", name },
 				title: `/${name}`,
 			};
-			report(() => reporter.scopeStart(scope, clock()));
+			report(() => attribution.reporter.scopeStart(scope, attribution.clock()));
 			const forwarded = [...args];
 			if (isExtensionContext(ctx))
-				forwarded[1] = proxyCtx(ctx, scope, reporter, clock);
+				forwarded[1] = proxyCtx(
+					ctx,
+					scope,
+					attribution.reporter,
+					attribution.clock,
+				);
 			try {
 				// SAFETY: same reasoning as `wrapToolExecute`'s `forwarded`.
 				const result = await original.apply(
@@ -410,11 +545,19 @@ function instrumentCommands(
 					forwarded as Parameters<CommandHandler>,
 				);
 				report(() =>
-					reporter.scopeEnd(scope, clock(), { ok: true, result: undefined }),
+					attribution.reporter.scopeEnd(scope, attribution.clock(), {
+						ok: true,
+						result: undefined,
+					}),
 				);
 				return result;
 			} catch (error) {
-				report(() => reporter.scopeEnd(scope, clock(), { ok: false, error }));
+				report(() =>
+					attribution.reporter.scopeEnd(scope, attribution.clock(), {
+						ok: false,
+						error,
+					}),
+				);
 				throw error;
 			}
 		};
@@ -423,13 +566,24 @@ function instrumentCommands(
 	});
 }
 
+/** Same purpose as `toolAttributions`, for a shared `ExtensionShortcut`. */
+const shortcutAttributions = new WeakMap<ExtensionShortcut, AttributionRegistry>();
+
 function instrumentShortcuts(
 	extension: Extension,
 	ref: ExtensionRef,
 	reporter: InstrumentationReporter,
 	clock: Clock,
+	sessionKey: ExtensionSessionKey | undefined,
 ): void {
 	instrumentMapEntries(extension.shortcuts, (key, shortcut) => {
+		const alreadyWrapped = shortcutAttributions.has(shortcut);
+		const entry = registerAttribution(shortcutAttributions, shortcut, sessionKey, {
+			ref,
+			reporter,
+			clock,
+		});
+		if (alreadyWrapped) return;
 		type ShortcutHandler = ExtensionShortcut["handler"];
 		const original: ShortcutHandler = unwrapped(shortcut.handler);
 		const wrapped = async function (
@@ -437,17 +591,23 @@ function instrumentShortcuts(
 			...args: Parameters<ShortcutHandler>
 		): Promise<Awaited<ReturnType<ShortcutHandler>>> {
 			const [ctx] = args;
+			const attribution = resolveAttribution(entry, ctx);
 			const scope: InstrumentedScope = {
 				scopeId: `shortcut:${crypto.randomUUID()}`,
 				timed: true,
-				extension: ref,
+				extension: attribution.ref,
 				trigger: { kind: "shortcut", key },
 				title: key,
 			};
-			report(() => reporter.scopeStart(scope, clock()));
+			report(() => attribution.reporter.scopeStart(scope, attribution.clock()));
 			const forwarded = [...args];
 			if (isExtensionContext(ctx))
-				forwarded[0] = proxyCtx(ctx, scope, reporter, clock);
+				forwarded[0] = proxyCtx(
+					ctx,
+					scope,
+					attribution.reporter,
+					attribution.clock,
+				);
 			try {
 				// SAFETY: same reasoning as `wrapToolExecute`'s `forwarded`.
 				const result = await original.apply(
@@ -455,11 +615,19 @@ function instrumentShortcuts(
 					forwarded as Parameters<ShortcutHandler>,
 				);
 				report(() =>
-					reporter.scopeEnd(scope, clock(), { ok: true, result: undefined }),
+					attribution.reporter.scopeEnd(scope, attribution.clock(), {
+						ok: true,
+						result: undefined,
+					}),
 				);
 				return result;
 			} catch (error) {
-				report(() => reporter.scopeEnd(scope, clock(), { ok: false, error }));
+				report(() =>
+					attribution.reporter.scopeEnd(scope, attribution.clock(), {
+						ok: false,
+						error,
+					}),
+				);
 				throw error;
 			}
 		};

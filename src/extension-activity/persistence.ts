@@ -60,7 +60,16 @@ export type RebuiltActivity = Readonly<{
  * seen wins (so a re-written `"finish"` after a late panel refresh replaces
  * the earlier one), and an activity that only ever got a `"start"` entry
  * (pi-ui exited mid-run) is reported `cancelled` with an "Interrupted"
- * summary instead of staying `working` forever.
+ * summary instead of staying `working` forever — *unless* `openActivityIds`
+ * (the live `ExtensionActivityTracker.listOpen()` ids for this runtime, when
+ * the caller has one) says the activity is, in fact, still genuinely running
+ * in memory. That happens on an ordinary reload/reconnect of a session whose
+ * agent turn hasn't settled yet: the finish entry hasn't been written (and
+ * may never be, if the activity keeps refreshing its output instead), so
+ * without this the card would flash "Stopped" until the tracker's next live
+ * patch corrects it. An id absent from `openActivityIds` (or no set passed
+ * at all, e.g. a backgrounded/closed session) still falls back to
+ * `interruptedActivity`.
  *
  * Non-activity entries (a different `customType`, or anything `decodeActivityEntry`
  * can't parse) are silently skipped, exactly like `transcript-projector.ts`'s
@@ -70,6 +79,7 @@ export type RebuiltActivity = Readonly<{
  */
 export function rebuildActivitiesFromEntries(
 	payloads: readonly unknown[],
+	openActivityIds?: ReadonlySet<string>,
 ): readonly RebuiltActivity[] {
 	const byId = new Map<
 		string,
@@ -92,7 +102,10 @@ export function rebuildActivitiesFromEntries(
 	});
 	return [...byId.values()]
 		.map(({ activity, firstSeenIndex, sawFinish }) => ({
-			activity: sawFinish ? activity : interruptedActivity(activity),
+			activity:
+				sawFinish || openActivityIds?.has(activity.id)
+					? activity
+					: interruptedActivity(activity),
 			firstSeenIndex,
 		}))
 		.sort((a, b) => a.firstSeenIndex - b.firstSeenIndex);

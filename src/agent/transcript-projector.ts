@@ -98,9 +98,16 @@ function customMessageInput(
  * introduced it, preserving transcript order across a session switch,
  * restart or `/resume` (`DESIGN-ext-activity.md` §2.4's "Projection on
  * load" bullet).
+ *
+ * `openActivityIds`, when passed, is this runtime's live
+ * `ExtensionActivityTracker.listOpen()` ids — an activity still open there
+ * keeps its persisted `working` state instead of being forced `cancelled`
+ * for lacking a `"finish"` entry yet (see `rebuildActivitiesFromEntries`'s
+ * doc comment; this is the reload/reconnect "Stopped" flash fix).
  */
 export function projectExtensionActivities(
 	entries: readonly SessionEntry[],
+	openActivityIds?: ReadonlySet<string>,
 ): Map<number, TranscriptMessageInput[]> {
 	const payloads: unknown[] = [];
 	const entryIndexByPayloadPosition: number[] = [];
@@ -111,7 +118,10 @@ export function projectExtensionActivities(
 		}
 	});
 	const byEntryIndex = new Map<number, TranscriptMessageInput[]>();
-	for (const { activity, firstSeenIndex } of rebuildActivitiesFromEntries(payloads)) {
+	for (const { activity, firstSeenIndex } of rebuildActivitiesFromEntries(
+		payloads,
+		openActivityIds,
+	)) {
 		const entryIndex = entryIndexByPayloadPosition[firstSeenIndex];
 		if (entryIndex === undefined) continue;
 		const timestamp = new Date(entries[entryIndex]?.timestamp ?? Date.now());
@@ -186,6 +196,64 @@ function foldAnchoredActivities(
 }
 
 /**
+ * A standalone (unanchored) extension-activity card triggered by a hook that
+ * runs before the model call — `before_agent_start`, chiefly — is promoted
+ * (and so first appended, live) while the SDK is still finishing that hook,
+ * and the SDK does not append *its own* `message_start`/`message_end` for
+ * the user's prompt until after `before_agent_start` returns (it can still
+ * rewrite the prompt up to that point). So the card's own entry always lands
+ * on the branch *before* the user message entry it actually belongs to, and
+ * without this pass it would render above that user's own prompt row
+ * instead of below it — confusing, since the card is *about* the turn that
+ * prompt started, not the previous one.
+ *
+ * Moves every maximal run of standalone extension-activity cards that sits
+ * immediately before a `role: "user"` message (nothing else between them) to
+ * immediately after it instead, preserving the run's own relative order.
+ * `foldAnchoredActivities` must run first: only a still-standalone card (one
+ * with no `toolCallId`) is a candidate — a card anchored into its tool's own
+ * step list moves (or doesn't) with that tool message, never on its own.
+ *
+ * The "immediately before, nothing between" condition is deliberately
+ * narrow: a card from an *earlier* turn (with its own assistant reply, tool
+ * calls, or anything else already between it and the next prompt) is left
+ * exactly where it is — this only ever reorders a card that could not
+ * legitimately describe anything but the turn that follows it.
+ *
+ * "Nothing between" is checked against this pass's *projected* input, after
+ * every other entry has already been turned into zero or more messages —
+ * not against the raw branch. A prior turn whose assistant reply projects
+ * to nothing at all (e.g. `content: []`, no text and no tool call) would
+ * make its own card look adjacent to the next prompt too; that combination
+ * does not occur for a real turn (some message, even a bare stop marker,
+ * always projects), so it's an accepted edge rather than one this pass
+ * guards against.
+ */
+function anchorActivitiesAfterTheirUserTurn(
+	messages: readonly TranscriptMessageInput[],
+): TranscriptMessageInput[] {
+	const reordered = [...messages];
+	for (let userIndex = 0; userIndex < reordered.length; userIndex += 1) {
+		if (reordered[userIndex]?.role !== "user") continue;
+		let runStart = userIndex;
+		while (
+			runStart > 0 &&
+			reordered[runStart - 1]?.role === "extension-activity" &&
+			reordered[runStart - 1]?.toolCallId === undefined
+		) {
+			runStart -= 1;
+		}
+		if (runStart === userIndex) continue;
+		const [userMessage] = reordered.splice(userIndex, 1);
+		// SAFETY: `userIndex` was just read from this same array at a valid
+		// index (the loop guard above), so `splice(userIndex, 1)` always
+		// removes exactly one element.
+		reordered.splice(runStart, 0, userMessage as TranscriptMessageInput);
+	}
+	return reordered;
+}
+
+/**
  * Renders `pi.registerMessageRenderer`/`registerEntryRenderer` output for one
  * `customType`, supplied by the caller (`RuntimeController`) already bound to
  * the live `session.extensionRunner`, the requesting client's terminal width
@@ -204,17 +272,28 @@ export type TranscriptCustomRenderers = {
 };
 
 export class TranscriptProjector {
+	/**
+	 * `openActivityIds`: see `projectExtensionActivities`'s doc comment. The
+	 * caller (`RuntimeController.loadCurrentSessionMessages`) passes this
+	 * runtime's live tracker's `listOpen()` ids so a still-running activity
+	 * doesn't read "Stopped" for the instant between a reload's projection
+	 * and the tracker's next live patch.
+	 */
 	load(
 		runtime: AgentSessionRuntime,
 		state: ProjectedTranscript,
 		renderers?: TranscriptCustomRenderers,
+		openActivityIds?: ReadonlySet<string>,
 	): void {
 		const pending = new Map<string, { name: string; args: ToolArguments }>();
 		const entries = runtime.session.sessionManager.getBranch();
 		const misses = runtime.session.settingsManager?.getShowCacheMissNotices()
 			? collectCacheMisses(entries, runtime.session.modelRuntime)
 			: undefined;
-		const activityMessagesByEntryIndex = projectExtensionActivities(entries);
+		const activityMessagesByEntryIndex = projectExtensionActivities(
+			entries,
+			openActivityIds,
+		);
 		const projected: TranscriptMessageInput[] = [];
 		entries.forEach((entry: SessionEntry, index) => {
 			const miss =
@@ -232,7 +311,9 @@ export class TranscriptProjector {
 			const activityMessages = activityMessagesByEntryIndex.get(index);
 			if (activityMessages) projected.push(...activityMessages);
 		});
-		state.replaceMessages(foldAnchoredActivities(projected));
+		state.replaceMessages(
+			anchorActivitiesAfterTheirUserTurn(foldAnchoredActivities(projected)),
+		);
 	}
 
 	entry(

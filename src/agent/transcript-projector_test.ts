@@ -457,3 +457,139 @@ test("TranscriptProjector.load() keeps an anchored activity as a standalone card
 	assertEquals(projected[0]?.role, "extension-activity");
 	assertEquals(projected[0]?.toolCallId, "no-such-call");
 });
+
+function userEntry(id: string, text: string) {
+	return sessionEntryStub({
+		id,
+		type: "message",
+		message: { role: "user", content: text, timestamp: 1 },
+	});
+}
+
+test("TranscriptProjector.load() moves a before_agent_start card from before its own user prompt to after it", () => {
+	const activity = activityFixture({
+		state: "done",
+		finishedAt: 50,
+		summary: "A red square.",
+	});
+	const entries = [
+		// The SDK's own event order: the hook (and so its card's own entry)
+		// lands on the branch before the user message it actually describes.
+		sessionEntryStub({
+			type: "custom",
+			customType: "pi-ui.extension-activity",
+			data: encodeActivityEntry("finish", activity),
+		}),
+		userEntry("u1", "describe this image"),
+	];
+	const runtime = agentSessionRuntimeStub({
+		session: { sessionManager: sessionManagerStub({ getBranch: () => entries }) },
+	});
+	const { transcript, messages } = capturingTranscript();
+	new TranscriptProjector().load(runtime, transcript);
+
+	const roles = messages().map((message) => message.role);
+	assertEquals(roles, ["user", "extension-activity"]);
+});
+
+test("TranscriptProjector.load() moves a whole run of leading cards past their shared user prompt, keeping their own order", () => {
+	const first = activityFixture({ id: "xa-1", state: "done", finishedAt: 10 });
+	const second = activityFixture({ id: "xa-2", state: "done", finishedAt: 20 });
+	const entries = [
+		sessionEntryStub({
+			type: "custom",
+			customType: "pi-ui.extension-activity",
+			data: encodeActivityEntry("finish", first),
+		}),
+		sessionEntryStub({
+			type: "custom",
+			customType: "pi-ui.extension-activity",
+			data: encodeActivityEntry("finish", second),
+		}),
+		userEntry("u1", "go"),
+	];
+	const runtime = agentSessionRuntimeStub({
+		session: { sessionManager: sessionManagerStub({ getBranch: () => entries }) },
+	});
+	const { transcript, messages } = capturingTranscript();
+	new TranscriptProjector().load(runtime, transcript);
+
+	const projected = messages();
+	assertEquals(
+		projected.map((message) => message.role),
+		["user", "extension-activity", "extension-activity"],
+	);
+	assertEquals(
+		projected
+			.filter((message) => message.role === "extension-activity")
+			.map((message) => message.activities?.[0]?.id),
+		["xa-1", "xa-2"],
+	);
+});
+
+test("TranscriptProjector.load() leaves an earlier turn's card where it is — only a run immediately before the next prompt moves", () => {
+	const priorTurnCard = activityFixture({ state: "done", finishedAt: 10 });
+	const entries = [
+		userEntry("u0", "first turn"),
+		sessionEntryStub({
+			type: "custom",
+			customType: "pi-ui.extension-activity",
+			data: encodeActivityEntry("finish", priorTurnCard),
+		}),
+		// An assistant reply sits between the card above and the next prompt,
+		// so that card is NOT a candidate to move — it already reads correctly.
+		sessionEntryStub({
+			type: "message",
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "On it." }],
+				stopReason: "endTurn",
+				timestamp: 2,
+			},
+		}),
+		userEntry("u1", "second turn"),
+	];
+	const runtime = agentSessionRuntimeStub({
+		session: { sessionManager: sessionManagerStub({ getBranch: () => entries }) },
+	});
+	const { transcript, messages } = capturingTranscript();
+	new TranscriptProjector().load(runtime, transcript);
+
+	assertEquals(
+		messages().map((message) => message.role),
+		["user", "extension-activity", "assistant", "user"],
+	);
+});
+
+test("TranscriptProjector.load() never moves an anchored (tool-folded) card — it isn't a standalone entry any more", () => {
+	const activity = activityFixture({
+		state: "done",
+		finishedAt: 50,
+		anchor: { toolCallId: "call-1" },
+	});
+	const entries = [
+		sessionEntryStub({
+			type: "custom",
+			customType: "pi-ui.extension-activity",
+			data: encodeActivityEntry("finish", activity),
+		}),
+		toolCallEntry("assistant", "call-1"),
+		toolResultEntry("result", "call-1"),
+		userEntry("u1", "next turn"),
+	];
+	const runtime = agentSessionRuntimeStub({
+		session: { sessionManager: sessionManagerStub({ getBranch: () => entries }) },
+	});
+	const { transcript, messages } = capturingTranscript();
+	new TranscriptProjector().load(runtime, transcript);
+
+	// Folded into the tool card, so there is no standalone "extension-activity"
+	// entry left to move — the tool card (carrying the step) stays put, ahead
+	// of the next prompt, exactly as it was projected.
+	const projected = messages();
+	assertEquals(
+		projected.map((message) => message.role),
+		["tool", "user"],
+	);
+	assertEquals(projected[0]?.activities?.[0]?.id, activity.id);
+});

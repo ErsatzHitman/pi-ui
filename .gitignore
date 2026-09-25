@@ -15,3 +15,4 @@ static/build/
 
 /scratch/
 /.playwright-cli/
+/.cdp-shots/

@@ -431,6 +431,16 @@ async function loadEdgeFixture(): Promise<Extension> {
 	return extension;
 }
 
+/** A distinct, opaque `ExtensionContext["sessionManager"]` stand-in for
+ * `instrumentExtensions`'s `sessionKey` — only ever compared by reference, so
+ * a real `ReadonlySessionManager`'s shape is irrelevant here. */
+function fakeSessionManager(id: string): ExtensionContext["sessionManager"] {
+	// SAFETY: `sessionKey`/`ctx.sessionManager` are only ever compared by
+	// reference (`Map` key identity) in `instrument.ts`, never called into —
+	// a tagged opaque object is a faithful, distinct stand-in.
+	return { id } as unknown as ExtensionContext["sessionManager"];
+}
+
 function recordingUiCtx(calls: unknown[]): ExtensionContext {
 	const ui = {
 		notify(...args: unknown[]) {
@@ -562,4 +572,115 @@ test("a tool definition shared by two instrumented runtimes is wrapped once, nev
 	assertEquals(result.content[0], { type: "text", text: "definition-this" });
 	const starts = [...firstLog, ...secondLog].filter((entry) => entry.event === "start");
 	assertEquals(starts.length, 1);
+});
+
+test("a tool definition shared by two runtimes attributes each call to whichever runtime's own ctx.sessionManager actually invoked it, not whichever instrumented it last", async () => {
+	const extension = await loadEdgeFixture();
+	const { reporter: firstReporter, log: firstLog } = recordingReporter();
+	const { reporter: secondReporter, log: secondLog } = recordingReporter();
+	const firstSessionManager = fakeSessionManager("first");
+	const secondSessionManager = fakeSessionManager("second");
+	instrumentExtensions(
+		[extension],
+		firstReporter,
+		resolveExtensionRef,
+		() => 0,
+		firstSessionManager,
+	);
+	// A second runtime's `Extension` object whose factory registered the same
+	// module-level definition (the SDK's factory cache makes this possible),
+	// instrumented *after* the first — the scenario that used to make every
+	// future call, from either runtime, report to this second one.
+	const secondRuntimeExtension: Extension = {
+		...extension,
+		handlers: new Map(),
+		tools: new Map(extension.tools),
+		commands: new Map(),
+		shortcuts: new Map(),
+	};
+	instrumentExtensions(
+		[secondRuntimeExtension],
+		secondReporter,
+		resolveExtensionRef,
+		() => 0,
+		secondSessionManager,
+	);
+	const definition = secondRuntimeExtension.tools.get("shared_tool")?.definition;
+	assertExists(definition);
+
+	const ctxFor = (
+		sessionManager: ExtensionContext["sessionManager"],
+	): ExtensionContext =>
+		({ ...recordingUiCtx([]), sessionManager }) as ExtensionContext;
+
+	// The FIRST runtime's own call, made through its own ctx, must still
+	// report to the first runtime's own reporter even though the second
+	// runtime instrumented this shared definition more recently.
+	await definition.execute(
+		"call-1",
+		{},
+		undefined,
+		undefined,
+		ctxFor(firstSessionManager),
+	);
+	await definition.execute(
+		"call-2",
+		{},
+		undefined,
+		undefined,
+		ctxFor(secondSessionManager),
+	);
+
+	assertEquals(
+		firstLog
+			.filter((entry) => entry.event === "start")
+			.map((entry) => entry.scope.toolCallId),
+		["call-1"],
+	);
+	assertEquals(
+		secondLog
+			.filter((entry) => entry.event === "start")
+			.map((entry) => entry.scope.toolCallId),
+		["call-2"],
+	);
+});
+
+test("a shared tool definition's call with an unrecognized ctx.sessionManager falls back to whichever runtime instrumented it most recently, instead of throwing", async () => {
+	const extension = await loadEdgeFixture();
+	const { reporter: firstReporter, log: firstLog } = recordingReporter();
+	const { reporter: secondReporter, log: secondLog } = recordingReporter();
+	instrumentExtensions(
+		[extension],
+		firstReporter,
+		resolveExtensionRef,
+		() => 0,
+		fakeSessionManager("first"),
+	);
+	const secondRuntimeExtension: Extension = {
+		...extension,
+		handlers: new Map(),
+		tools: new Map(extension.tools),
+		commands: new Map(),
+		shortcuts: new Map(),
+	};
+	instrumentExtensions(
+		[secondRuntimeExtension],
+		secondReporter,
+		resolveExtensionRef,
+		() => 0,
+		fakeSessionManager("second"),
+	);
+	const definition = secondRuntimeExtension.tools.get("shared_tool")?.definition;
+	assertExists(definition);
+
+	await definition.execute(
+		"call-1",
+		{},
+		undefined,
+		undefined,
+		recordingUiCtx([]), // no `sessionManager` at all — a plain test-fixture ctx
+	);
+
+	assertEquals(firstLog.filter((entry) => entry.event === "start").length, 0);
+	assertEquals(secondLog.filter((entry) => entry.event === "start").length, 1);
 });

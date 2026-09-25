@@ -111,3 +111,25 @@ test("an already-terminal activity that only saw a start entry is left as-is", (
 	]);
 	assertEquals(rebuilt[0]!.activity, cancelled);
 });
+
+test("a start-only activity still open in the live tracker stays working, not Stopped", () => {
+	const started = activity({ id: "xa-live", state: "working", workingAt: 10 });
+	const rebuilt = rebuildActivitiesFromEntries(
+		[encodeActivityEntry("start", started)],
+		new Set(["xa-live"]),
+	);
+	assertEquals(rebuilt[0]!.activity, started);
+	assertEquals(rebuilt[0]!.activity.state, "working");
+});
+
+test("openActivityIds only spares the ids it lists — a different start-only activity is still interrupted", () => {
+	const live = activity({ id: "xa-live", state: "working" });
+	const dead = activity({ id: "xa-dead", state: "working" });
+	const rebuilt = rebuildActivitiesFromEntries(
+		[encodeActivityEntry("start", live), encodeActivityEntry("start", dead)],
+		new Set(["xa-live"]),
+	);
+	const byId = new Map(rebuilt.map((r) => [r.activity.id, r.activity]));
+	assertEquals(byId.get("xa-live")!.state, "working");
+	assertEquals(byId.get("xa-dead")!.state, "cancelled");
+});
