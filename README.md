@@ -218,7 +218,8 @@ all options with their defaults:
 		"focus-sessions": "alt s",
 		"focus-workspace-files": "alt f",
 		"focus-workspace-changes": "alt g",
-		"focus-workspace-editor": "alt e"
+		"focus-workspace-editor": "alt e",
+		"voice-input": "alt v"
 	},
 	"minimalMode": false,
 	"sessionSidebar": {
@@ -227,9 +228,20 @@ all options with their defaults:
 	},
 	"toolOutputHidden": false,
 	"toolbarHidden": false,
-	"updateCheck": false
+	"updateCheck": false,
+	"voice": {
+		"enabled": true,
+		"model": "whisper-large-v3-turbo",
+		"language": "",
+		"prompt": "",
+		"maxSeconds": 300,
+		"baseUrl": "https://api.groq.com/openai/v1"
+	}
 }
 ```
+
+voice input (the mic in the prompt bar) needs a Groq key on the server and an HTTPS or
+localhost origin; see [docs/voice.md](docs/voice.md).
 
 ## keybinds
 
@@ -242,6 +254,7 @@ all options with their defaults:
 | <kbd>alt</kbd> <kbd>g</kbd>                                | focus git changes           |
 | <kbd>alt</kbd> <kbd>e</kbd>                                | focus file or diff          |
 | <kbd>alt</kbd> <kbd>s</kbd>                                | focus sessions              |
+| <kbd>alt</kbd> <kbd>v</kbd>                                | start / finish voice input  |
 | <kbd>j</kbd> / <kbd>k</kbd> or <kbd>↑</kbd> / <kbd>↓</kbd> | move or scroll focused pane |
 | <kbd>gg</kbd> / <kbd>G</kbd>                               | top / bottom                |
 | <kbd>ctrl/⌘</kbd> <kbd>o</kbd>                             | new session                 |

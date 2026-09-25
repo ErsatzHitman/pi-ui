@@ -199,6 +199,31 @@ function originMatchesHost(request: Request): boolean {
 	return !!host && !!source && host === source;
 }
 
+/**
+ * True when a request carries a browser signal that it came from another site — spending
+ * this server's resources (Groq credit, for `/voice/transcribe`) without the user ever
+ * meaning to. Unlike `originMatchesHost`'s cookie-CSRF check, this must also hold with no
+ * auth token configured (the no-auth localhost default), where there is no cookie or
+ * token to forge in the first place — another site's page can simply `fetch()` a mutating
+ * route directly. `Sec-Fetch-Site` (sent by every Baseline-newly-available browser on
+ * every request, including same-origin ones) is authoritative when present. Otherwise this
+ * falls back to a present `Origin`/`Referer` against `Host`: a cross-origin `fetch` always
+ * sends one of those, so their absence means a non-browser caller (curl, a script, a CLI)
+ * rather than a browser tab on another site — that caller already has the same
+ * unauthenticated access to every other route in no-auth mode, which is a wider gap than
+ * one route can close.
+ */
+export function isCrossSiteBrowserRequest(request: Request): boolean {
+	const secFetchSite = request.headers.get("sec-fetch-site");
+	if (secFetchSite) return secFetchSite !== "same-origin" && secFetchSite !== "none";
+	const host = (
+		request.headers.get("x-forwarded-host") ?? request.headers.get("host")
+	)?.toLowerCase();
+	const source = originHost(request);
+	if (!source) return false;
+	return !host || host !== source;
+}
+
 export type AuthCheck =
 	| { ok: true; setCookie?: string; redirect?: string }
 	| { ok: false; response: Response };

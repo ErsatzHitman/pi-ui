@@ -49,6 +49,10 @@ export type AppModel = {
 	name: string;
 	configured: boolean;
 	scoped: boolean;
+	/** The model's context window, in tokens, when the provider's catalog reports one. */
+	contextWindow?: number;
+	/** Whether the model supports extended thinking/reasoning. */
+	reasoning?: boolean;
 };
 export type AppThinkingLevel =
 	| "off"

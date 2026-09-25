@@ -6,7 +6,7 @@ import {
 	attachmentFileKind,
 } from "./attachment-file.js";
 import { closePickers } from "./pickers.js";
-import { promptInput } from "./prompt.js";
+import { placeNoticeAbovePromptRow, promptInput } from "./prompt.js";
 
 const FILE_REFERENCE_TYPES = [
 	"text/uri-list",
@@ -308,7 +308,7 @@ function showTransferError(message) {
 		error.className = "file-transfer-error";
 		error.setAttribute("role", "alert");
 		error.setAttribute("aria-live", "polite");
-		input.before(error);
+		placeNoticeAbovePromptRow(error, input);
 	}
 	error.textContent = message;
 	error.hidden = !message;

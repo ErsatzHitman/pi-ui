@@ -13,6 +13,12 @@ import {
 	liveWorkspaceTabs,
 } from "../src/live-workspace-types.ts";
 import {
+	defaultVoiceConfig,
+	voiceMaxSecondsMax,
+	voiceMaxSecondsMin,
+	voicePromptMaxLength,
+} from "../src/server/voice/voice-config.ts";
+import {
 	sessionSidebarWidthDefault,
 	sessionSidebarWidthMax,
 	sessionSidebarWidthMin,
@@ -298,6 +304,61 @@ const schema = Type.Object(
 				description:
 					"Check npm for a newer upstream @hyperpuncher/pi-ui release and show an update notice. Off by default: upgrading from that notice replaces this build with upstream's.",
 			}),
+		),
+		voice: Type.Optional(
+			Type.Object(
+				{
+					enabled: Type.Optional(
+						Type.Boolean({
+							default: defaultVoiceConfig.enabled,
+							description:
+								"Show the voice input (mic) button in the prompt bar.",
+						}),
+					),
+					model: Type.Optional(
+						Type.String({
+							minLength: 1,
+							default: defaultVoiceConfig.model,
+							description: "Groq speech-to-text model.",
+						}),
+					),
+					language: Type.Optional(
+						Type.String({
+							pattern: "^([a-z]{2,3}(-[A-Za-z]+)?)?$",
+							default: defaultVoiceConfig.language,
+							description: "ISO-639-1 language code; empty = auto-detect.",
+						}),
+					),
+					prompt: Type.Optional(
+						Type.String({
+							maxLength: voicePromptMaxLength,
+							default: defaultVoiceConfig.prompt,
+							description:
+								"Vocabulary/spelling hint sent with each transcription.",
+						}),
+					),
+					maxSeconds: Type.Optional(
+						Type.Integer({
+							minimum: voiceMaxSecondsMin,
+							maximum: voiceMaxSecondsMax,
+							default: defaultVoiceConfig.maxSeconds,
+							description:
+								"Longest recording; voice input finishes automatically at this length.",
+						}),
+					),
+					baseUrl: Type.Optional(
+						Type.String({
+							format: "uri",
+							default: defaultVoiceConfig.baseUrl,
+							description: "OpenAI-compatible transcription API base URL.",
+						}),
+					),
+				},
+				{
+					description: "Voice input (speech-to-text) settings.",
+					additionalProperties: false,
+				},
+			),
 		),
 	},
 	{

@@ -39,6 +39,22 @@ function preferred(items) {
 }
 
 /**
+ * Which pane `reset()` should land the popover on. Bug (fix pass 1, item 6): with a
+ * single provider (`renderModelPicker`, prompt-pickers.tsx, skips the whole providers
+ * pane — `providers.length > 1` — so it never renders any `[role="menuitem"][data-provider]`
+ * rows) and no current model yet, the old `hasCurrent ? "models" : "providers"` always
+ * chose "providers" in that case: `reset()` then asked for `visible(providerRows(command))`,
+ * an always-empty list since the pane doesn't exist, so `preferred([])` was `undefined` and
+ * nothing became active — a bare Enter did nothing. Falling back to "models" whenever there
+ * is no providers pane to land on (regardless of `hasCurrent`) fixes it: `reset()`'s own
+ * `preferred(visible(modelRowsFor(...)))` then picks the first model row.
+ */
+export function resolveActivePane(hasCurrent, hasProvidersPane) {
+	if (!hasProvidersPane) return "models";
+	return hasCurrent ? "models" : "providers";
+}
+
+/**
  * Shows only the active provider's group of models. While searching (`data-searching`)
  * every group with a match is shown instead — see `model-search.js`, which owns
  * `data-searching` and calls this once a cleared query hands narrowing back to the
@@ -131,7 +147,10 @@ export function reset(popover) {
 	command.dataset.searching = "false";
 	const { provider, hasCurrent } = currentProvider(command);
 	command.dataset.activeProvider = provider;
-	command.dataset.activePane = hasCurrent ? "models" : "providers";
+	command.dataset.activePane = resolveActivePane(
+		hasCurrent,
+		providerRows(command).length > 0,
+	);
 	markCurrentProviderRow(command);
 	applyActiveProvider(command);
 	const pane = command.dataset.activePane === "providers" ? "providers" : "models";
