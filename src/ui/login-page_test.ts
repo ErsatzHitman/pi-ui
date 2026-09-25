@@ -76,11 +76,45 @@ test("the login token input is at least 16px so iOS Safari doesn't zoom in on fo
 	assertStringIncludes(html, "font-size: 16px");
 });
 
-test("the login token input reaches a real 44px touch target on coarse pointers, matching the button", () => {
+test("the login inputs reach a real 44px touch target on coarse pointers, matching the button", () => {
 	const html = renderLoginPage({ next: "/", loginPath: "/session/login" });
 	assertStringIncludes(html, "@media (pointer: coarse)");
 	const coarseIndex = html.indexOf("@media (pointer: coarse)");
 	const afterCoarse = html.slice(coarseIndex, coarseIndex + 300);
-	assertStringIncludes(afterCoarse, "#login-token");
+	assertStringIncludes(afterCoarse, ".login-card .field > input");
 	assertStringIncludes(afterCoarse, "2.75rem");
+});
+
+test("the default login page asks for the access token", () => {
+	const html = renderLoginPage({ next: "/", loginPath: "/session/login" });
+	assertStringIncludes(html, 'name="token"');
+	assertStringExcludes(html, 'name="username"');
+	assertStringExcludes(html, 'name="password"');
+});
+
+test("password mode asks for a username and password instead of the token", () => {
+	const html = renderLoginPage({
+		next: "/",
+		loginPath: "/session/login",
+		mode: "password",
+	});
+	assertStringIncludes(html, 'name="username"');
+	assertStringIncludes(html, 'autocomplete="username"');
+	assertStringIncludes(html, 'name="password"');
+	assertStringIncludes(html, 'autocomplete="current-password"');
+	assertStringExcludes(html, 'name="token"');
+	assertStringIncludes(html, "Sign in");
+});
+
+test("password mode refills an escaped username after a failed attempt", () => {
+	const html = renderLoginPage({
+		next: "/",
+		loginPath: "/session/login",
+		mode: "password",
+		username: '"><b>x',
+		error: "That username or password isn't correct.",
+	});
+	// Attribute values only need their quote escaped to stay inside `value="..."`.
+	assertStringExcludes(html, 'value=""><b>x');
+	assertStringIncludes(html, 'value="&#34;><b>x"');
 });

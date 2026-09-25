@@ -49,6 +49,11 @@ test("isPiCliPassthrough: `service`/`autostart` stay pi-ui subcommands, not pass
 	assertFalse(isPiCliPassthrough(["autostart", "disable"]));
 });
 
+test("isPiCliPassthrough: `login` stays a pi-ui subcommand, not passthrough", () => {
+	assertFalse(isPiCliPassthrough(["login", "set", "akshat"]));
+	assertFalse(isPiCliPassthrough(["login", "status"]));
+});
+
 test("isPiCliPassthrough: exactly the argv piInvocation() builds for a sub-agent is passthrough", () => {
 	assert(
 		isPiCliPassthrough([

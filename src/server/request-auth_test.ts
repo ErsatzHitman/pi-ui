@@ -474,3 +474,15 @@ test("every icon the PWA manifest names exists and is served with no token (the 
 		assertEquals(result.ok, true);
 	}
 });
+
+test("an unauthenticated navigation gets the username/password form once a login is saved", async () => {
+	const result = checkAuthToken(navigationRequest("http://localhost/"), token, {
+		loginMode: () => "password",
+	});
+	assertEquals(result.ok, false);
+	if (!result.ok) {
+		const html = await result.response.text();
+		assertStringIncludes(html, 'name="username"');
+		assertStringIncludes(html, 'name="password"');
+	}
+});

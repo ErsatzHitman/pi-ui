@@ -177,6 +177,7 @@ function parseServerOptionsCore(
 
 export const serverUsage = `usage: pi-ui [options]
        pi-ui service install|uninstall [options] [--headless]
+       pi-ui login set <username>|remove|status
 
 options:
       --host <hostname>     listen hostname (default: ${defaultServerHostname}; env: PI_UI_HOST)
@@ -185,7 +186,9 @@ options:
                             Strongly recommended with --host set to anything other than
                             127.0.0.1/::1/localhost, since that exposes pi-ui to your whole
                             LAN. Open http://<host>:<port>/?token=<token> once per browser;
-                            pi-ui remembers it in a cookie after that.
+                            pi-ui remembers it in a cookie after that. With a login saved by
+                            "pi-ui login set <username>", the sign-in page asks for that
+                            username and password instead.
       --remote              serve clients on other machines, e.g. behind a TLS reverse
                             proxy on this host (env: PI_UI_REMOTE=1). Implied by any
                             --host other than 127.0.0.1/::1/localhost.

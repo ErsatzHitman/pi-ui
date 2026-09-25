@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 
+import { runLoginCommand } from "./login-command.ts";
 import { importLoginShellEnvironment } from "./login-shell-environment.ts";
 import { isPiCliPassthrough, runPiCli } from "./pi-cli-passthrough.ts";
 import { isRemoteMode, resolveRemoteMode, setRemoteMode } from "./remote-mode.ts";
@@ -20,6 +21,7 @@ import { AuthRateLimiter } from "./server/auth-rate-limit.ts";
 import { withAuthToken, type AuthCheckDeps } from "./server/request-auth.ts";
 import { endpoints } from "./server/routes/endpoints.ts";
 import { createSessionLoginRoute } from "./server/session-login-route.ts";
+import { loginCredentialsPath } from "./utils/app-dirs.ts";
 import { expandHomePath, setDefaultWorkspacePath } from "./utils/workspace.ts";
 import { isVersionRequest, version } from "./version.ts";
 
@@ -201,6 +203,8 @@ async function main(): Promise<void> {
 		console.log(version);
 	} else if (isPiCliPassthrough(args)) {
 		await runPiCli(args);
+	} else if (args[0] === "login") {
+		await runLoginCommand(args.slice(1));
 	} else if (args[0] === "service" || args[0] === "autostart") {
 		const installAction = args[0] === "service" ? "install" : "enable";
 		const uninstallAction = args[0] === "service" ? "uninstall" : "disable";
@@ -255,21 +259,30 @@ async function main(): Promise<void> {
 			}
 			const { disposeApp, fallback, routes } = await import("./server/lazy-app.ts");
 			const rateLimiter = new AuthRateLimiter();
+			const credentialsPath = loginCredentialsPath();
+			const loginMode = () => (existsSync(credentialsPath) ? "password" : "token");
 			const server = Bun.serve({
 				hostname: options.hostname,
 				port: options.port,
 				idleTimeout: 0,
 				routes: options.authToken
 					? {
-							...gateRoutes(routes, options.authToken, { rateLimiter }),
+							...gateRoutes(routes, options.authToken, {
+								rateLimiter,
+								loginMode,
+							}),
 							[endpoints.sessionLogin]: createSessionLoginRoute(
 								options.authToken,
 								rateLimiter,
+								credentialsPath,
 							),
 						}
 					: routes,
 				fetch: options.authToken
-					? withAuthToken(fallback, options.authToken, { rateLimiter })
+					? withAuthToken(fallback, options.authToken, {
+							rateLimiter,
+							loginMode,
+						})
 					: fallback,
 			});
 			const stop = createShutdown(server, disposeApp);
