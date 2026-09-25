@@ -2,9 +2,15 @@
 // removes sidebar rows, moved rows glide to their new slot (FLIP), new rows settle in and
 // removed rows leave through a ghost, instead of teleporting between two frames.
 //
-// Morph safety: rows are id-keyed (`session-sidebar-row-<path>`), so a reorder reuses nodes
-// and only genuinely new or removed ids animate. `aria-disabled` churn on every commit is an
-// attribute change, which this observer never sees.
+// Nothing draws over anything else (round 4): date-group headings FLIP with the rows, a row
+// that leapfrogs others (moved to the top) rides above them on the pane surface, and an item
+// entering a slot a displaced neighbour still covers is revealed by a clip that tracks that
+// neighbour's glide, so the list visibly makes room instead of printing text on text.
+//
+// Morph safety: rows and headings are id-keyed (`session-sidebar-row-<path>`,
+// `session-sidebar-<day>`), so a reorder reuses nodes and only genuinely new or removed ids
+// animate. `aria-disabled` churn on every commit is an attribute change, which this observer
+// never sees.
 import {
 	duration,
 	easing,
@@ -14,7 +20,8 @@ import {
 	staggerStepMs,
 } from "./motion.js";
 
-const rowSelector = 'li[id^="session-sidebar-row-"]';
+/** Every id-keyed list item that can move: session rows and date-group headings. */
+const rowSelector = 'li[id^="session-sidebar-row-"], .session-group-heading[id]';
 const flipId = "list-flip";
 /** B-X3: a delete-pending row rests at this opacity (session-sidebar.css `[data-deleting]`). */
 const deletingOpacity = 0.45;
@@ -47,6 +54,88 @@ export function diffRows(previous, next) {
  */
 export function flipEasing(removedCount) {
 	return removedCount > 0 ? easing.out : easing.inOut;
+}
+
+/**
+ * Pure (unit-tested): ids whose glide crosses another item's (their relative order flipped).
+ * Of each crossing pair the farther traveller is lifted, so a row moved to the top slides
+ * over the rows making room for it instead of through them.
+ */
+export function liftedRows(previous, next) {
+	const lifted = new Set();
+	const shared = [];
+	for (const [id, rect] of next) {
+		const old = previous.get(id);
+		if (old !== undefined) shared.push({ id, from: old.top, to: rect.top });
+	}
+	for (const [index, a] of shared.entries()) {
+		for (let other = index + 1; other < shared.length; other++) {
+			const b = shared[other];
+			if ((a.from - b.from) * (a.to - b.to) >= 0) continue;
+			const farther =
+				Math.abs(a.to - a.from) >= Math.abs(b.to - b.from) ? a.id : b.id;
+			lifted.add(farther);
+		}
+	}
+	return lifted;
+}
+
+function round(value) {
+	return Math.round(value * 100) / 100;
+}
+
+/**
+ * Pure (unit-tested): clip keyframes that keep a static item (an entering row or heading in its
+ * final slot, or a removed item's ghost in its old one) to the part of its slot no gliding
+ * neighbour covers. `slot` is `{ top, height }`; each occupant's drawn top glides `from` → `to`
+ * (with its `height`) over the FLIP. Offsets are FLIP *progress*, so the caller runs these on
+ * the FLIP's own duration and easing: every bound is then linear in the offset and the
+ * sampled keyframes can only clip more than needed, never less. A neighbour on the slot's
+ * lower side (leaving downward, or arriving from below) bounds the visible bottom; one on its
+ * upper side bounds the visible top. Opacity follows the visible fraction. Returns undefined
+ * when no occupant ever covers the slot, so a plain entry or fade is safe.
+ */
+export function clearFrames(slot, occupants, steps = 12) {
+	const bottom = slot.top + slot.height;
+	const below = occupants.filter(
+		(o) =>
+			(o.to > o.from && o.to >= bottom - 0.5) ||
+			(o.from > o.to && o.from >= bottom - 0.5),
+	);
+	const above = occupants.filter(
+		(o) =>
+			(o.to < o.from && o.to + o.height <= slot.top + 0.5) ||
+			(o.from < o.to && o.from + o.height <= slot.top + 0.5),
+	);
+	const frames = [];
+	let covered = false;
+	for (let step = 0; step <= steps; step++) {
+		const offset = step / steps;
+		const at = (o) => o.from + (o.to - o.from) * offset;
+		let visibleTop = slot.top;
+		let visibleBottom = bottom;
+		for (const o of below) visibleBottom = Math.min(visibleBottom, at(o));
+		for (const o of above) visibleTop = Math.max(visibleTop, at(o) + o.height);
+		const topInset = Math.min(slot.height, Math.max(0, visibleTop - slot.top));
+		const visible = Math.max(0, visibleBottom - slot.top - topInset);
+		if (visible < slot.height - 0.5) covered = true;
+		frames.push({
+			offset,
+			clipPath: `inset(${round(topInset)}px 0 ${round(slot.height - topInset - visible)}px 0)`,
+			opacity: round(visible / slot.height),
+		});
+	}
+	return covered ? frames : undefined;
+}
+
+/** The opaque surface the list sits on (the sidebar pane), to back a lifted row. */
+function surfaceBehind(element) {
+	for (let node = element; node instanceof Element; node = node.parentElement) {
+		const color = getComputedStyle(node).backgroundColor;
+		if (color && color !== "transparent" && !/\/\s*0\)$|,\s*0\)$/.test(color))
+			return color;
+	}
+	return undefined;
 }
 
 /**
@@ -126,13 +215,17 @@ export function bindSessionListMotion() {
 		const { moved, added, removed } = diffRows(cache, next);
 		const reduce = reducedMotion();
 		const origin = list.getBoundingClientRect();
+		const flipCurve = flipEasing(removed.length);
+		/** Every glide this change starts, as drawn: what entering items and ghosts yield to. */
+		const occupants = [];
 
 		if (!reduce) {
-			const flipCurve = flipEasing(removed.length);
+			const lifted = liftedRows(cache, next);
+			const surface = lifted.size > 0 ? surfaceBehind(list) : undefined;
 			for (const { id, dy } of moved) {
 				const row = document.getElementById(id);
-				const layoutTop = next.get(id)?.top;
-				if (!row || layoutTop === undefined) continue;
+				const layout = next.get(id);
+				if (!row || layout === undefined) continue;
 				// Retarget: a row still gliding from the last change starts from where it is drawn
 				// (its old slot plus the running offset), never from its old slot.
 				let running = 0;
@@ -140,13 +233,27 @@ export function bindSessionListMotion() {
 					.getAnimations()
 					.filter((animation) => animation.id === flipId);
 				if (flips.length > 0) {
-					running = row.getBoundingClientRect().top - origin.top - layoutTop;
+					running = row.getBoundingClientRect().top - origin.top - layout.top;
 					for (const animation of flips) animation.cancel();
 				}
 				const offset = dy + running;
 				if (Math.abs(offset) <= 0.5) continue;
+				occupants.push({
+					from: layout.top + offset,
+					to: layout.top,
+					height: layout.height,
+				});
+				// A leapfrogging row rides above the rows it crosses, backed by the pane surface,
+				// so their text never shows through its own (2 clears the rows' z-index 1 content).
+				const lift =
+					lifted.has(id) && surface
+						? { zIndex: 2, backgroundColor: surface }
+						: {};
 				row.animate(
-					[{ transform: `translateY(${offset}px)` }, { transform: "none" }],
+					[
+						{ transform: `translateY(${offset}px)`, ...lift },
+						{ transform: "none", ...lift },
+					],
 					{
 						duration: duration.lg,
 						easing: flipCurve,
@@ -156,8 +263,19 @@ export function bindSessionListMotion() {
 			}
 		}
 
-		for (const [index, id] of added.entries()) {
-			document.getElementById(id)?.animate(
+		let plainIndex = 0;
+		for (const id of added) {
+			const item = document.getElementById(id);
+			const slot = next.get(id);
+			if (!item || !slot) continue;
+			// Entering a slot a displaced neighbour still covers: reveal only what it has vacated,
+			// on the FLIP's own clock (duration and curve), so the two never overlap.
+			const reveal = reduce ? undefined : clearFrames(slot, occupants);
+			if (reveal) {
+				item.animate(reveal, { duration: duration.lg, easing: flipCurve });
+				continue;
+			}
+			item.animate(
 				reduce
 					? [{ opacity: 0 }, { opacity: 1 }]
 					: [
@@ -167,10 +285,11 @@ export function bindSessionListMotion() {
 				{
 					duration: reduce ? duration.sm : duration.md,
 					easing: easing.out,
-					delay: Math.min(index, staggerCap - 1) * staggerStepMs,
+					delay: Math.min(plainIndex, staggerCap - 1) * staggerStepMs,
 					fill: "backwards",
 				},
 			);
+			plainIndex += 1;
 		}
 
 		if (removed.length > 0) {
@@ -182,7 +301,7 @@ export function bindSessionListMotion() {
 				const node = nodes.get(id);
 				const rect = cache.get(id);
 				if (!node || !rect) continue;
-				ghostExit(
+				const exit = ghostExit(
 					node,
 					{
 						left: origin.left + rect.left,
@@ -192,6 +311,16 @@ export function bindSessionListMotion() {
 					},
 					{ ...removedRowGhost(node, reduce), host },
 				);
+				// Neighbours closing the gap slide over the fading ghost: clip it back to the part
+				// they have not reached yet (clip only; the ghost keeps its own fade).
+				const cover = reduce ? undefined : clearFrames(rect, occupants);
+				const ghost = exit?.effect?.target;
+				if (cover && ghost instanceof Element) {
+					ghost.animate(
+						cover.map(({ offset, clipPath }) => ({ offset, clipPath })),
+						{ duration: duration.lg, easing: flipCurve, fill: "forwards" },
+					);
+				}
 			}
 		}
 		cache = next;

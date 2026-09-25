@@ -18,6 +18,14 @@ export function setPromptValue(value) {
 const placeholderHoldMs = duration.sm;
 /** The empty state waits this long at most for the send's user article before it fades. */
 const emptyStateHoldMs = 1500;
+/** How far the empty state's handoff exit is already into its fade when its first frame
+ * paints: about one frame, so it is under a third of its opacity at once (flow-critique
+ * first-message handoff). */
+export const handoffLeadMs = 16;
+/** The first user article's fade waits this long (messages.css, `transition-delay` on the
+ * session's first `.message-user[data-enter]`): the exit above is then all but done, so the
+ * heading is gone before the bubble is visible over it. Mirrored in messages.css. */
+export const handoffArticleDelayMs = 40;
 /** A live-appended user article (messages.tsx markEntering): the send has landed. */
 const userArrivalSelector = "#message-list > .message-user[data-enter]";
 
@@ -27,16 +35,15 @@ const userArrivalSelector = "#message-list > .message-user[data-enter]";
  * never held: it lifts and fades out over `duration.md` on every send (steers, queued and
  * slow sends too), so it can never sit over the settled composer or its placeholder. On the
  * first message the empty state bridges a slow send instead: it stays until the first
- * article lands (`emptyStateHoldMs` at most), then fades out as the article rises. A failed
- * send keeps it (file-transfer.js `pi-ui-prompt-send-failed`).
+ * article lands (`emptyStateHoldMs` at most), then hands off to it: gone within 80ms, before
+ * the article is legible. A failed send keeps it (file-transfer.js
+ * `pi-ui-prompt-send-failed`).
  */
 export function clearPromptForSend() {
 	const input = promptInput();
 	if (!input) return;
 	const text = input.value;
 	const reduce = reducedMotion();
-	const box = document.getElementById("prompt-box");
-	const boxBefore = box instanceof HTMLElement ? box.offsetHeight : undefined;
 	// Placed and the placeholder hidden before the value clears, so the placeholder never
 	// paints over the ghost; the ghost starts once the collapse is measured.
 	const ghost = text ? placePromptGhost(input) : undefined;
@@ -54,11 +61,11 @@ export function clearPromptForSend() {
 		lift.finished.then(remove, remove);
 		releasePlaceholder(input, lift);
 	}
-	// The composer's settled height, for the prompt spacer (message-scroll.js). Read
-	// before the clear, so it holds whether or not the collapse below tweens (reduced
-	// motion steps the whole difference at once).
-	if (boxBefore !== undefined)
-		setComposerSettle(boxBefore - (before - after), performance.now() + duration.md);
+	// The textarea's settled height, for the prompt spacer (message-scroll.js): while it
+	// collapses the spacer is sized as if it already had, and every other change of the
+	// composer (a queued steer easing in) is still tracked live. Under reduced motion the
+	// textarea steps, so there is nothing to discount.
+	setComposerSettle(after, performance.now() + duration.md);
 	if (!reduce && before - after > 1) {
 		input.animate([{ height: `${before}px` }, { height: `${after}px` }], {
 			duration: duration.md,
@@ -73,9 +80,12 @@ export function clearPromptForSend() {
  * until the send's first article lands (a one-shot observer on #messages' subtree, since
  * #message-list can be replaced), so a slow send never shows a blank transcript. That
  * morph removes the node, so it then exits as a ghost at its last painted rect
- * (tracked per frame: the composer's collapse moves it), fading out over `duration.sm`
- * while the article rises. After `emptyStateHoldMs` without an article it fades in place.
- * A failed send keeps it, or fades it back.
+ * (tracked per frame: the composer's collapse moves it). The two share the transcript's
+ * middle, so the exit is a handoff, not a crossfade: `duration.xs`, already `handoffLeadMs`
+ * in when it first paints, while the article's fade waits `handoffArticleDelayMs`, so the
+ * heading is gone before the bubble shows.
+ * After `emptyStateHoldMs` without an article it fades in place (`duration.sm`). A failed
+ * send keeps it, or fades it back.
  */
 export function holdEmptyStateForSend(reduce = reducedMotion()) {
 	const messages = document.getElementById("messages");
@@ -84,6 +94,7 @@ export function holdEmptyStateForSend(reduce = reducedMotion()) {
 	const seen = new Set(document.querySelectorAll(userArrivalSelector));
 	const lift = reduce ? "0" : "-0.25rem";
 	let rect = node.getBoundingClientRect();
+	const hidden = hiddenParts(node);
 	let fade;
 	let settled = false;
 	let raf = 0;
@@ -93,15 +104,16 @@ export function holdEmptyStateForSend(reduce = reducedMotion()) {
 		raf = requestAnimationFrame(track);
 	};
 	raf = requestAnimationFrame(track);
-	const fadeInPlace = () => {
-		if (!node.isConnected) return;
+	const fadeInPlace = (ms = duration.sm) => {
+		if (!node.isConnected) return undefined;
 		fade = node.animate(
 			[
 				{ opacity: 1, transform: "none" },
 				{ opacity: 0, transform: `translateY(${lift})` },
 			],
-			{ duration: duration.sm, easing: easing.out, fill: "forwards" },
+			{ duration: ms, easing: easing.out, fill: "forwards" },
 		);
+		return fade;
 	};
 	const observer = new MutationObserver(() => {
 		// Whatever lands first (an extension card before the user article) removes it.
@@ -136,8 +148,13 @@ export function holdEmptyStateForSend(reduce = reducedMotion()) {
 		stop();
 		document.removeEventListener("pi-ui-prompt-send-failed", failed);
 		document.removeEventListener("pi-ui-prompt-submit-finished", finished);
-		if (node.isConnected) fadeInPlace();
-		else ghostExit(node, rect, { translateY: lift, ms: duration.sm });
+		const exit = node.isConnected
+			? fadeInPlace(duration.xs)
+			: ghostExit(ghostSource(node, hidden), rect, {
+					translateY: lift,
+					ms: duration.xs,
+				});
+		if (exit) exit.currentTime = handoffLeadMs;
 	}
 	observer.observe(messages, { childList: true, subtree: true });
 	// No article yet (a very slow server): fade in place; its morph then removes an
@@ -148,6 +165,34 @@ export function holdEmptyStateForSend(reduce = reducedMotion()) {
 	}, emptyStateHoldMs);
 	document.addEventListener("pi-ui-prompt-send-failed", failed, { once: true });
 	document.addEventListener("pi-ui-prompt-submit-finished", finished, { once: true });
+}
+
+/**
+ * The indexes (in `querySelectorAll("*")` order) of `root`'s parts hidden by an attribute
+ * rule (`[data-keybind-hint]` under a narrow screen or with hints off): ghostExit strips
+ * `data-*` from its clone, which would show them and re-lay the ghost out, the heading
+ * jumping up by the hint's row. Read while `root` is still rendered.
+ */
+function hiddenParts(root) {
+	const parts = [...(root.querySelectorAll?.("*") ?? [])];
+	const hidden = [];
+	parts.forEach((part, index) => {
+		if (getComputedStyle(part).display === "none") hidden.push(index);
+	});
+	return hidden;
+}
+
+/**
+ * Pure (unit-tested): the node a ghost is cloned from, `root` itself when nothing was
+ * hidden, else a copy with those parts (hiddenParts) pinned hidden inline, which survives
+ * ghostExit's attribute strip, so the ghost is laid out exactly as it was painted.
+ */
+export function ghostSource(root, hidden) {
+	if (hidden.length === 0) return root;
+	const copy = root.cloneNode(true);
+	const parts = [...copy.querySelectorAll("*")];
+	for (const index of hidden) parts[index]?.style.setProperty("display", "none");
+	return copy;
 }
 
 /**

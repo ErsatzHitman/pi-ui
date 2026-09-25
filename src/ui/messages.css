@@ -813,6 +813,14 @@
 		/* Held 150ms so a fast first token never flashes the row in and straight back out. */
 		transition-delay: 150ms;
 	}
+
+	/* A session's first message takes over the empty state's place (prompt.js
+	   holdEmptyStateForSend): its fade waits out the empty state's 80ms handoff exit, so
+	   "What can I help with?" is gone before the bubble is visible over it (200ms + 40ms,
+	   inside the 250ms budget). */
+	#message-list > .message-user[data-enter]:nth-child(1 of .message) {
+		transition-delay: 40ms;
+	}
 	@starting-style {
 		#message-list > .message[data-enter],
 		#message-list + .message-pending[data-enter] {

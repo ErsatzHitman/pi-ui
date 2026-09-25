@@ -7,18 +7,22 @@ import {
 	bindMessageResize,
 	blockRevealTargets,
 	chaseStep,
+	composerLift,
 	enterFrom,
 	followBottom,
 	frameClampedStart,
 	hasPointerDragIntent,
 	holdFollow,
 	holdSpacerForSend,
+	insertionReveals,
+	insertionShifts,
 	markUnpinned,
 	nextSpacerHeight,
 	promptClearance,
 	quietTranscript,
 	releasedSpacerHeight,
 	retainedAnchorScrollTop,
+	rowGapUnfilled,
 	scrollBottom,
 	shouldRearmAfterScroll,
 	shouldTrimOldMessages,
@@ -396,6 +400,37 @@ test("an explicit snap to the bottom cancels an in-flight follow", () => {
 	assertEquals(frames.pending(), 0);
 });
 
+test("a send while pinned keeps an in-flight follow gliding to the new bottom", () => {
+	const frames = fakeFrames();
+	reducedMotion(false);
+	install("HTMLElement", FakeHTMLElement);
+	install("HTMLButtonElement", class {});
+	const messages = new FakeHTMLElement(1000, 400, 500);
+	install("document", {
+		getElementById: (id: string) => (id === "messages" ? messages : null),
+	});
+	scrollBottom("instant");
+	messages.scrollTop = 500;
+	followBottom(messages);
+	frames.frame(0);
+	frames.frame(50);
+	const mid = messages.scrollTop;
+	assert(mid > 500 && mid < 600, `mid-follow ${mid}`);
+	// Enter queues a steer (prompt-box.tsx calls scrollBottom()) while it still catches up.
+	messages.scrollHeight = 1030;
+	scrollBottom();
+	assertEquals(messages.scrollTop, mid);
+	let last = mid;
+	let biggest = 0;
+	runFrames(frames, 66, () => {
+		biggest = Math.max(biggest, messages.scrollTop - last);
+		last = messages.scrollTop;
+	});
+	assertEquals(messages.scrollTop, 630);
+	assert(biggest < 20, `largest single-frame step ${biggest}px`);
+	scrollBottom("instant");
+});
+
 test("jump to latest lands a screen above, then tweens to the live bottom in 250ms", () => {
 	const frames = fakeFrames();
 	reducedMotion(false);
@@ -423,23 +458,107 @@ test("jump to latest lands a screen above, then tweens to the live bottom in 250
 	assertEquals(messages.scrollTop, 5100);
 });
 
-test("the spacer is sized for the settled composer while it collapses", () => {
-	const settle = { height: 144, until: 1160 };
-	// Mid-collapse the composer is still 258px tall: the clearance is already settled.
-	assertEquals(promptClearance(258, settle, 1080), 192);
+test("the spacer is sized for the settled textarea while it collapses", () => {
+	// The textarea settles at 24px; mid-collapse it is still 138px of a 258px composer.
+	const settle = { input: 24, until: 1160 };
+	assertEquals(promptClearance(258, settle, 1080, 138), 192);
 	// After the collapse (or with none) the live height counts.
-	assertEquals(promptClearance(150, settle, 1160), 198);
+	assertEquals(promptClearance(150, settle, 1160, 24), 198);
 	assertEquals(promptClearance(150, undefined, 0), 198);
 	// So a 700px growth past a 306px hold releases straight to 192, in one call: no
-	// frame-by-frame tracking of the collapsing composer.
+	// frame-by-frame tracking of the collapsing textarea.
 	const hold = { px: 306, baseTop: 800, until: 2500 };
-	const needed = promptClearance(258, settle, 1080);
+	const needed = promptClearance(258, settle, 1080, 138);
 	assertEquals(nextSpacerHeight(needed, hold, 1500, 1080, true), {
 		height: 192,
 		hold: undefined,
 	});
-	const later = promptClearance(210, settle, 1120);
+	const later = promptClearance(210, settle, 1120, 90);
 	assertEquals(nextSpacerHeight(later, undefined, 1500, 1120, true).height, 192);
+});
+
+test("a queued steer easing in mid-collapse is tracked live, not after the settle", () => {
+	const settle = { input: 24, until: 1160 };
+	// The textarea is still 138px, and the queue has already grown the composer by 30px.
+	assertEquals(promptClearance(288, settle, 1080, 138), 222);
+});
+
+test("only the composer's share of a spacer growth lifts the pinned transcript", () => {
+	// The first pass for a spacer has nothing to compare with.
+	assertEquals(composerLift(240, undefined, 48), 0);
+	// The queue eased the composer 12px taller this frame, and the spacer grew with it.
+	assertEquals(composerLift(252, 240, 12), 12);
+	// A held spacer (send hold) absorbs the growth: nothing moves.
+	assertEquals(composerLift(252, 240, 0), 0);
+	// The spacer grew past the composer's growth (a row lifted into it): only 12px.
+	assertEquals(composerLift(252, 240, 50), 12);
+	// A shrinking composer is followed by the scroll clamp instead.
+	assertEquals(composerLift(228, 240, -12), 0);
+});
+
+test("a pending row replaced by an article at least as tall holds nothing", () => {
+	// The row's share is 50px; a 52px card fills it: the foot never moved up.
+	assertEquals(rowGapUnfilled(50, 1052, 1002, 1000), 0);
+	// A 20px first line leaves 30px to hold until the reply grows into it.
+	assertEquals(rowGapUnfilled(50, 1020, 970, 1000), 30);
+	// Shown and answered in one batch: nothing was painted to step from.
+	assertEquals(rowGapUnfilled(50, 1072, 1022, 950), 0);
+	// Nothing measured yet: the row's whole share.
+	assertEquals(rowGapUnfilled(50, 1052, 1002, undefined), 50);
+	// The lift left the spacer's top unchanged (unmeasurable): the row's own height.
+	assertEquals(rowGapUnfilled(50, 1000, 1000, undefined), 50);
+});
+
+test("rows below an inserted article are shifted by the run above them", () => {
+	// A user article inserted above an extension card that landed first.
+	assertEquals(
+		insertionShifts([
+			{ inserted: true, top: 135 },
+			{ inserted: false, top: 235 },
+		]),
+		[0, 100],
+	);
+	// Two runs: the rows after the second run move by both.
+	assertEquals(
+		insertionShifts([
+			{ inserted: true, top: 100 },
+			{ inserted: true, top: 140 },
+			{ inserted: false, top: 180 },
+			{ inserted: false, top: 260 },
+			{ inserted: true, top: 300 },
+			{ inserted: false, top: 330 },
+		]),
+		[0, 0, 80, 80, 0, 110],
+	);
+});
+
+test("an inserted article is clipped to the space its displaced rows have left", () => {
+	// A 100px user article above a card that landed first, 8px apart: its clip starts at
+	// the whole share (card top less the gap) and eases to 0 on the glide's curve.
+	assertEquals(
+		insertionReveals([
+			{ inserted: true, top: 135, height: 100 },
+			{ inserted: false, top: 243, height: 40 },
+		]),
+		[108, 0],
+	);
+	// A run of two: the earlier one is bounded by its distance above the run's end.
+	assertEquals(
+		insertionReveals([
+			{ inserted: true, top: 100, height: 30 },
+			{ inserted: true, top: 140, height: 30 },
+			{ inserted: false, top: 180, height: 60 },
+		]),
+		[40, 80, 0],
+	);
+	// Nothing displaced after a run (the list's tail): no clip.
+	assertEquals(
+		insertionReveals([
+			{ inserted: false, top: 100, height: 30 },
+			{ inserted: true, top: 140, height: 30 },
+		]),
+		[0, 0],
+	);
 });
 
 test("a not-yet-started spacer release holds its start height", () => {
@@ -803,5 +922,49 @@ test("a send-time follow-up snap keeps a live append's land-and-glide", async ()
 	assertEquals(messages.scrollTop, 1700);
 	runFrames(frames, 0);
 	assertEquals(messages.scrollTop, 2300);
+	scrollBottom("instant");
+});
+
+test("a composer easing taller moves the pinned transcript up in the same pass", async () => {
+	const frames = fakeFrames();
+	reducedMotion(false);
+	const { messages, spacer, resize } = transcriptStubs();
+	await quietReleased();
+	scrollBottom("instant");
+	resize(800);
+	runFrames(frames, 0);
+	assertEquals(spacer.offsetHeight, 192);
+	assertEquals(messages.scrollTop, 1400);
+	// One frame of a queued steer easing in: the composer is 16px taller.
+	const prompt = document.getElementById("prompt-box") as unknown as {
+		offsetHeight: number;
+		getAnimations: () => { effect: { getKeyframes: () => object[] } }[];
+	};
+	const tween = {
+		effect: { getKeyframes: () => [{ height: "48px" }, { height: "88px" }] },
+	};
+	prompt.getAnimations = () => [tween];
+	prompt.offsetHeight = 160;
+	messages.scrollHeight = 2016;
+	resize(800);
+	assertEquals(spacer.offsetHeight, 208);
+	// Moved with the composer's edge now, not chased a frame or more behind it.
+	assertEquals(messages.scrollTop, 1416);
+	assertEquals(frames.pending(), 0);
+	// Easing back down: the scroll clamp follows the spacer in the same pass.
+	prompt.offsetHeight = 144;
+	messages.scrollHeight = 2000;
+	resize(800);
+	assertEquals(spacer.offsetHeight, 192);
+	assertEquals(messages.scrollTop, 1400);
+	assertEquals(frames.pending(), 0);
+	// A stepped growth (a footer re-wrapping for a frame) is not lifted with: the follow
+	// chases it, standing still on its first frame.
+	prompt.getAnimations = () => [];
+	prompt.offsetHeight = 160;
+	messages.scrollHeight = 2016;
+	resize(800);
+	assertEquals(messages.scrollTop, 1400);
+	assert(frames.pending() > 0, "a follow chases it");
 	scrollBottom("instant");
 });

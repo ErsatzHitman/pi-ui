@@ -77,6 +77,15 @@ const sidebarSwipeRelease = `const dialog = el.closest('dialog');
 		dialog.close();
 		dialog.inert = true;
 	}`;
+/*
+ * Light dismiss (closedby="any") closes the phone drawer on pointerup, but the click that a
+ * tap produces is hit-tested after touchend, when the closed dialog's backdrop no longer
+ * catches it: the tap landed on the page underneath (a Recent sessions button resumed that session). A
+ * touch that began on the backdrop keeps the dialog as its target, so cancelling its
+ * touchend drops the tap's compatibility mouse events and click. A mouse click is already
+ * safe: it targets the dialog, where its mousedown and mouseup both landed.
+ */
+const sidebarBackdropTouchEnd = `if (evt.target === el && !el.open && evt.cancelable) evt.preventDefault();`;
 const focusSessionSidebarShortcut = `el.dispatchEvent(new CommandEvent('command', { command: '--show' }));
 	const target = el.querySelector(
 		'li > button[aria-current="true"], li > button[data-active="true"], li > button',
@@ -133,6 +142,7 @@ export function renderSessionSidebar(
 					if (row && row.getAttribute('aria-disabled') !== 'true') { el.close(); el.inert = true; }
 					if (!('closedBy' in HTMLDialogElement.prototype) && evt.target === el) { el.close(); el.inert = true; }
 				`}
+				data-on:touchend={sidebarBackdropTouchEnd}
 				data-signals:_session-sidebar-width__ifmissing={String(width)}
 				data-effect={`document.documentElement.style.setProperty(
 					'--session-sidebar-preferred-width',

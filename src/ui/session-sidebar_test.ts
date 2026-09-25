@@ -47,6 +47,39 @@ test("a closing Sessions pane goes inert through its exit; opening clears it fir
 	assertStringIncludes(html, "el.inert = mobile || !true;");
 });
 
+test("a backdrop tap that light-dismisses the drawer never clicks the page underneath", () => {
+	const html = renderSessionSidebar(
+		appRenderSnapshot({ sessions: [], currentSessionPath: undefined }),
+	);
+	const dialogTag = html.slice(
+		html.indexOf("<dialog"),
+		html.indexOf(">", html.indexOf("<dialog")),
+	);
+	const handler = dialogTag.split('data-on:touchend="')[1]?.split('"')[0];
+	if (!handler) throw new Error("dialog touchend handler not found");
+	// Datastar listeners are non-passive unless `__passive`, so preventDefault() can cancel the tap.
+	assertFalse(dialogTag.includes("data-on:touchend__passive"));
+	const run = (target: "backdrop" | "nav", open: boolean, cancelable = true) => {
+		const el = { open };
+		let prevented = false;
+		const evt = {
+			target: target === "backdrop" ? el : {},
+			cancelable,
+			preventDefault: () => {
+				prevented = true;
+			},
+		};
+		new Function("el", "evt", handler)(el, evt);
+		return prevented;
+	};
+	// Light dismiss closed the drawer on pointerup: cancel the tap's click.
+	if (!run("backdrop", false)) throw new Error("expected the backdrop tap cancelled");
+	// Taps inside the drawer (rows, swipe release) and a still-open dialog keep their click.
+	assertFalse(run("nav", false));
+	assertFalse(run("backdrop", true));
+	assertFalse(run("backdrop", false, false));
+});
+
 test("session sidebar shows an empty state with no sessions and nothing loading", () => {
 	const html = renderSessionSidebar(
 		appRenderSnapshot({

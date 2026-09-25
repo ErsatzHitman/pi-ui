@@ -6,9 +6,11 @@ import {
 	freshIds,
 	holdsForRebuild,
 	planQueueExits,
+	queueResizeKeyframes,
 	rebuildComplete,
 	queueTextKey,
 	settleQueueFrame,
+	survivorShifts,
 } from "./prompt-motion.js";
 
 /** A removed queue item as the MutationObserver hands it over (detached, attributes kept). */
@@ -239,4 +241,47 @@ test("the rebuild's refill is complete only once every survivor is back", () => 
 		rebuildComplete(survivors, new Set(["alpha-0", "bravo-0", "charlie-0"])),
 		true,
 	);
+});
+
+test("the queue eases between heights clipped on the block axis only", () => {
+	assertEquals(queueResizeKeyframes(128, 88), [
+		{ height: "128px", overflowY: "clip" },
+		{ height: "88px", overflowY: "clip" },
+	]);
+});
+
+test("survivors glide from where they were painted into their new slots", () => {
+	// ✕ on alpha (top of three): under the eased height the list lays out from the old top
+	// edge, so bravo and charlie would jump up a slot; they start 40px lower instead.
+	const before = new Map([
+		["alpha", -120],
+		["bravo", -80],
+		["charlie", -40],
+	]);
+	assertEquals(
+		survivorShifts(
+			before,
+			new Map([
+				["bravo", -120],
+				["charlie", -80],
+			]),
+		),
+		new Map([
+			["bravo", 40],
+			["charlie", 40],
+		]),
+	);
+	// ✕ on charlie (last): alpha and bravo keep their slots and ride the eased edge down.
+	assertEquals(
+		survivorShifts(
+			before,
+			new Map([
+				["alpha", -120],
+				["bravo", -80],
+			]),
+		).size,
+		0,
+	);
+	// A fresh item (no painted place) is left to its entry.
+	assertEquals(survivorShifts(before, new Map([["delta", -40]])).size, 0);
 });

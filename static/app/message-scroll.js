@@ -52,9 +52,13 @@ let lastStackWidth;
 let freshStack = false;
 
 // The composer's send-time collapse (prompt.js clearPromptForSend → setComposerSettle):
-// while it animates, the spacer is sized for the settled composer, so the release of the
-// send hold happens once, in the same resize pass as the growth (SF2-02).
-let composerSettle; // { height, until }
+// while the textarea animates, the spacer is sized for its settled height, so the release
+// of the send hold happens once, in the same resize pass as the growth (SF2-02). Any other
+// change of the composer in that window (a queued steer easing in) is still tracked live.
+let composerSettle; // { input, until }
+// The clearance the spacer last answered, per spacer node: the composer growing past it
+// moves the pinned transcript up with it in the same pass (see updatePromptSpacer).
+let lastNeeded; // { spacer, px }
 
 // Session switch (SP-5): the transcript's live opacity is mirrored into
 // `--messages-enter-from` on #chat-pane (watchSessionLoading), which the incoming
@@ -369,9 +373,21 @@ export function scrollBottom(behavior = "auto") {
 		behavior = "instant";
 	}
 	clearBottomScrollTimers();
-	// An in-flight follow would pull the snap back up toward its stale target next frame.
-	cancelFollow();
-	cancelJump();
+	// Already pinned with a glide to the live bottom in flight (a steer sent while the
+	// transcript still catches up with streamed text): the glide keeps going and takes the
+	// new bottom, rather than the rest of the catch-up landing in one frame.
+	const messages = document.getElementById("messages");
+	const gliding =
+		requested === "auto" &&
+		state.pinnedToBottom &&
+		!historyLoading &&
+		messages instanceof HTMLElement &&
+		(follow?.messages === messages || jump !== undefined);
+	// Otherwise an in-flight follow would pull the snap back up toward its stale target.
+	if (!gliding) {
+		cancelFollow();
+		cancelJump();
+	}
 	anchor = undefined;
 	historyLoading = false;
 	state.middleScrolling = false;
@@ -406,7 +422,8 @@ export function scrollBottom(behavior = "auto") {
 		updateScrollControl();
 		return;
 	}
-	scroll();
+	if (gliding) followOrSnap();
+	else scroll();
 	if (behavior === "auto") {
 		for (const delay of [16, 80, 180]) {
 			const timer = setTimeout(() => {
@@ -690,18 +707,36 @@ export function holdFollow(anim) {
 }
 
 /**
- * The composer's send-time collapse (prompt.js): `height` is the #prompt-box's settled
+ * The composer's send-time collapse (prompt.js): `input` is the textarea's settled
  * offsetHeight and `until` the `performance.now()` time its collapse ends. Until then the
- * spacer is sized for the settled composer, not each frame of the collapse (SF2-02).
+ * spacer is sized as if the textarea had already collapsed, not for each frame of it
+ * (SF2-02); the rest of the composer is tracked live.
  */
-export function setComposerSettle(height, until) {
-	composerSettle = { height, until };
+export function setComposerSettle(input, until) {
+	composerSettle = { input, until };
 }
 
-/** Pure (unit-tested): the spacer clearance the composer needs at `now`. */
-export function promptClearance(promptHeight, settle, now) {
-	const height = settle && now < settle.until ? settle.height : promptHeight;
-	return height + promptSpacerClearancePx;
+/**
+ * Pure (unit-tested): the spacer clearance the composer needs at `now`: its live height,
+ * less whatever the textarea still has to collapse (`inputHeight` above `settle.input`).
+ */
+export function promptClearance(promptHeight, settle, now, inputHeight = 0) {
+	const collapsing =
+		settle && now < settle.until ? Math.max(0, inputHeight - settle.input) : 0;
+	return promptHeight - collapsing + promptSpacerClearancePx;
+}
+
+/**
+ * Pure (unit-tested): how far the pinned transcript moves up with the composer in this
+ * spacer pass. The composer grew (`needed` rose past `lastNeeded`: a queued item or the
+ * attachment tray easing in, a new line) and the spacer grew with it (`spacerGrowth`); the
+ * part of the spacer's growth that answers the composer is followed in the same frame, not
+ * glided after it, so the transcript's foot and the composer's top edge move as one.
+ */
+export function composerLift(needed, lastNeeded, spacerGrowth) {
+	if (lastNeeded === undefined) return 0;
+	const lift = Math.min(needed - lastNeeded, spacerGrowth);
+	return lift > 0.5 ? lift : 0;
 }
 
 /**
@@ -763,13 +798,28 @@ export function nextSpacerHeight(needed, hold, contentTop, now, pinned, waiting 
 }
 
 /**
+ * Pure (unit-tested): how much of the pending row's in-flow share an incoming article leaves
+ * unfilled once the row is lifted out of flow, i.e. how far the transcript's foot would move
+ * up. `topWithRow` and `topWithout` are the spacer's offsetTop with the row still in flow
+ * and after it is lifted (their difference is the row's share, `gap` when unmeasurable);
+ * `topBefore` is the spacer's offsetTop last painted, before the article landed (unknown:
+ * the whole share).
+ */
+export function rowGapUnfilled(gap, topWithRow, topWithout, topBefore) {
+	const share = topWithRow - topWithout > 0.5 ? topWithRow - topWithout : gap;
+	if (topBefore === undefined) return share;
+	const unfilled = Math.min(share, topBefore - topWithout);
+	return unfilled > 0.5 ? unfilled : 0;
+}
+
+/**
  * Retires the pending "thinking..." row (messages.tsx renderPendingResponse) in place.
  * `replaced`: a response article was just appended to #message-list, right above the
  * row, into the slot the row occupied (same `.message + .message` offset) and pushing it
  * down. The row is lifted out of flow back onto that slot, so the article holds its place
  * with no layout jump, and fades out from its current opacity while the article fades in
- * (flow-decisions §10.1); the space it leaves is held by the prompt spacer until the
- * response grows into it. The #message-list observer calls this synchronously when the
+ * (flow-decisions §10.1); whatever of its space the article does not fill is held by the
+ * prompt spacer until the response grows into it (`rowGapUnfilled`). The #message-list observer calls this synchronously when the
  * article lands, before it is ever painted; the server's call is then a no-op. In minimal mode a thought's first row IS the pending row, so
  * that swap is made pixel-identical instead. Without `replaced` (the turn ended with no
  * response: abort, settle) the row fades where it is, still in flow, and its space is then
@@ -801,15 +851,19 @@ export function retirePending(replaced = false) {
 	}
 	const from = Number.parseFloat(getComputedStyle(row).opacity);
 	if (incoming instanceof HTMLElement) {
-		// The row's in-flow share (height + margin) is measured before it leaves the flow
-		// and held in the spacer, which gives it back only as the response grows into it
-		// (the send hold's mechanism), so the pinned transcript never steps or glides
-		// down when the row is lifted out (SF2-06). A row rendered without `data-enter`
-		// (reconnect, replace) retires the same way.
+		// The row's in-flow share (height + margin) is measured before it leaves the flow.
+		// A pinned transcript must never step or glide down when the row is lifted out
+		// (SF2-06): whatever of that share the incoming article does not fill is held in the
+		// spacer, which gives it back only as the response grows into it (the send hold's
+		// mechanism). An article at least as tall as the row fills it, so nothing is held:
+		// a hold with nothing left to grow into (an abort's card) would only expire later
+		// and drift the transcript down with nothing on screen causing it. A row rendered
+		// without `data-enter` (reconnect, replace) retires the same way.
 		const gap =
 			row.offsetHeight + (Number.parseFloat(getComputedStyle(row).marginTop) || 0);
 		const spacer = document.getElementById("messages-prompt-spacer");
 		const spacerPx = spacer instanceof HTMLElement ? spacer.offsetHeight : 0;
+		const topWithRow = spacer instanceof HTMLElement ? spacer.offsetTop : 0;
 		// Layout offsets, not rects: the article's @starting-style translate is already
 		// in its rect. The offsetParent is the position: relative `.messages-stack`, which
 		// is also the absolute row's containing block.
@@ -822,8 +876,16 @@ export function retirePending(replaced = false) {
 			pointerEvents: "none",
 		});
 		if (spacer instanceof HTMLElement && state.pinnedToBottom) {
-			holdSpacer(spacer, spacerPx + gap);
-			updatePromptSpacer();
+			const unfilled = rowGapUnfilled(
+				gap,
+				topWithRow,
+				spacer.offsetTop,
+				contentTop,
+			);
+			if (unfilled > 0) {
+				holdSpacer(spacer, spacerPx + unfilled);
+				updatePromptSpacer();
+			}
 		}
 	}
 	const fade = row.animate(
@@ -950,6 +1012,143 @@ export function transcriptFootChanges(records, list) {
 	return { appended, replacesRow };
 }
 
+/**
+ * Pure (unit-tested): how far each row was pushed down by live articles inserted above it
+ * in one batch. `rows` runs in document order from the first inserted article; each is
+ * `{ inserted, top }` with its layout top after the insertion. A run of inserted articles
+ * pushes every later row down by the run's share (the next kept row's top less the run's
+ * first top); runs add up. Inserted rows get 0.
+ */
+export function insertionShifts(rows) {
+	let shift = 0;
+	let runTop;
+	return rows.map(({ inserted, top }) => {
+		if (inserted) {
+			runTop ??= top;
+			return 0;
+		}
+		if (runTop !== undefined) {
+			shift += top - runTop;
+			runTop = undefined;
+		}
+		return shift;
+	});
+}
+
+/**
+ * Pure (unit-tested): the bottom clip each inserted row starts its reveal with, so it only
+ * ever shows space the rows it displaced have already vacated. `rows` is as for
+ * insertionShifts plus each row's layout `height`. The run's last article shows down to the
+ * next kept row's gliding top less the gap between them: its visible height is `height -
+ * share · (1 - progress)`, so a clip of `share` easing to 0 on the glide's own curve tracks
+ * it exactly. An earlier article of the run, `below` px above the run's end, starts at
+ * `share - below`, a linear bound that is never under its exact clip. Rows of a run with no
+ * kept row after it (nothing displaced) and kept rows get 0.
+ */
+export function insertionReveals(rows) {
+	const insets = rows.map(() => 0);
+	let run = [];
+	rows.forEach((row, index) => {
+		if (row.inserted) {
+			run.push(index);
+			return;
+		}
+		if (run.length === 0) return;
+		const share = row.top - rows[run[0]].top;
+		const last = rows[run.at(-1)];
+		const runBottom = last.top + last.height;
+		for (const at of run) {
+			const below = runBottom - (rows[at].top + rows[at].height);
+			insets[at] = Math.max(0, share - below);
+		}
+		run = [];
+	});
+	return insets;
+}
+
+/**
+ * A live article inserted above rows already on screen (a slow send whose extension card
+ * landed first, then its user article above the card) pushes those rows down in one frame.
+ * They glide from where they were painted instead (FLIP on `transform`), on the pinned
+ * follow's curve (`duration.lg`, `--ease-out`): pinned, the transcript's foot stays put
+ * while the older rows lift to make room; otherwise the rows below slide down.
+ * The inserted article never draws over a row still leaving its slot: it skips its rise and
+ * is revealed by a bottom clip on the same clock and curve (insertionReveals), opening only
+ * as far as the displaced rows have moved out, while its opacity fades in as usual.
+ * Reduced motion: the rows step and the article only fades.
+ */
+function glideDisplacedRows(records, list) {
+	if (reducedMotion()) return;
+	const added = new Set();
+	const moved = new Set();
+	for (const record of records) {
+		if (record.target !== list) continue;
+		for (const node of record.addedNodes) added.add(node);
+		for (const node of record.removedNodes) moved.add(node);
+	}
+	let first;
+	for (const node of added) {
+		if (
+			!(node instanceof HTMLElement) ||
+			moved.has(node) ||
+			node.parentElement !== list ||
+			!node.nextElementSibling ||
+			!node.matches(".message[data-enter]")
+		)
+			continue;
+		if (
+			!first ||
+			first.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING
+		)
+			first = node;
+	}
+	if (!first) return;
+	const nodes = [];
+	for (let node = first; node; node = node.nextElementSibling)
+		if (node instanceof HTMLElement) nodes.push(node);
+	const inserted = nodes.map((node) => added.has(node) && !moved.has(node));
+	// Before anything reads layout (the first style pass starts the entry transition): an
+	// article that displaces kept rows below it enters in place, with no rise.
+	let run = [];
+	nodes.forEach((node, index) => {
+		if (inserted[index]) run.push(node);
+		else {
+			for (const article of run) article.style.translate = "none";
+			run = [];
+		}
+	});
+	const rows = nodes.map((node, index) => ({
+		inserted: inserted[index],
+		top: node.offsetTop,
+		height: node.offsetHeight,
+	}));
+	const shifts = insertionShifts(rows);
+	const insets = insertionReveals(rows);
+	nodes.forEach((node, index) => {
+		const shift = shifts[index] ?? 0;
+		if (shift >= 0.5)
+			node.animate(
+				[{ transform: `translateY(${-shift}px)` }, { transform: "none" }],
+				{ duration: duration.lg, easing: easing.out },
+			);
+		const inset = insets[index] ?? 0;
+		if (inset < 0.5) return;
+		// A rise already started (its style was computed earlier) is added to the clip.
+		const rise = Number.parseFloat(
+			getComputedStyle(node).translate.split(" ")[1] ?? "0",
+		);
+		const reveal = node.animate(
+			[
+				{ clipPath: `inset(0px 0px ${inset + (rise > 0 ? rise : 0)}px 0px)` },
+				{ clipPath: "inset(0px 0px 0px 0px)" },
+			],
+			{ duration: duration.lg, easing: easing.out },
+		);
+		const settle = () => node.style.removeProperty("translate");
+		reveal.finished.then(settle, settle);
+	});
+}
+
 /** Scoped to `#message-list` (never Datastar's helper node after <body>, M9d). */
 function observeBlockReveal(list) {
 	if (list === observedMessageList) return;
@@ -968,6 +1167,7 @@ function observeBlockReveal(list) {
 			document.documentElement.hasAttribute("data-transcript-quiet")
 		)
 			return;
+		if (foot.appended) glideDisplacedRows(records, observedMessageList);
 		for (const block of blockRevealTargets(records)) {
 			if (block.isConnected)
 				block.animate([{ opacity: 0 }, { opacity: 1 }], {
@@ -1156,12 +1356,20 @@ function updatePromptSpacer() {
 	if (!(prompt instanceof HTMLElement) || !(spacer instanceof HTMLElement)) return;
 	const now = performance.now();
 	if (composerSettle && now >= composerSettle.until) composerSettle = undefined;
+	const input = composerSettle ? document.getElementById("prompt-input") : undefined;
 	// Never below the spacer's own CSS floor: a hold or a glide aimed under it would be
 	// clamped away and read as a drop, not a glide (SS3-04).
 	const needed = Math.max(
 		spacerFloor(spacer),
-		promptClearance(prompt.offsetHeight, composerSettle, now),
+		promptClearance(
+			prompt.offsetHeight,
+			composerSettle,
+			now,
+			input instanceof HTMLElement ? input.offsetHeight : 0,
+		),
 	);
+	const answered = lastNeeded?.spacer === spacer ? lastNeeded.px : undefined;
+	lastNeeded = { spacer, px: needed };
 	const top = spacer.offsetTop;
 	if (top !== contentTop) {
 		// An accordion moving while a hold is live (holdFollow) is not the reply growing
@@ -1204,15 +1412,57 @@ function updatePromptSpacer() {
 		state.pinnedToBottom,
 	);
 	if (glide === undefined) cancelSpacerRelease();
-	const height = `${Math.max(next.height, glide ?? 0)}px`;
+	const px = Math.max(next.height, glide ?? 0);
+	const height = `${px}px`;
 	if (spacer.style.height !== height) {
+		const previous = Number.parseFloat(spacer.style.height);
 		// The spacer is a layout owner: its height must land in the same frame as the
 		// growth it answers. Reduced motion's blanket 0.01ms `transition-duration` (base.css)
 		// applies to the initial `transition-property: all`, which would render the old
 		// height for one more frame and step the pinned transcript (SF2-02 under RM).
 		spacer.style.transitionProperty = "none";
 		spacer.style.height = height;
+		if (Number.isFinite(previous) && easingHeight(prompt))
+			liftWithComposer(composerLift(needed, answered, px - previous));
 	}
+}
+
+/**
+ * Whether a height tween runs in the composer (the queue or the attachment tray easing in):
+ * only that growth is lifted with. A stepped change (a new line, a footer that re-wraps for
+ * a frame) is left to followBottom, whose chase stands still on its first frame, so a
+ * one-frame blip of the composer never bounces the transcript.
+ */
+function easingHeight(prompt) {
+	return (
+		prompt
+			.getAnimations?.({ subtree: true })
+			.some((animation) =>
+				animation.effect?.getKeyframes?.().some((frame) => "height" in frame),
+			) === true
+	);
+}
+
+/**
+ * The composer eased `px` taller and the spacer with it: a pinned transcript moves up by the
+ * same amount now, in this pass, as does any follow or jump in flight (their positions shift, so
+ * a glide carries on from where it is). Only content growth is left to followBottom, which
+ * would otherwise chase the composer's eased edge a frame or more behind it. A shrink needs
+ * nothing: the scroll clamp follows the spacer down in the same frame.
+ */
+function liftWithComposer(px) {
+	const messages = document.getElementById("messages");
+	if (px === 0 || historyLoading || !state.pinnedToBottom) return;
+	if (!(messages instanceof HTMLElement)) return;
+	messages.scrollTop += px;
+	if (follow?.mode === "ease") {
+		follow.from += px;
+		follow.to += px;
+	} else if (follow) {
+		follow.pos += px;
+		follow.to += px;
+	}
+	if (jump) jump.from += px;
 }
 
 function updateScrollControl() {

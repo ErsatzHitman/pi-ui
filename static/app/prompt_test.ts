@@ -1,9 +1,13 @@
 import { afterEach, test } from "bun:test";
 
-import { assertEquals } from "#testing/assertions";
+import { assert, assertEquals } from "#testing/assertions";
 
+import { duration, easeOut } from "./motion.js";
 import {
 	fadesEmptyState,
+	ghostSource,
+	handoffArticleDelayMs,
+	handoffLeadMs,
 	holdEmptyStateForSend,
 	placeNoticeAbovePromptRow,
 	promptGhostKeyframes,
@@ -120,19 +124,27 @@ type Keyframes = { opacity?: number; transform?: string; clipPath?: string }[];
 class FakeElement {
 	isConnected = true;
 	style: Record<string, string> = {};
-	animations: { keyframes: Keyframes; ms: number; reversed: boolean }[] = [];
+	animations: { keyframes: Keyframes; ms: number; reversed: boolean; lead?: number }[] =
+		[];
 	inert = false;
 	constructor(public rect = { left: 0, top: 0, width: 0, height: 0 }) {}
 	getBoundingClientRect() {
 		return this.rect;
 	}
 	animate(keyframes: Keyframes, { duration }: { duration: number }) {
-		const record = { keyframes, ms: duration, reversed: false };
+		const record: FakeElement["animations"][number] = {
+			keyframes,
+			ms: duration,
+			reversed: false,
+		};
 		this.animations.push(record);
 		return {
 			finished: new Promise(() => {}),
 			reverse: () => {
 				record.reversed = true;
+			},
+			set currentTime(value: number) {
+				record.lead = value;
 			},
 		};
 	}
@@ -219,11 +231,13 @@ test("the empty state stays until the first article lands, then exits as a ghost
 	assertEquals(page.empty.animations, []);
 	assertEquals(page.appended, []);
 	page.land();
-	// The morph removed the node: a ghost at its last rect fades out over 120ms.
+	// The morph removed the node: a ghost at its last rect hands off to the article, gone
+	// in 80ms and already a frame in when it first paints, so the two never read at once.
 	assertEquals(page.appended.length, 1);
 	const ghost = page.appended[0];
 	assertEquals([ghost?.style.left, ghost?.style.top], ["40px", "200px"]);
-	assertEquals(ghost?.animations[0]?.ms, 120);
+	assertEquals(ghost?.animations[0]?.ms, 80);
+	assertEquals(ghost?.animations[0]?.lead, handoffLeadMs);
 	assertEquals(ghost?.animations[0]?.keyframes.at(-1)?.opacity, 0);
 	assertEquals(page.observing(), false);
 });
@@ -233,6 +247,9 @@ test("a send that never lands fades the empty state at the cap; a failure fades 
 	holdEmptyStateForSend(false);
 	page.cap();
 	assertEquals(page.empty.animations.length, 1);
+	// No article to hand off to: a plain 120ms fade in place.
+	assertEquals(page.empty.animations[0]?.ms, 120);
+	assertEquals(page.empty.animations[0]?.lead, undefined);
 	assertEquals(page.empty.animations[0]?.keyframes.at(-1), {
 		opacity: 0,
 		transform: "translateY(-0.25rem)",
@@ -258,4 +275,55 @@ test("an extension card landing before the user article also retires the empty s
 	// The user article that follows does not ghost it a second time.
 	page.land();
 	assertEquals(page.appended.length, 1);
+});
+
+test("the first article's fade waits until the empty state's handoff exit is done", async () => {
+	// messages.css mirrors the delay on the session's first user article.
+	const css = await Bun.file(
+		new URL("../../src/ui/messages.css", import.meta.url),
+	).text();
+	const rule = css.match(
+		/#message-list > \.message-user\[data-enter\]:nth-child\(1 of \.message\) \{\s*transition-delay: (\d+)ms;/,
+	);
+	assertEquals(Number(rule?.[1]), handoffArticleDelayMs);
+	// Both start on the arrival frame. By the time the bubble (a 200ms fade after its delay)
+	// passes 0.15 opacity, the heading (an 80ms exit, `handoffLeadMs` in) is gone, and the
+	// whole handoff stays inside 250ms.
+	let passes = handoffArticleDelayMs;
+	while (easeOut((passes - handoffArticleDelayMs) / duration.lg) < 0.15) passes += 1;
+	const heading = 1 - easeOut(Math.min(1, (passes + handoffLeadMs) / duration.xs));
+	assert(heading < 0.01, `heading still at ${heading} when the bubble shows`);
+	assert(
+		1 - easeOut(Math.min(1, (handoffArticleDelayMs + handoffLeadMs) / duration.xs)) <
+			0.02,
+		"the heading is all but gone before the bubble starts",
+	);
+	assert(handoffArticleDelayMs + duration.lg <= 250, "inside the 250ms budget");
+});
+
+test("the empty state's ghost keeps parts an attribute rule hid (the keybind hint)", () => {
+	const part = () => {
+		const style = new Map<string, string>();
+		return {
+			style: {
+				setProperty: (name: string, value: string) => style.set(name, value),
+			},
+			shown: () => style.get("display") !== "none",
+		};
+	};
+	const parts = [part(), part(), part()];
+	const root = {
+		cloneNode: () => ({ querySelectorAll: () => parts }),
+		querySelectorAll: () => [],
+	};
+	// Nothing hidden: the ghost is cloned from the node itself.
+	assertEquals(ghostSource(root, []) === root, true);
+	// The hint row (index 1) was hidden while painted: pinned hidden inline in the copy,
+	// which ghostExit's `data-*` strip leaves alone.
+	const copy = ghostSource(root, [1]);
+	assertEquals(copy === root, false);
+	assertEquals(
+		parts.map((p) => p.shown()),
+		[true, false, true],
+	);
 });

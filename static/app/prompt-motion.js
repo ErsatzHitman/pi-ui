@@ -125,6 +125,37 @@ export function rebuildComplete(survivorIds, presentIds) {
 	return survivorIds.every((id) => presentIds.has(id));
 }
 
+/**
+ * Pure: keyframes that ease #prompt-queue between two heights, the attachment tray's
+ * mechanism (file-transfer.js `trayResizeKeyframes`). The composer is bottom-anchored, so an
+ * item arriving or leaving moves its top edge (and the pinned transcript above it) by a
+ * whole row: this bridges that edge instead of jumping it in one frame. Only the block axis
+ * clips, so the list's side padding and the items' shadows stay visible.
+ */
+export function queueResizeKeyframes(from, to) {
+	const box = (height) => ({ height: `${height}px`, overflowY: "clip" });
+	return [box(from), box(to)];
+}
+
+/**
+ * Pure: how far each surviving item must be shifted back (px, down is positive) to start
+ * from where it was painted, given its top before the change and its new layout top (both
+ * relative to #prompt-box's bottom, see `measureQueue`). Under the eased queue height the
+ * list lays out from the queue's old top edge, so a survivor below a removed item would jump
+ * up into its slot and one below an inserted item would jump down; each glides from its old
+ * place instead. Ids without both tops, or that did not move, are left out.
+ */
+export function survivorShifts(before, after) {
+	const shifts = new Map();
+	for (const [id, top] of after) {
+		const old = before.get(id);
+		if (old === undefined) continue;
+		const shift = old - top;
+		if (Math.abs(shift) >= 0.5) shifts.set(id, shift);
+	}
+	return shifts;
+}
+
 /** Ids whose ✕ was pressed and whose POST is in flight (prompt-box.tsx's ✕ handler). */
 function queueRemoving() {
 	return globalThis.piUi?.queueRemoving ?? new Set();
@@ -256,6 +287,16 @@ function coverList(list, pressed, offset, box) {
 	return cover;
 }
 
+function isList(node) {
+	return node instanceof Element && node.matches(".prompt-queue-list");
+}
+
+/** Whether the queue list scrolls (more items than its max-height shows). */
+function listScrolls(queue) {
+	const list = queue.querySelector(".prompt-queue-list");
+	return list instanceof HTMLElement && list.scrollHeight > list.clientHeight + 1;
+}
+
 function watchQueue(queue, box) {
 	let ids = new Set(keyedNodes(queue, queueItemSelector).map((item) => item.id));
 	let offsets = measureQueue(queue, box);
@@ -268,15 +309,95 @@ function watchQueue(queue, box) {
 	let listOffset = measureList(queue, box);
 	// A ✕ rebuild in flight: the queue is frozen under a cover until the refill completes.
 	let rebuild;
+	// The queue's settled height (the last one it was eased to, or measured at rest), and
+	// the height tween and survivor glides that bridge a change of it (`resizeQueue`).
+	let height = queue.offsetHeight;
+	let scrolled = listScrolls(queue);
+	let resize;
+	const glides = new Map();
 	// Offsets stay those from before the frame's removals (or the rebuild) until it settles.
+	// They are the items' painted places (a glide's transform included), which is where a
+	// ghost leaves from and a survivor glides from.
 	const remeasure = () => {
 		if (frame || rebuild) return;
 		offsets = measureQueue(queue, box);
 		listOffset = measureList(queue, box);
+		if (!resize) {
+			height = queue.offsetHeight;
+			scrolled = listScrolls(queue);
+		}
+	};
+	// The height the composer shows right now: mid-tween wherever the tween is.
+	const shownHeight = () => (resize ? queue.offsetHeight : height);
+	// A session replace marks the new #messages `data-enter`: its queue steps with it.
+	const switching = () => {
+		const next = document.getElementById("messages");
+		return next !== transcript && next?.hasAttribute("data-enter") === true;
+	};
+	/**
+	 * Eases the queue from `from` to its new height (160ms, `--ease-out`) and glides each
+	 * survivor from where it was painted (`offsets`) to its new slot on the same curve, so
+	 * the composer's top edge and the pinned transcript above it (message-scroll.js tracks the
+	 * composer every frame) move together, never a row in one frame (flow-critique S1).
+	 * While it runs the list does not clip its items (the queue clips instead), so a glide
+	 * is never cut by the list's own box. A list that scrolls (more items than its
+	 * max-height) only eases the height. Reduced motion, page load and a session switch step.
+	 */
+	const resizeQueue = (from, animate) => {
+		resize?.cancel();
+		resize = undefined;
+		const to = queue.offsetHeight;
+		const wasScrolled = scrolled;
+		height = to;
+		scrolled = listScrolls(queue);
+		if (!animate || reducedMotion() || Math.abs(to - from) < 1) return;
+		const run = queue.animate(queueResizeKeyframes(from, to), {
+			duration: duration.md,
+			easing: easing.out,
+		});
+		resize = run;
+		const done = () => {
+			if (resize !== run) return;
+			resize = undefined;
+			remeasure();
+		};
+		run.finished.then(done, done);
+		if (wasScrolled || scrolled) return;
+		const list = queue.querySelector(".prompt-queue-list");
+		list?.animate([{ overflow: "visible" }, { overflow: "visible" }], {
+			duration: duration.md,
+		});
+		// Laid out under the tween's first frame: the new places the survivors glide to.
+		const anchor = box.getBoundingClientRect().bottom;
+		const before = new Map();
+		const after = new Map();
+		for (const item of keyedNodes(queue, queueItemSelector)) {
+			const old = offsets.get(item.id);
+			if (!old) continue;
+			glides.get(item)?.cancel();
+			glides.delete(item);
+			before.set(item.id, old.bottom);
+			after.set(item.id, item.getBoundingClientRect().top - anchor);
+		}
+		for (const [id, shift] of survivorShifts(before, after)) {
+			const item = document.getElementById(id);
+			if (!item) continue;
+			const glide = item.animate(
+				[{ transform: `translateY(${shift}px)` }, { transform: "none" }],
+				{ duration: duration.md, easing: easing.out },
+			);
+			glides.set(item, glide);
+			const settled = () => {
+				if (glides.get(item) === glide) glides.delete(item);
+			};
+			glide.finished.then(settled, settled);
+		}
 	};
 	document.addEventListener("pi-ui-queue-restore", () => {
 		restoringUntil = performance.now() + restoreWindowMs;
 	});
+	// Items arrived or left (or the list did): ease from the height still shown.
+	const easeHeight = () => resizeQueue(shownHeight(), !switching() && entriesAllowed());
 	const settle = () => {
 		frame = 0;
 		const present = keyedNodes(queue, queueItemSelector);
@@ -352,8 +473,12 @@ function watchQueue(queue, box) {
 		rebuild = undefined;
 		clearTimeout(timer);
 		queue.style.visibility = "";
+		// The frozen height (`height`) is where the tween starts.
+		queue.style.removeProperty("height");
 		cover.remove();
 		cancelAnimationFrame(frame);
+		frame = 0;
+		easeHeight();
 		removedBuffer.push(...items);
 		settle();
 	};
@@ -375,9 +500,19 @@ function watchQueue(queue, box) {
 				cover: coverList(started.list, started.pressed, listOffset, box),
 				timer: setTimeout(() => rebuild && finishRebuild(), rebuildHoldMs),
 			};
+			// The emptied queue keeps its height until the refill lands, so neither the
+			// composer's top edge nor the pinned transcript moves in the gap.
+			height = shownHeight();
+			resize?.cancel();
+			resize = undefined;
+			queue.style.height = `${height}px`;
 			queue.style.visibility = "hidden";
 			return;
 		}
+		// Eased here, in the callback, not in settle's frame: anything that reads layout
+		// before then (a scroll follow-up timer, the spacer) already sees the tween.
+		if (records.some((record) => record.target === queue || isList(record.target)))
+			easeHeight();
 		removedBuffer.push(...removedMatches(records, queueItemSelector));
 		if (!frame) frame = requestAnimationFrame(settle);
 	});
